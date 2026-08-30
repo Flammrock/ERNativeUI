@@ -1,0 +1,63 @@
+ERNativeUI third-party notices and acknowledgements
+==================================================
+
+Open-source software included in ERNativeUI
+--------------------------------------------
+
+ERNativeUI links the following open-source components into the host:
+
+- SafetyHook v0.7.0: https://github.com/cursey/safetyhook
+- MinHook v1.3.4: https://github.com/TsudaKageyu/minhook
+- Zydis v4.1.0: https://github.com/zyantific/zydis
+- Zycore: https://github.com/zyantific/zycore-c
+
+Release staging, CMake installation, and CPack packages include the complete
+upstream license texts under the `licenses` directory. Those texts and their
+copyright notices govern the respective third-party components.
+
+Research influences and interoperability
+-----------------------------------------
+
+Solid Uncapper's native in-game menu was the inspiration for starting
+ERNativeUI. During development, Solid Uncapper's observable runtime behavior
+also helped identify Elden Ring menu interfaces and later validate coexistence
+between both mods. ERNativeUI therefore includes explicit compatibility logic
+for chaining the native functions hooked by Solid Uncapper:
+
+https://www.nexusmods.com/eldenring/mods/6640
+
+The public elden-ring-transmog and elden-x source repositories by Thomas J.
+Clark were used as references while cross-checking the distinction between
+Elden Ring's lower-level four-argument `MsgRepository::LookupEntry` function
+and the higher-level five-argument native UI text resolver:
+
+https://github.com/ThomasJClark/elden-ring-transmog
+https://github.com/ThomasJClark/elden-x
+
+Development tools
+-----------------
+
+JPEXS Free Flash Decompiler (FFDec) 26.2.1 was used to inspect Elden Ring's
+Scaleform GFX/SWF structure while researching and validating the optional GFX
+patch. FFDec is a development tool; it is not linked into or redistributed
+with ERNativeUI:
+
+https://github.com/jindrapetrik/jpexs-decompiler
+
+Mod Engine 2 is the loading and test environment used for ERNativeUI. It is
+not included in ERNativeUI packages:
+
+https://github.com/soulsmods/ModEngine2
+
+Modified Elden Ring UI asset
+----------------------------
+
+The end-user package includes an optional, modified
+`menu/win/02_040_optionsetting.gfx`. It expands the Controller Settings layout
+to 13 visual rows and corrects the presentation of injected button labels.
+ERNativeUI.dll also supports the game's unmodified six-row layout, so this
+asset is optional.
+
+ELDEN RING and its original game assets are the property of their respective
+owners. The modified GFX asset is provided only for use with a lawfully owned
+copy of ELDEN RING.

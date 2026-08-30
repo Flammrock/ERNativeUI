@@ -1,0 +1,39 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-release",
+      "displayName": "Windows x64 Release",
+      "description": "Build the host, examples, GFX patcher, and test suite with the installed Visual Studio.",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/preset-release",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist/ERNativeUI"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "configuration": "Release",
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+#include "resource.h"
+
+ERUI_DEFAULT_INI_RESOURCE RCDATA "../assets/ERNativeUI.ini"

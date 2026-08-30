@@ -1,0 +1,13 @@
+/build/
+/build-*/
+/dist/
+/.release-please-manifest.json.bak
+/.vs/
+*.user
+*.suo
+*.log
+/gfx_patch_output/
+/gfx_fingerprint_output/
+*.gfx
+!/assets/menu/win/02_040_optionsetting.gfx
+*.zip

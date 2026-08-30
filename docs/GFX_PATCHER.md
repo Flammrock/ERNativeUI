@@ -1,0 +1,140 @@
+# ERNativeUIGfxPatcher
+
+`ERNativeUIGfxPatcher.exe` expands visual row capacity in the user's own
+PC copy of:
+
+```text
+menu\win\02_040_optionsetting.gfx
+```
+
+ERNativeUI releases include the optional pre-patched 13-row GFX used by the
+recommended installation. The patcher is provided so the transformation is
+reproducible: it reads an original file extracted from the user's installed
+game, makes a narrow structural change, verifies the result, and writes a
+separate output file.
+
+## v0.8.0 Controller Settings patch
+
+The PC `ControllSetting` sprite contains six generic visual row placements:
+
+```text
+Item_0_0 ... Item_5_0
+```
+
+Elden Ring normally occupies four of them, leaving two visible slots for rows
+injected afterward. The retained v0.8.0 patch adds:
+
+```text
+Item_6_0
+```
+
+at the same spacing and depth convention used by the other Game Options
+panels. This creates seven visual slots, so the Controller Settings page can
+show four vanilla rows plus three ERNativeUI rows.
+
+The patcher does not invent or redistribute a widget. It clones a compatible
+generic `Item_6_0` placement already present elsewhere in the same user-owned
+GFX, updates the `ControllSetting` sprite length and movie length, then parses
+the completed output again to verify the requested row count.
+
+## Root button row labels
+
+Controller Settings uses `MENU_PC_SettingParts`, while Graphics subpages use
+`MENU_ItemParts`. The Controller `Button` widget originally exposes only its
+right-side `Text_0` value and lacks the second field required for an injected
+button's left row label.
+
+The patcher adds `Text_1` with a nested child named `Text`, cloning the native
+Controller `Caption` presentation so button labels use the same position,
+filter and shadow as slider and choice labels. See
+`tools/gfx_patcher/README.md` for the display tree, validation rules, and the
+failed wrapper probe that established the exact binding contract.
+
+## Build
+
+Run:
+
+```bat
+build.bat
+```
+
+Output:
+
+```text
+build\preset-release\Release\ERNativeUIGfxPatcher.exe
+```
+
+## One-command 13-row patch
+
+Pass the PC GFX extracted with UXM:
+
+```bat
+build\preset-release\Release\ERNativeUIGfxPatcher.exe ^
+  --input "C:\path\to\UXM\menu\win\02_040_optionsetting.gfx" ^
+  --output "gfx_patch_output\menu\win\02_040_optionsetting.gfx" ^
+  --controller-rows 13
+```
+
+The source file is never modified. Output:
+
+```text
+gfx_patch_output\
+└─ menu\
+   └─ win\
+      └─ 02_040_optionsetting.gfx
+```
+
+Copy the generated `menu` directory into the Mod Engine 2 mod directory that
+already contains your loose assets.
+
+## Direct command line
+
+Inspect without writing:
+
+```bat
+build\preset-release\Release\ERNativeUIGfxPatcher.exe ^
+  --inspect ^
+  --input "C:\path\to\menu\win\02_040_optionsetting.gfx"
+```
+
+Generate the 13-row Controller Settings panel:
+
+```bat
+build\preset-release\Release\ERNativeUIGfxPatcher.exe ^
+  --input "C:\path\to\original\02_040_optionsetting.gfx" ^
+  --output "C:\path\to\ModEngine2\mod\menu\win\02_040_optionsetting.gfx" ^
+  --controller-rows 13 ^
+  --overwrite
+```
+
+The structural patcher accepts target counts from 6 through 13. ERNativeUI
+ships the visually largest supported 13-row layout as an optional convenience;
+the unmodified six-row game asset remains fully supported.
+
+## Safety checks
+
+The patcher refuses to write when:
+
+- the input is not an uncompressed `GFX` movie;
+- its declared movie length or tag boundaries are invalid;
+- non-zero unknown data follows the declared movie;
+- `WindowList.ControllSetting` cannot be identified uniquely;
+- the existing `Item_N_0` sequence is non-contiguous or uses an unknown layout;
+- a compatible simple donor placement does not exist inside that same GFX;
+- a requested new display depth is already occupied;
+- input and output paths are identical;
+- the completed output does not parse back to the requested row count.
+
+The output is written through a temporary file and moved into place only after
+all transformations and verification succeed.
+
+## Uninstall
+
+Delete the loose file:
+
+```text
+mod\menu\win\02_040_optionsetting.gfx
+```
+
+Elden Ring will fall back to its original archive copy. The DLL itself does not
+modify the installed game archives.
