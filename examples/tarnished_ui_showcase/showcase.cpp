@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 namespace {
@@ -21,6 +22,14 @@ std::atomic<std::uint8_t> g_popup_extended{3};
 std::array<std::uint32_t, 32> g_action_numbers{};
 erui::Registration g_registration{};
 erui::RowHandle g_enabled_row{};
+
+struct TextInputState {
+    std::mutex mutex{};
+    std::wstring value{};
+};
+
+TextInputState g_player_note{};
+TextInputState g_extended_note{};
 
 struct PopupVariant {
     std::wstring label{};
@@ -40,6 +49,7 @@ constexpr erui::AlertOptions popup_options(
 
 std::array<PopupVariant, 14> g_popup_variants{};
 const showcase::Text* g_text{};
+const showcase::TextInputText* g_text_input{};
 
 void initialize_popup_variants(const showcase::Text& text) {
     constexpr std::array<erui::AlertButtons, 7> buttons{
@@ -75,6 +85,19 @@ void debug(const wchar_t* message) noexcept {
 void ERUI_CALL value_changed(void* context, std::uint8_t value) noexcept {
     static_cast<std::atomic<std::uint8_t>*>(context)->store(
         value, std::memory_order_release);
+}
+
+void text_input_changed(
+    TextInputState& state,
+    const erui::TextInputChange& change) noexcept {
+    // TextInputChange::value is borrowed for this callback only. A real mod
+    // should copy it into its own configuration before returning, as here.
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.value.assign(change.value);
+    } catch (...) {
+        debug(L"Could not copy a confirmed TextInput value.");
+    }
 }
 
 void ERUI_CALL action_pressed(void* context) noexcept {
@@ -237,7 +260,9 @@ void toggle_from_code() noexcept {
 DWORD WINAPI initialize(void*) noexcept {
     const erui::LanguageInfo language = erui::query_game_language();
     g_text = &showcase::text(language.known);
+    g_text_input = &showcase::text_input_text(language.known);
     initialize_popup_variants(*g_text);
+    g_player_note.value = L"Tarnished";
 
     erui::ProviderOptions options{};
     options.provider_id = "io.github.ernativeui.tarnished-showcase";
@@ -334,6 +359,36 @@ DWORD WINAPI initialize(void*) noexcept {
         root.add_button<&toggle_from_code>(
             g_text->toggle_code,
             g_text->row_help);
+
+        // TextInput is an additive API 1.1 capability. The current wrapper
+        // can negotiate API 1.0, so clients must gate the row before adding
+        // it and may keep all of their older menu features available.
+        if (menu.supports(erui::Capability::text_input)) {
+            auto text_inputs = root.add_submenu(
+                g_text_input->showcase,
+                g_text->row_help,
+                g_text_input->showcase,
+                g_text->row_help);
+
+            erui::TextInputOptions normal{};
+            normal.initial_value = g_player_note.value;
+            normal.placeholder = g_text_input->note_placeholder;
+            text_inputs.add_text_input<&text_input_changed>(
+                g_text_input->note,
+                g_text->row_help,
+                normal,
+                g_player_note);
+
+            erui::TextInputOptions extended{};
+            extended.initial_value = g_extended_note.value;
+            extended.placeholder = g_text_input->extended_placeholder;
+            extended.maximum_length = 35;
+            text_inputs.add_text_input<&text_input_changed>(
+                g_text_input->extended_note,
+                g_text->row_help,
+                extended,
+                g_extended_note);
+        }
 
         auto large = root.add_submenu(
             g_text->large,

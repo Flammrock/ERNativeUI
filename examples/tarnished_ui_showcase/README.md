@@ -9,6 +9,8 @@
 - a dedicated choice submenu comparing one inline row with independent native
   popup lists containing two, four, and eight options;
 - a programmatic `Registration::set_value` update;
+- a capability-gated TextInput submenu with the default 16-unit limit and an
+  explicit 35-UTF-16-unit field;
 - a nested logical page with 32 generated action rows;
 - automatic Next/Previous pagination through Elden Ring's native page stack;
 - the default native localized-OK alert;

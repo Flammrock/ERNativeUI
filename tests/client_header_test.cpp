@@ -40,12 +40,15 @@ int main() {
     static_assert(sizeof(ERUI_ToggleDesc) == 64);
     static_assert(sizeof(ERUI_SliderDesc) == 80);
     static_assert(sizeof(ERUI_ChoiceDesc) == 72);
+    static_assert(sizeof(ERUI_TextInputChangeContext) == 48);
+    static_assert(sizeof(ERUI_TextInputDesc) == 96);
     static_assert(sizeof(ERUI_SubmenuDesc) == 80);
     static_assert(sizeof(ERUI_PageTitleFormatContext) == 56);
     static_assert(sizeof(ERUI_PagePresentationDesc) == 64);
     static_assert(sizeof(ERUI_AlertDesc) == 48);
-    static_assert(sizeof(ERUI_Api) == 128);
+    static_assert(sizeof(ERUI_Api) == 152);
     static_assert(ERUI_API_V1_0_SIZE == 128);
+    static_assert(ERUI_API_V1_1_SIZE == 152);
     static_assert(std::is_trivially_copyable<ERUI_Api>::value);
     static_assert(std::is_pointer<erui::ButtonCallback>::value);
     static_assert(std::is_pointer<erui::AlertCallback>::value);

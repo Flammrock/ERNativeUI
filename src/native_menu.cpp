@@ -5,6 +5,7 @@
 #include "runtime_state.hpp"
 #include "root_button_text_override.hpp"
 #include "submenu_runtime.hpp"
+#include "native_text_input.hpp"
 
 #include <Windows.h>
 
@@ -822,6 +823,10 @@ bool inject_logical_row(
     case erui::RowKind::popup_choice:
         constructor_succeeded = row.byte_value &&
             add_popup_choice(page, addresses, row, faulted);
+        break;
+    case erui::RowKind::text_input:
+        constructor_succeeded = row.text_input_state &&
+            add_text_input(page, addresses, row, faulted);
         break;
     case erui::RowKind::button:
         if (!row.enabled || !row.action) {

@@ -8,6 +8,8 @@
 *.log
 /gfx_patch_output/
 /gfx_fingerprint_output/
+/research-work/
 *.gfx
 !/assets/menu/win/02_040_optionsetting.gfx
+!/assets/menu/win/02_042_pc_graphicsetting.gfx
 *.zip

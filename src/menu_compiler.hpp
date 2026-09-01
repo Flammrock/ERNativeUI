@@ -45,8 +45,10 @@ struct CompiledRow {
     volatile std::uint8_t* byte_value{};
     SliderSpec slider{};
     std::vector<TextId> choice_ids{};
+    TextInputState* text_input_state{};
     Action action{};
     ValueAction value_action{};
+    TextAction text_action{};
     std::size_t target_page_index{invalid_compiled_index};
     bool enabled{true};
     mutable PopupChoiceNativeState popup_choice_state{};
@@ -87,6 +89,7 @@ struct CompiledMenu {
     std::size_t modeled_button_count{};
     std::size_t modeled_submenu_count{};
     std::size_t modeled_popup_choice_count{};
+    std::size_t modeled_text_input_count{};
     bool pagination_required{};
 
     [[nodiscard]] CompiledPage& root_page() noexcept { return pages[root_page_index]; }

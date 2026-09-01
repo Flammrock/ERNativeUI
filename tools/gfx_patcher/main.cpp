@@ -28,6 +28,9 @@ struct Arguments {
     std::filesystem::path input{};
     std::filesystem::path output{};
     std::uint16_t controller_rows{7};
+    erui::gfx::TextInputPresentation text_input_presentation{
+        erui::gfx::TextInputPresentation::native};
+    bool controller_rows_explicit{};
     bool inspect_only{};
     bool overwrite{};
 };
@@ -35,11 +38,18 @@ struct Arguments {
 void print_usage() {
     std::wcout
         << L"Inspect:\n"
-        << L"  ERNativeUIGfxPatcher.exe --inspect --input <02_040_optionsetting.gfx>\n\n"
-        << L"Patch the user's own PC GFX:\n"
+        << L"  ERNativeUIGfxPatcher.exe --inspect --input <supported.gfx>\n\n"
+        << L"Patch Controller Settings:\n"
         << L"  ERNativeUIGfxPatcher.exe --input <source.gfx> --output <patched.gfx> "
-           L"--controller-rows 13 [--overwrite]\n\n"
-        << L"The input file is never modified. The target row count may be 6..13.\n";
+           L"--controller-rows 13 [--text-input-presentation character-name] "
+           L"[--overwrite]\n\n"
+        << L"Patch Advanced Settings TextInput presentation:\n"
+        << L"  ERNativeUIGfxPatcher.exe --input <02_042_pc_graphicsetting.gfx> "
+           L"--output <patched.gfx> --text-input-presentation character-name "
+           L"[--overwrite]\n\n"
+        << L"The input file is never modified. The target row count may be 6..13.\n"
+        << L"The host movie and TextInput sprite are detected structurally.\n"
+        << L"TextInput presentation values: native (default), character-name.\n";
 }
 
 [[nodiscard]] std::optional<std::uint16_t> parse_u16(std::wstring_view text) {
@@ -80,7 +90,8 @@ void print_usage() {
             continue;
         }
         if (token == L"--input" || token == L"--output" ||
-            token == L"--controller-rows") {
+            token == L"--controller-rows" ||
+            token == L"--text-input-presentation") {
             if (index + 1 >= arguments.size()) {
                 error = L"missing value after " + std::wstring(token);
                 return false;
@@ -90,6 +101,17 @@ void print_usage() {
                 parsed.input = value;
             } else if (token == L"--output") {
                 parsed.output = value;
+            } else if (token == L"--text-input-presentation") {
+                if (value == L"native") {
+                    parsed.text_input_presentation =
+                        erui::gfx::TextInputPresentation::native;
+                } else if (value == L"character-name") {
+                    parsed.text_input_presentation =
+                        erui::gfx::TextInputPresentation::character_name;
+                } else {
+                    error = L"--text-input-presentation requires native or character-name";
+                    return false;
+                }
             } else {
                 const std::optional<std::uint16_t> rows = parse_u16(value);
                 if (!rows) {
@@ -97,6 +119,7 @@ void print_usage() {
                     return false;
                 }
                 parsed.controller_rows = *rows;
+                parsed.controller_rows_explicit = true;
             }
             continue;
         }
@@ -214,10 +237,19 @@ void print_inspection(const erui::gfx::Inspection& inspection) {
     std::wcout
         << L"GFX version:                 " << static_cast<unsigned>(inspection.gfx_version) << L'\n'
         << L"Declared movie length:       " << inspection.declared_length << L" bytes\n"
-        << L"WindowList sprite ID:         " << inspection.window_list_sprite << L'\n'
-        << L"ControllSetting sprite ID:    " << inspection.controller_sprite << L'\n'
-        << L"Generic item character ID:    " << inspection.controller_item_character << L'\n'
-        << L"Controller visual row slots:  " << inspection.controller_rows << L'\n';
+        << L"Detected host:                "
+        << widen_ascii(erui::gfx::host_name(inspection.host)) << L'\n'
+        << L"TextInput sprite ID:          " << inspection.text_input_sprite << L'\n';
+    if (inspection.host == erui::gfx::GfxHost::controller_settings) {
+        std::wcout
+            << L"WindowList sprite ID:         " << inspection.window_list_sprite << L'\n'
+            << L"ControllSetting sprite ID:    " << inspection.controller_sprite << L'\n'
+            << L"Generic item character ID:    " << inspection.controller_item_character << L'\n'
+            << L"Controller visual row slots:  " << inspection.controller_rows << L'\n';
+    }
+    std::wcout
+        << L"Character-name TextInput:     "
+        << (inspection.character_name_text_input ? L"present" : L"not present") << L'\n';
 }
 
 int run(const std::vector<std::wstring>& command_line) {
@@ -241,12 +273,32 @@ int run(const std::vector<std::wstring>& command_line) {
         return 3;
     }
 
-    const erui::gfx::Inspection inspection =
-        erui::gfx::inspect_controller_panel(input);
-    if (!inspection.success()) {
-        std::wcerr << L"ERROR [" << widen_ascii(erui::gfx::error_name(inspection.error))
-                   << L"]: " << widen_ascii(inspection.message) << L'\n';
+    const erui::gfx::Inspection text_input_inspection =
+        erui::gfx::inspect_text_input_host(input);
+    if (!text_input_inspection.success()) {
+        std::wcerr << L"ERROR ["
+                   << widen_ascii(erui::gfx::error_name(text_input_inspection.error))
+                   << L"]: " << widen_ascii(text_input_inspection.message) << L'\n';
         return 4;
+    }
+
+    erui::gfx::Inspection inspection = text_input_inspection;
+    if (text_input_inspection.host == erui::gfx::GfxHost::controller_settings) {
+        inspection = erui::gfx::inspect_controller_panel(input);
+        if (!inspection.success()) {
+            std::wcerr << L"ERROR ["
+                       << widen_ascii(erui::gfx::error_name(inspection.error))
+                       << L"]: " << widen_ascii(inspection.message) << L'\n';
+            return 4;
+        }
+    } else if (text_input_inspection.host ==
+            erui::gfx::GfxHost::advanced_settings &&
+        arguments.controller_rows_explicit) {
+        std::wcerr
+            << L"ERROR: --controller-rows is only valid for "
+               L"02_040_optionsetting.gfx; the detected Advanced Settings "
+               L"movie has no ControllSetting panel.\n";
+        return 2;
     }
 
     std::wcout << L"Input: " << arguments.input.wstring() << L'\n';
@@ -255,14 +307,32 @@ int run(const std::vector<std::wstring>& command_line) {
         return 0;
     }
 
+    if (inspection.host == erui::gfx::GfxHost::advanced_settings &&
+        arguments.text_input_presentation !=
+            erui::gfx::TextInputPresentation::character_name) {
+        std::wcerr
+            << L"ERROR: Advanced Settings has no controller rows to patch; "
+               L"pass --text-input-presentation character-name.\n";
+        return 2;
+    }
+
     if (same_path(arguments.input, arguments.output)) {
         std::wcerr << L"ERROR: input and output must be different paths; the patcher never modifies the source file.\n";
         return 2;
     }
 
-    const erui::gfx::PatchResult patch = erui::gfx::patch_controller_panel(
-        input,
-        {.controller_rows = arguments.controller_rows});
+    erui::gfx::PatchResult patch{};
+    if (inspection.host == erui::gfx::GfxHost::controller_settings) {
+        patch = erui::gfx::patch_controller_panel(
+            input,
+            {
+                .controller_rows = arguments.controller_rows,
+                .text_input_presentation = arguments.text_input_presentation,
+            });
+    } else {
+        patch = erui::gfx::patch_text_input_presentation(
+            input, arguments.text_input_presentation);
+    }
     if (!patch.success()) {
         std::wcerr << L"ERROR [" << widen_ascii(erui::gfx::error_name(patch.error))
                    << L"]: " << widen_ascii(patch.message) << L'\n';
@@ -278,17 +348,25 @@ int run(const std::vector<std::wstring>& command_line) {
         return 6;
     }
 
+    if (inspection.host == erui::gfx::GfxHost::controller_settings) {
+        std::wcout
+            << L"Controller rows:             " << patch.report.before.controller_rows
+            << L" -> " << patch.report.after.controller_rows << L'\n';
+    }
     std::wcout
-        << L"Controller rows:             " << patch.report.before.controller_rows
-        << L" -> " << patch.report.after.controller_rows << L'\n'
-        << L"Bytes added:                 " << patch.report.bytes_added << L'\n'
+        << L"TextInput sprite ID:          " << patch.report.after.text_input_sprite << L'\n'
+        << L"Bytes added:                  " << patch.report.bytes_added << L'\n'
         << L"Status:                      "
         << (patch.report.already_satisfied ? L"already satisfied" : L"patched and verified")
         << L'\n';
+    const wchar_t* install_name = inspection.host ==
+            erui::gfx::GfxHost::controller_settings
+        ? L"02_040_optionsetting.gfx"
+        : L"02_042_pc_graphicsetting.gfx";
     std::wcout
         << L"Output: " << arguments.output.wstring() << L"\n\n"
         << L"Install the output as:\n"
-        << L"  <ModEngine2 mod path>\\menu\\win\\02_040_optionsetting.gfx\n";
+        << L"  <ModEngine2 mod path>\\menu\\win\\" << install_name << L'\n';
     return 0;
 }
 

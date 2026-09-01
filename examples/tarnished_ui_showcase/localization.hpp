@@ -36,6 +36,14 @@ struct Text {
     const wchar_t* popup_message;
 };
 
+struct TextInputText {
+    const wchar_t* showcase;
+    const wchar_t* note;
+    const wchar_t* note_placeholder;
+    const wchar_t* extended_note;
+    const wchar_t* extended_placeholder;
+};
+
 inline const Text& text(erui::GameLanguage language) noexcept {
     static constexpr Text english{
         L"Tarnished UI Showcase", L"Showcase Enabled", L"Showcase Intensity",
@@ -233,6 +241,80 @@ inline const Text& text(erui::GameLanguage language) noexcept {
         L"Este mensaje fue puesto en cola por la demostración mediante ERNativeUI.",
         L"Demuestra esta disposición y posición de diálogo nativo.",
         L"Este es un diálogo nativo mostrado mediante ERNativeUI."};
+
+    switch (language) {
+    case erui::GameLanguage::german: return german;
+    case erui::GameLanguage::french: return french;
+    case erui::GameLanguage::italian: return italian;
+    case erui::GameLanguage::korean: return korean;
+    case erui::GameLanguage::spanish: return spanish;
+    case erui::GameLanguage::chinese_simplified: return schinese;
+    case erui::GameLanguage::chinese_traditional: return tchinese;
+    case erui::GameLanguage::russian: return russian;
+    case erui::GameLanguage::thai: return thai;
+    case erui::GameLanguage::japanese: return japanese;
+    case erui::GameLanguage::polish: return polish;
+    case erui::GameLanguage::arabic: return arabic;
+    case erui::GameLanguage::portuguese_brazil: return brazilian;
+    case erui::GameLanguage::spanish_latin_america: return latam;
+    default: return english;
+    }
+}
+
+inline const TextInputText& text_input_text(
+    erui::GameLanguage language) noexcept {
+    static constexpr TextInputText english{
+        L"Text Input Showcase", L"Player Note", L"Enter a note",
+        L"Extended Note", L"Enter longer text"};
+    static constexpr TextInputText german{
+        L"Texteingabe-Demo", L"Spielernotiz", L"Notiz eingeben",
+        L"Erweiterte Notiz", L"Längeren Text eingeben"};
+    static constexpr TextInputText french{
+        L"Vitrine de saisie de texte", L"Note du joueur",
+        L"Saisissez une note", L"Note étendue",
+        L"Saisissez un texte plus long"};
+    static constexpr TextInputText italian{
+        L"Demo inserimento testo", L"Nota del giocatore",
+        L"Inserisci una nota", L"Nota estesa",
+        L"Inserisci un testo più lungo"};
+    static constexpr TextInputText korean{
+        L"텍스트 입력 쇼케이스", L"플레이어 메모", L"메모 입력",
+        L"확장 메모", L"긴 텍스트 입력"};
+    static constexpr TextInputText spanish{
+        L"Demostración de entrada de texto", L"Nota del jugador",
+        L"Escribe una nota", L"Nota ampliada",
+        L"Escribe un texto más largo"};
+    static constexpr TextInputText schinese{
+        L"文本输入展示", L"玩家备注", L"输入备注", L"扩展备注",
+        L"输入更长的文本"};
+    static constexpr TextInputText tchinese{
+        L"文字輸入展示", L"玩家備註", L"輸入備註", L"擴充備註",
+        L"輸入更長的文字"};
+    static constexpr TextInputText russian{
+        L"Демонстрация ввода текста", L"Заметка игрока",
+        L"Введите заметку", L"Расширенная заметка",
+        L"Введите более длинный текст"};
+    static constexpr TextInputText thai{
+        L"ตัวอย่างการป้อนข้อความ", L"บันทึกผู้เล่น", L"ป้อนบันทึก",
+        L"บันทึกแบบยาว", L"ป้อนข้อความที่ยาวขึ้น"};
+    static constexpr TextInputText japanese{
+        L"テキスト入力ショーケース", L"プレイヤーメモ", L"メモを入力",
+        L"拡張メモ", L"長いテキストを入力"};
+    static constexpr TextInputText polish{
+        L"Prezentacja pola tekstowego", L"Notatka gracza",
+        L"Wpisz notatkę", L"Rozszerzona notatka",
+        L"Wpisz dłuższy tekst"};
+    static constexpr TextInputText arabic{
+        L"عرض إدخال النص", L"ملاحظة اللاعب", L"أدخل ملاحظة",
+        L"ملاحظة موسعة", L"أدخل نصًا أطول"};
+    static constexpr TextInputText brazilian{
+        L"Demonstração de entrada de texto", L"Nota do jogador",
+        L"Digite uma nota", L"Nota ampliada",
+        L"Digite um texto mais longo"};
+    static constexpr TextInputText latam{
+        L"Demostración de entrada de texto", L"Nota del jugador",
+        L"Escribe una nota", L"Nota ampliada",
+        L"Escribe un texto más largo"};
 
     switch (language) {
     case erui::GameLanguage::german: return german;

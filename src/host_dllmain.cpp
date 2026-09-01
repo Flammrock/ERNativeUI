@@ -152,7 +152,7 @@ DWORD run_host() noexcept {
             if (!game.initialize(GetModuleHandleW(nullptr)) ||
                 !erui::native::resolve_game_addresses(
                     game, early_addresses,
-                    true, true, true, true, true, true)) {
+                    true, true, true, true, true, false, true)) {
                 log::write(
                     "ERROR: could not capture native interfaces before Solid Uncapper initialization");
                 set_api_state(ApiState::failed);

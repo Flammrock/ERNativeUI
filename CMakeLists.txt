@@ -127,12 +127,14 @@ if(_ernativeui_need_native_core)
         src/native_dialog.cpp
         src/native_menu.cpp
         src/native_popup_choice.cpp
+        src/native_text_input.cpp
         src/native_text_result.cpp
         src/pagination.cpp
         src/runtime.cpp
         src/runtime_log.cpp
         src/runtime_state.cpp
         src/submenu_navigation.cpp
+        src/text_input_state.cpp
         src/text_registry.cpp)
     add_library(ERNativeUI::Core ALIAS ERNativeUICore)
     target_include_directories(ERNativeUICore PRIVATE
@@ -173,58 +175,6 @@ if(_ernativeui_need_native_core)
             target_link_options(ERNativeUIHost PRIVATE /INCREMENTAL:NO)
         endif()
 
-        add_custom_command(TARGET ERNativeUIHost POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>"
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/docs"
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses"
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<TARGET_FILE:ERNativeUIHost>"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/ERNativeUI.dll"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/ERNativeUI.ini"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/ERNativeUI.ini"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/locales"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/locales"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_040_optionsetting.gfx"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/README.md"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/VALIDATION.md"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/VALIDATION.md"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/LICENSE.txt"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/THIRD_PARTY_NOTICES.txt"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/docs"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/docs"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/examples"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/examples"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${safetyhook_SOURCE_DIR}/LICENSE"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/SafetyHook-LICENSE.txt"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${minhook_SOURCE_DIR}/LICENSE.txt"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/MinHook-LICENSE.txt"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${Zydis_SOURCE_DIR}/LICENSE"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/Zydis-LICENSE.txt"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${Zycore_SOURCE_DIR}/LICENSE"
-                "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/Zycore-LICENSE.txt"
-            VERBATIM)
     endif()
 
 endif()
@@ -233,15 +183,121 @@ if(WIN32 AND ERNATIVEUI_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
+# Keep the complete local deployment tree current even when only a document,
+# locale, or optional GFX asset changed. A POST_BUILD command on the host alone
+# is not rerun by an incremental build when the DLL itself is already current.
+if(TARGET ERNativeUIHost)
+    set(_ernativeui_stage_dependencies ERNativeUIHost)
+    foreach(_ernativeui_example_target IN ITEMS
+            TarnishedUIShowcase LocalizedGreeting MyERNativeUIMod)
+        if(TARGET ${_ernativeui_example_target})
+            list(APPEND _ernativeui_stage_dependencies
+                ${_ernativeui_example_target})
+        endif()
+    endforeach()
+
+    add_custom_target(ERNativeUIStageRuntime ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/docs"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ERNativeUIHost>"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/ERNativeUI.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/ERNativeUI.ini"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/ERNativeUI.ini"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/locales"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/locales"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_040_optionsetting.gfx"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_042_pc_graphicsetting.gfx"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/README.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/VALIDATION.md"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/VALIDATION.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/LICENSE.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/THIRD_PARTY_NOTICES.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/docs"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/docs"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/examples"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/examples"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${safetyhook_SOURCE_DIR}/LICENSE"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/SafetyHook-LICENSE.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${minhook_SOURCE_DIR}/LICENSE.txt"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/MinHook-LICENSE.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${Zydis_SOURCE_DIR}/LICENSE"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/Zydis-LICENSE.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${Zycore_SOURCE_DIR}/LICENSE"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses/Zycore-LICENSE.txt"
+        DEPENDS ${_ernativeui_stage_dependencies}
+        VERBATIM)
+    unset(_ernativeui_stage_dependencies)
+    unset(_ernativeui_example_target)
+endif()
+
 if(NOT WIN32)
     message(STATUS "Non-Windows build: public headers and selected portable tools only.")
 endif()
 
 if(_ernativeui_enable_tests)
+    if(WIN32)
+        # Game-independent DLL built from the real production negotiation and
+        # registry sources. Frozen clients load this target in isolated test
+        # processes; no Elden Ring executable or native hook installation is
+        # involved.
+        add_library(ERNativeUIAbiHostCurrent SHARED
+            tests/abi/support/current_host_dllmain.cpp
+            src/host_api.cpp
+            src/host_registry.cpp
+            src/steam_language.cpp)
+        target_include_directories(ERNativeUIAbiHostCurrent PRIVATE
+            src include)
+        target_link_libraries(ERNativeUIAbiHostCurrent PRIVATE
+            ERNativeUI::Core)
+        target_compile_features(ERNativeUIAbiHostCurrent PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUIAbiHostCurrent PRIVATE
+            ERUI_HOST_EXPORTS WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUIAbiHostCurrent PROPERTIES
+            OUTPUT_NAME ERNativeUI
+            PREFIX ""
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/abi/runtime/current")
+        if(_ernativeui_msvc_abi)
+            target_compile_options(ERNativeUIAbiHostCurrent PRIVATE
+                /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus /wd4100 /wd4324)
+            target_link_options(ERNativeUIAbiHostCurrent PRIVATE
+                /INCREMENTAL:NO)
+        endif()
+    endif()
+
+    add_subdirectory(tests/abi)
+
     add_executable(ERNativeUIGfxPatcherTests tests/gfx_patcher_test.cpp)
-        target_link_libraries(ERNativeUIGfxPatcherTests PRIVATE ERNativeUI::GfxPatch)
-        target_compile_definitions(ERNativeUIGfxPatcherTests PRIVATE
-            ERNATIVEUI_TEST_CONTROLLER_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx")
+    target_link_libraries(ERNativeUIGfxPatcherTests PRIVATE ERNativeUI::GfxPatch)
+    target_compile_definitions(ERNativeUIGfxPatcherTests PRIVATE
+        ERNATIVEUI_TEST_CONTROLLER_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
+        ERNATIVEUI_TEST_ADVANCED_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx")
     target_compile_features(ERNativeUIGfxPatcherTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.GfxPatcher COMMAND ERNativeUIGfxPatcherTests)
 
@@ -398,6 +454,7 @@ if(TARGET ERNativeUIHost)
     install(DIRECTORY assets/locales/
         DESTINATION ${CMAKE_INSTALL_BINDIR}/locales)
     install(FILES assets/menu/win/02_040_optionsetting.gfx
+        assets/menu/win/02_042_pc_graphicsetting.gfx
         DESTINATION ${CMAKE_INSTALL_BINDIR}/menu/win)
 endif()
 if(TARGET ERNativeUIGfxPatcher)

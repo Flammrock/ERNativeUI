@@ -14,6 +14,8 @@
 #include <atomic>
 #include <cstdint>
 #include <iterator>
+#include <mutex>
+#include <string>
 
 namespace {
 
@@ -47,6 +49,9 @@ std::atomic_bool g_feature_enabled{true};
 std::atomic<std::uint8_t> g_strength{50};
 std::atomic<std::uint8_t> g_mode{1};
 std::atomic<std::uint8_t> g_popup_mode{1};
+std::mutex g_alias_mutex{};
+std::wstring g_alias{L"Tarnished"};
+erui::RowHandle g_alias_row{};
 
 void log(const wchar_t* text) noexcept {
     OutputDebugStringW(L"[MyERNativeUIMod] ");
@@ -73,10 +78,47 @@ void ERUI_CALL popup_mode_changed(void*, std::uint8_t index) noexcept {
     g_popup_mode.store(index, std::memory_order_release);
 }
 
+// TextInputChange::value is borrowed and expires when this callback returns.
+// Copy it while inside the callback if your configuration must retain it.
+// The callback runs only after the player confirms a different value; Cancel,
+// an unchanged confirmation, and Registration::set_text do not invoke it.
+void alias_changed(const erui::TextInputChange& change) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(g_alias_mutex);
+        g_alias.assign(change.value);
+        // Persist g_alias to your own INI/configuration here if desired.
+    } catch (...) {
+        // No exception may cross a callback boundary.
+    }
+}
+
 // Button callbacks run synchronously on Elden Ring's UI thread. Keep them
 // short; hand expensive work to your own worker when necessary.
 void apply_settings() noexcept {
     log(L"Apply Settings was selected.");
+}
+
+void set_alias_from_code() noexcept {
+    // Programmatic writes are copied by the host and intentionally do not
+    // synthesize a player-change callback. get_text performs the bounded
+    // query/copy/retry protocol and changes its std::wstring only on success.
+    if (g_registration.set_text(g_alias_row, L"Set by client") != ERUI_OK) {
+        log(L"Could not update the TextInput value.");
+        return;
+    }
+
+    std::wstring current;
+    if (g_registration.get_text(g_alias_row, current) != ERUI_OK) {
+        log(L"Could not read the TextInput value.");
+        return;
+    }
+
+    try {
+        std::lock_guard<std::mutex> lock(g_alias_mutex);
+        g_alias.swap(current);
+    } catch (...) {
+        log(L"Could not retain the updated TextInput value.");
+    }
 }
 
 // Alert completions are dispatched asynchronously on ERNativeUI's worker,
@@ -188,6 +230,28 @@ DWORD WINAPI initialize_mod(void*) noexcept {
         // would use options.display_name. The shared root cannot be changed.
         advanced.set_presentation(
             L"My Mod - Advanced", L"Advanced Settings");
+
+        // TextInput was appended in API 1.1. A client built with the newer
+        // wrapper can still negotiate API 1.0, so test the capability before
+        // calling the builder. Unsupported optional rows can then disappear
+        // without disabling this mod's older toggle/slider/button features.
+        if (menu.supports(erui::Capability::text_input)) {
+            erui::TextInputOptions alias{};
+            alias.initial_value = g_alias;
+            alias.placeholder = L"Enter an alias";
+            // The default is 16. API 1.1 accepts 1..35, counted in UTF-16 code
+            // units (std::wstring_view::size() on Windows), not bytes or
+            // user-perceived characters. The limit is fixed for this row.
+            alias.maximum_length = 16;
+
+            g_alias_row = advanced.add_text_input<&alias_changed>(
+                L"Player Alias",
+                L"Choose the name used by this mod.",
+                alias);
+            advanced.add_button<&set_alias_from_code>(
+                L"Set Alias From Client Code",
+                L"Demonstrate Registration::set_text and get_text.");
+        }
 
         advanced.add_button<&apply_settings>(
             L"Apply Advanced Settings",

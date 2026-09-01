@@ -7,6 +7,8 @@
 #include <string_view>
 #include <vector>
 
+#include "text_input_state.hpp"
+
 namespace erui {
 
 using TextId = std::uint32_t;
@@ -16,6 +18,7 @@ enum class RowKind : std::uint8_t {
     slider,
     inline_choice,
     popup_choice,
+    text_input,
     button,
     submenu,
 };
@@ -59,6 +62,9 @@ struct MenuLocalization {
 
 using ActionCallback = void (*)(void* user_data) noexcept;
 using ValueChangedCallback = void (*)(std::uint8_t value, void* user_data) noexcept;
+using TextChangedCallback = void (*)(
+    std::wstring_view value,
+    void* user_data) noexcept;
 
 struct Action {
     ActionCallback callback{};
@@ -81,6 +87,18 @@ struct ValueAction {
         if (callback) {
             callback(value, user_data);
         }
+    }
+};
+
+struct TextAction {
+    TextChangedCallback callback{};
+    void* user_data{};
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return callback != nullptr;
+    }
+    void invoke(std::wstring_view value) const noexcept {
+        if (callback) callback(value, user_data);
     }
 };
 
@@ -132,6 +150,12 @@ public:
         bool enabled = true,
         ValueAction on_changed = {});
 
+    Page& add_text_input(
+        std::wstring label,
+        std::wstring help,
+        detail::TextInputState& state,
+        TextAction on_changed = {});
+
     Page& add_button(
         std::wstring label,
         std::wstring help,
@@ -167,8 +191,10 @@ private:
         volatile std::uint8_t* byte_value{};
         SliderSpec slider{};
         std::vector<std::wstring> choices{};
+        detail::TextInputState* text_input_state{};
         Action action{};
         ValueAction value_action{};
+        TextAction text_action{};
         Page* target_page{};
         bool enabled{true};
     };

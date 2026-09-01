@@ -248,6 +248,23 @@ callbacks and `Registration::get_value`/`set_value` all use the same
 zero-based selected index. Choice rows are always interactive because the
 corresponding native constructors have no proven disabled-state parameter.
 
+### Development preview: TextInput
+
+The current development branch implements a capability-gated TextInput for
+the unreleased API 1.1. It is not available in the published 1.0 SDK and the
+1.1 function table is not frozen yet. A newer client should check
+`menu.supports(erui::Capability::text_input)` before adding one, allowing all
+of its API 1.0 rows to remain usable with an older host.
+
+`TextInputOptions` supplies copied initial and placeholder text plus a limit.
+The C++ option defaults to 16; at the raw C boundary, zero also selects 16.
+Explicit values must be 1 through 35 UTF-16 code units. A confirmed changed
+value is delivered as a borrowed `TextInputChange`; copy it inside the
+callback. A retained registration can use `set_text` and `get_text` for
+programmatic copy-in/copy-out. The limit is fixed per row at registration
+time. See the [API guide](docs/API.md#textinput-unreleased-api-11) and
+[native investigation](docs/analysis/TEXT_INPUT.md).
+
 ### CMake client integration
 
 When ERNativeUI is included as a subdirectory:
@@ -384,13 +401,17 @@ formatter for per-slice titles. See
 [Page titles and presentation](docs/PAGE_PRESENTATION.md) for the API,
 lifetime rules, and the native GFX research behind this behavior.
 
-## Optional Controller GFX patch
+## Optional GFX presentation patches
 
 ERNativeUI includes an optional 13-row `02_040_optionsetting.gfx` for a more
 spacious Controller Settings page. The DLL also supports Elden Ring's native
 six-row asset without modification and reads capacities 6 through 13 from the
-live page object. `ERNativeUIGfxPatcher.exe` can reproduce any supported layout
-from your own UXM-extracted asset. See
+live page object. The bundled `02_040` and
+`02_042_pc_graphicsetting.gfx` also carry the narrow, reproducible
+character-name TextInput presentation used by root and Advanced Settings rows.
+TextInput remains functional without those visual patches, but its idle field
+uses the game's plain settings style. `ERNativeUIGfxPatcher.exe` can reproduce
+both transformations from your own UXM-extracted assets. See
 [GFX patcher guide](docs/GFX_PATCHER.md).
 
 ## Build, test and deploy
@@ -421,7 +442,7 @@ cmake --build --preset windows-release
 ctest --preset windows-release
 ```
 
-All 17 native-model, ABI, wrapper, pagination, dialog, choice, and GFX tests
+All native-model, frozen-ABI, wrapper, pagination, dialog, choice, and GFX tests
 must pass before deployment.
 
 ### Deploy for local testing
@@ -434,6 +455,11 @@ build/preset-release/deploy/Release/
 +-- ERNativeUI.ini
 +-- README.md, VALIDATION.md
 +-- LICENSE.txt, THIRD_PARTY_NOTICES.txt
++-- locales/
++-- menu/
+|   `-- win/
+|       +-- 02_040_optionsetting.gfx
+|       `-- 02_042_pc_graphicsetting.gfx
 +-- docs/
 |   +-- API.md
 |   +-- GFX_PATCHER.md
@@ -512,6 +538,96 @@ With the default value `0`, the host does not create, truncate, append to, or
 flush a log file. An old log is left untouched. Diagnostics add address
 resolution, registry, pagination, native row and callback traces and are useful
 only while logging is enabled.
+
+## Roadmap: 1.1.0
+
+Version 1.1.0 is an additive release in active development. A checked item
+below is implemented in the development tree; it is not a released or frozen
+API promise until every 1.1 release gate passes. The current TextInput block is
+therefore available for validation, while the API 1.1 table and its final size
+will grow with Color Picker and other accepted 1.1 features. Mod authors should
+continue targeting the published 1.0 SDK for releases today.
+
+Reverse-engineering results may refine implementation details, but must not
+weaken the released 1.0 ABI.
+The public [native UI research notebook](docs/analysis/README.md) records the
+evidence, rejected hypotheses, object lifetimes, and remaining runtime probes
+behind this roadmap.
+
+### Compatibility foundation
+
+- [x] Preserve the complete API 1.0 binary contract and continue accepting
+  explicit `ERUI_API_VERSION_1_0` requests.
+- [x] Add an append-only development API 1.1 table and exact 1.1-to-1.0
+  negotiation in the C++ wrapper.
+- [x] Make new capabilities optional so 1.1 clients using only 1.0 features
+  can still operate with a 1.0 host.
+- [x] Add regression tests using unchanged C and C++17 clients built with the
+  released 1.0 headers against the 1.1 host.
+
+### Native text input
+
+- [Research notebook and discovery plan](docs/analysis/TEXT_INPUT.md)
+- [Unreleased API usage](docs/API.md#textinput-unreleased-api-11)
+- [API-version compatibility test plan](docs/analysis/API_VERSION_COMPATIBILITY_TESTS.md)
+- [x] Recover native TextInput construction and activation, root/subpage GFX
+  presentation, confirmed persistence, and independent per-row limits.
+- [x] Implement bounded host-owned UTF-16 storage, a confirmation callback,
+  fixed per-row maximum length, and programmatic copy-in/copy-out.
+- [x] Add capability-gated C and C++17 text-input APIs without exposing game or
+  STL objects across the DLL boundary.
+- [x] Add maintained template documentation and a production showcase
+  submenu built only through the public API.
+- [ ] Complete callback/cancel/same-value, keyboard, controller, mouse,
+  IME/localized text, pagination, and modal-input validation.
+- [ ] Freeze the final API 1.1 table only after all accepted 1.1 additions and
+  compatibility fixtures are complete.
+
+### Any built-in Game Options tab
+
+- [ ] Identify and validate the native handler, page context, capacity, and
+  presentation behavior for every built-in Game Options tab.
+- [ ] Add a stable public placement identifier, with Controller Settings
+  remaining the default for existing clients.
+- [ ] Merge providers deterministically and paginate independently within each
+  selected built-in tab.
+- [ ] Detect unsupported game builds or foreign hook conflicts and disable only
+  the affected tab integration safely.
+
+### Custom top-level tabs
+
+- [ ] Recover top-level tab creation, selection, teardown, mouse navigation,
+  and LB/RB or L1/R1 navigation.
+- [ ] Define a custom-tab descriptor with localized name, icon metadata,
+  ordering, and unambiguous lifetime rules.
+- [ ] Support any number of logical custom tabs through host-owned
+  virtualization or pagination rather than assuming a fixed GFX capacity.
+- [ ] Define deterministic merging when several providers request custom tabs.
+- [ ] Provide documented icon requirements, validation, fallbacks, and an
+  example custom tab.
+
+### Site of Grace menu integration
+
+- [ ] Recover and document the Site of Grace menu's row construction, action,
+  focus, Back, page-open, and teardown interfaces.
+- [ ] Add an optional capability for providers to register Site of Grace rows.
+- [ ] Support actions that invoke callbacks, enqueue native dialogs, or open
+  provider-owned pages.
+- [ ] Keep Game Options functional when Grace-menu interfaces are unavailable
+  or conflict with another mod.
+- [ ] Validate repeated resting, travel, page navigation, dialog ownership,
+  save reloads, and interaction with other Grace-menu mods.
+
+### 1.1.0 release gates
+
+- [ ] Pass the complete automated suite under MSVC and the public-header tests
+  under both MSVC and MinGW-w64.
+- [ ] Live-test the native six-row and optional thirteen-row Game Options
+  layouts, all supported input devices, and all Steam languages.
+- [ ] Re-run standalone and Solid Uncapper compatibility matrices; record
+  Seamless Co-op and DLC results when testers can provide them.
+- [ ] Update the SDK, template, examples, API reference, native research notes,
+  compatibility guide, Nexus instructions, and migration notes.
 
 ## Current limitations
 

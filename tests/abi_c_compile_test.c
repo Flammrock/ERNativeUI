@@ -13,13 +13,17 @@ _Static_assert(sizeof(ERUI_ButtonDesc) == 64u, "ERUI_ButtonDesc ABI drift");
 _Static_assert(sizeof(ERUI_ToggleDesc) == 64u, "ERUI_ToggleDesc ABI drift");
 _Static_assert(sizeof(ERUI_SliderDesc) == 80u, "ERUI_SliderDesc ABI drift");
 _Static_assert(sizeof(ERUI_ChoiceDesc) == 72u, "ERUI_ChoiceDesc ABI drift");
+_Static_assert(sizeof(ERUI_TextInputChangeContext) == 48u,
+    "ERUI_TextInputChangeContext ABI drift");
+_Static_assert(sizeof(ERUI_TextInputDesc) == 96u,
+    "ERUI_TextInputDesc ABI drift");
 _Static_assert(sizeof(ERUI_SubmenuDesc) == 80u, "ERUI_SubmenuDesc ABI drift");
 _Static_assert(sizeof(ERUI_PageTitleFormatContext) == 56u,
     "ERUI_PageTitleFormatContext ABI drift");
 _Static_assert(sizeof(ERUI_PagePresentationDesc) == 64u,
     "ERUI_PagePresentationDesc ABI drift");
 _Static_assert(sizeof(ERUI_AlertDesc) == 48u, "ERUI_AlertDesc ABI drift");
-_Static_assert(sizeof(ERUI_Api) == 128u, "ERUI_Api ABI drift");
+_Static_assert(sizeof(ERUI_Api) == 152u, "ERUI_Api ABI drift");
 _Static_assert(_Alignof(ERUI_Api) == 8u, "ERUI_Api alignment drift");
 _Static_assert(offsetof(ERUI_ProviderDesc, owner_module) == 16u,
     "ERUI_ProviderDesc offset drift");
@@ -50,6 +54,7 @@ _Static_assert(offsetof(ERUI_Api, enqueue_alert) == 112u,
 _Static_assert(offsetof(ERUI_Api, get_game_language) == 120u,
     "ERUI_Api language function offset drift");
 _Static_assert(ERUI_API_V1_0_SIZE == 128u, "ERUI API 1.0 prefix drift");
+_Static_assert(ERUI_API_V1_1_SIZE == 152u, "ERUI API 1.1 prefix drift");
 #endif
 
 static void ERUI_CALL button_callback(void* user_data) {

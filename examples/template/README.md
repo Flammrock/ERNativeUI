@@ -82,7 +82,22 @@ error and the rest of your mod can continue.
 ## State and callback rules
 
 - The host copies all text/options and owns toggle, slider, inline-choice, and
-  popup-choice bytes. Choice indices and callbacks are always zero-based.
+  popup-choice bytes plus TextInput strings. Choice indices and callbacks are
+  always zero-based.
+- TextInput is an additive API 1.1 capability. Gate its builder with
+  `menu.supports(erui::Capability::text_input)` so the same client can retain
+  its API 1.0 rows when an older host is installed.
+- `TextInputOptions::maximum_length` defaults to 16. At the raw C boundary,
+  zero also selects 16; explicit values must be 1 through 35 UTF-16 code
+  units. It is fixed when the row is registered.
+  A confirmed changed value arrives as a borrowed `TextInputChange::value`;
+  copy it before the callback returns.
+- `Registration::set_text` copies a programmatic value without invoking the
+  player-change callback. `Registration::get_text` copies the current value
+  into a caller-owned `std::wstring`; both return an `ERUI_Result`.
+- Native display changes are applied at the next UI frame. If `set_text` runs
+  while the player is editing, Cancel keeps the programmatic value and Confirm
+  replaces it with the player's confirmed value.
 - Value callbacks run on the ERNativeUI worker; button callbacks run on the
   Elden Ring UI thread.
 - Alert completion callbacks run asynchronously on the ERNativeUI worker and

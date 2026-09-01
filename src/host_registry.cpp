@@ -124,6 +124,29 @@ void invoke_value_callback(
 #endif
 }
 
+void invoke_text_input_callback(
+    ERUI_TextInputChangedCallback callback,
+    void* user_data,
+    const ERUI_TextInputChangeContext* context) noexcept {
+    if (!callback) return;
+#if defined(_MSC_VER)
+    __try {
+        callback(user_data, context);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Provider TextInput callback raised SEH exception 0x%08lX",
+            GetExceptionCode());
+    }
+#else
+    try {
+        callback(user_data, context);
+    } catch (...) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Provider TextInput callback raised a C++ exception");
+    }
+#endif
+}
+
 ERUI_Result invoke_page_title_formatter(
     ERUI_PageTitleFormatter formatter,
     void* user_data,
@@ -241,6 +264,7 @@ Registry::Row& Registry::create_row_locked(Provider& provider, Page& page) {
     }
     auto row = std::make_unique<Row>();
     row->handle = next_handle_++;
+    row->provider = provider.handle;
     Row* result = row.get();
     provider.rows.push_back(std::move(row));
     try {
@@ -277,6 +301,7 @@ ERUI_Result Registry::validate_provider_and_page_locked(
 }
 
 ERUI_Result Registry::register_provider(
+    std::uint32_t negotiated_api_version,
     const ERUI_ProviderDesc* description,
     ERUI_ProviderHandle* out_provider,
     ERUI_PageHandle* out_root_page) noexcept {
@@ -286,7 +311,9 @@ ERUI_Result Registry::register_provider(
     if (!description ||
         !field_available(description->size,
             ERUI_FIELD_END(ERUI_ProviderDesc, display_name)) ||
-        description->api_version != ERUI_API_VERSION_CURRENT ||
+        (negotiated_api_version != ERUI_API_VERSION_1_0 &&
+            negotiated_api_version != ERUI_API_VERSION_1_1) ||
+        description->api_version != negotiated_api_version ||
         description->flags != 0 || !description->owner_module ||
         !valid_view(description->provider_id) ||
         !valid_view(description->display_name)) {
@@ -298,6 +325,7 @@ ERUI_Result Registry::register_provider(
         provider->display_name = copy_utf16(description->display_name, false);
         provider->priority = description->root_priority;
         provider->owner_module = static_cast<HMODULE>(description->owner_module);
+        provider->api_version = negotiated_api_version;
 
         std::lock_guard lock(mutex_);
         if (!open_) return ERUI_REGISTRATION_CLOSED;
@@ -500,6 +528,80 @@ ERUI_Result Registry::add_choice(
       catch (...) { return ERUI_INVALID_ARGUMENT; }
 }
 
+ERUI_Result Registry::add_text_input(
+    ERUI_ProviderHandle provider_handle,
+    ERUI_PageHandle page_handle,
+    const ERUI_TextInputDesc* description,
+    ERUI_RowHandle* out_row) noexcept {
+    // Bind feature availability to the version-specific registration
+    // trampoline. In particular, do not inspect any 1.1-only pointer supplied
+    // with a provider created through the frozen 1.0 table.
+    {
+        std::lock_guard lock(mutex_);
+        const auto provider_it = providers_.find(provider_handle);
+        if (provider_it == providers_.end()) return ERUI_INVALID_HANDLE;
+        if (provider_it->second->api_version < ERUI_API_VERSION_1_1) {
+            return ERUI_NOT_SUPPORTED;
+        }
+    }
+
+    if (out_row) *out_row = ERUI_INVALID_ROW;
+    if (!description || !field_available(description->size,
+            ERUI_FIELD_END(ERUI_TextInputDesc, reserved)) ||
+        description->flags != 0 || description->reserved != 0 ||
+        !valid_view(description->label) ||
+        !valid_view(description->help) ||
+        !valid_view(description->initial_value) ||
+        !valid_view(description->placeholder) ||
+        (!description->changed_callback && description->user_data)) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    const std::uint32_t maximum_length = description->maximum_length == 0
+        ? erui::detail::text_input_default_maximum_length
+        : description->maximum_length;
+    if (maximum_length > erui::detail::text_input_maximum_length) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    try {
+        std::wstring label = copy_utf16(description->label, false);
+        std::wstring help = copy_utf16(description->help);
+        std::wstring initial_value = copy_utf16(description->initial_value);
+        std::wstring placeholder = copy_utf16(description->placeholder);
+        if (initial_value.size() > maximum_length) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+        auto state = std::make_unique<erui::detail::TextInputState>(
+            std::move(initial_value), std::move(placeholder), maximum_length);
+
+        std::lock_guard lock(mutex_);
+        if (!open_) return ERUI_REGISTRATION_CLOSED;
+        Provider* provider{};
+        Page* page{};
+        const ERUI_Result valid = validate_provider_and_page_locked(
+            provider_handle, page_handle, provider, page);
+        if (valid != ERUI_OK) return valid;
+        if (provider->api_version < ERUI_API_VERSION_1_1) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        Row& row = create_row_locked(*provider, *page);
+        row.kind = RowKind::text_input;
+        row.label = std::move(label);
+        row.help = std::move(help);
+        row.text_changed_callback = description->changed_callback;
+        row.user_data = description->user_data;
+        row.text_input_state = std::move(state);
+        if (out_row) *out_row = row.handle;
+        note_activity_locked();
+        return ERUI_OK;
+    } catch (const std::bad_alloc&) {
+        return ERUI_OUT_OF_MEMORY;
+    } catch (...) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+}
+
 ERUI_Result Registry::add_submenu(
     ERUI_ProviderHandle provider_handle,
     ERUI_PageHandle parent_handle,
@@ -603,6 +705,9 @@ ERUI_Result Registry::commit_provider(ERUI_ProviderHandle handle) noexcept {
             callback = reinterpret_cast<const void*>(row.button_callback);
         } else if (row.changed_callback) {
             callback = reinterpret_cast<const void*>(row.changed_callback);
+        } else if (row.text_changed_callback) {
+            callback = reinterpret_cast<const void*>(
+                row.text_changed_callback);
         }
         if (callback && !address_belongs_to_module(callback, provider.owner_module)) {
             return ERUI_CALLBACK_REJECTED;
@@ -688,6 +793,93 @@ ERUI_Result Registry::get_row_value(
     return ERUI_OK;
 }
 
+ERUI_Result Registry::set_text_input_value(
+    ERUI_ProviderHandle provider_handle,
+    ERUI_RowHandle row_handle,
+    const ERUI_Utf16View* value) noexcept {
+    erui::detail::TextInputState* state{};
+    {
+        std::lock_guard lock(mutex_);
+        const auto provider_it = providers_.find(provider_handle);
+        if (provider_it == providers_.end()) return ERUI_INVALID_HANDLE;
+        Provider& provider = *provider_it->second;
+        if (provider.api_version < ERUI_API_VERSION_1_1) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if (!provider.committed) return ERUI_INVALID_HANDLE;
+        const auto row_it = provider.row_lookup.find(row_handle);
+        if (row_it == provider.row_lookup.end()) return ERUI_INVALID_HANDLE;
+        if (row_it->second->kind != RowKind::text_input ||
+            !row_it->second->text_input_state) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+        state = row_it->second->text_input_state.get();
+    }
+
+    if (!value || !valid_view(*value)) return ERUI_INVALID_ARGUMENT;
+    try {
+        const std::wstring copied = copy_utf16(*value);
+        return state->set_programmatic(copied)
+            ? static_cast<ERUI_Result>(ERUI_OK)
+            : static_cast<ERUI_Result>(ERUI_INVALID_ARGUMENT);
+    } catch (const std::bad_alloc&) {
+        return ERUI_OUT_OF_MEMORY;
+    } catch (...) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+}
+
+ERUI_Result Registry::get_text_input_value(
+    ERUI_ProviderHandle provider_handle,
+    ERUI_RowHandle row_handle,
+    std::uint16_t* output,
+    std::uint32_t output_capacity,
+    std::uint32_t* out_length) noexcept {
+    erui::detail::TextInputState* state{};
+    {
+        std::lock_guard lock(mutex_);
+        const auto provider_it = providers_.find(provider_handle);
+        if (provider_it == providers_.end()) return ERUI_INVALID_HANDLE;
+        Provider& provider = *provider_it->second;
+        if (provider.api_version < ERUI_API_VERSION_1_1) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if (!provider.committed) return ERUI_INVALID_HANDLE;
+        const auto row_it = provider.row_lookup.find(row_handle);
+        if (row_it == provider.row_lookup.end()) return ERUI_INVALID_HANDLE;
+        if (row_it->second->kind != RowKind::text_input ||
+            !row_it->second->text_input_state) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+        state = row_it->second->text_input_state.get();
+    }
+
+    if (!out_length || (!output && output_capacity != 0)) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+    try {
+        const erui::detail::TextInputState::Snapshot snapshot =
+            state->snapshot();
+        if (snapshot.value.size() >
+            (std::numeric_limits<std::uint32_t>::max)()) {
+            return ERUI_INTERNAL_ERROR;
+        }
+        const auto required = static_cast<std::uint32_t>(snapshot.value.size());
+        *out_length = required;
+        if (!output) return ERUI_OK;
+        if (output_capacity < required) return ERUI_BUFFER_TOO_SMALL;
+        if (required != 0) {
+            std::memcpy(output, snapshot.value.data(),
+                static_cast<std::size_t>(required) * sizeof(std::uint16_t));
+        }
+        return ERUI_OK;
+    } catch (const std::bad_alloc&) {
+        return ERUI_OUT_OF_MEMORY;
+    } catch (...) {
+        return ERUI_INTERNAL_ERROR;
+    }
+}
+
 ERUI_Result Registry::enqueue_alert(
     ERUI_ProviderHandle provider_handle,
     const ERUI_AlertDesc* description) noexcept {
@@ -749,6 +941,27 @@ void Registry::value_bridge(std::uint8_t value, void* user_data) noexcept {
     row->public_value.store(value, std::memory_order_release);
     row->pending_value.store(value, std::memory_order_release);
     invoke_value_callback(row->changed_callback, row->user_data, value);
+}
+
+void Registry::text_input_bridge(
+    std::wstring_view value,
+    void* user_data) noexcept {
+    auto* row = static_cast<Row*>(user_data);
+    if (!row || !row->text_changed_callback ||
+        value.size() > (std::numeric_limits<std::uint32_t>::max)()) {
+        return;
+    }
+    ERUI_TextInputChangeContext context{};
+    context.size = sizeof(context);
+    context.provider = row->provider;
+    context.row = row->handle;
+    context.value = {
+        reinterpret_cast<const std::uint16_t*>(value.data()),
+        static_cast<std::uint32_t>(value.size()),
+        0,
+    };
+    invoke_text_input_callback(
+        row->text_changed_callback, row->user_data, &context);
 }
 
 bool Registry::page_title_bridge(
@@ -867,6 +1080,17 @@ void Registry::append_page_locked(
                 row->label, row->help, row->native_value,
                 row->choices, row->enabled,
                 {.callback = &Registry::value_bridge, .user_data = row});
+            break;
+        case RowKind::text_input:
+            if (!row->text_input_state) {
+                throw std::logic_error("TextInput state is missing");
+            }
+            destination.add_text_input(
+                row->label,
+                row->help,
+                *row->text_input_state,
+                {.callback = &Registry::text_input_bridge,
+                    .user_data = row});
             break;
         case RowKind::submenu: {
             const auto child = provider.page_lookup.find(row->child_page);

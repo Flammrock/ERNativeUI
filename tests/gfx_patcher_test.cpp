@@ -1,6 +1,7 @@
 #include "gfx_patch.hpp"
 
 #include <algorithm>
+#include <array>
 #include "test_assertions.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -114,12 +115,13 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     std::uint16_t depth,
     std::uint16_t character,
     std::int32_t y,
-    std::string_view name) {
+    std::string_view name,
+    std::int32_t x = 0) {
     std::vector<std::uint8_t> body{};
     body.push_back(0x26); // Character + Matrix + Name.
     append_u16(body, depth);
     append_u16(body, character);
-    const std::vector<std::uint8_t> transform = matrix(0, y);
+    const std::vector<std::uint8_t> transform = matrix(x, y);
     body.insert(body.end(), transform.begin(), transform.end());
     body.insert(body.end(), name.begin(), name.end());
     body.push_back(0);
@@ -140,7 +142,25 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     return tag(39, body, true);
 }
 
-[[nodiscard]] std::vector<std::uint8_t> make_fixture() {
+[[nodiscard]] std::vector<std::uint8_t> define_text_stub(
+    std::uint16_t id,
+    bool empty_placeholder) {
+    std::vector<std::uint8_t> body{};
+    append_u16(body, id);
+    if (empty_placeholder) {
+        const std::array<std::uint8_t, 4> gray{0x50, 0x50, 0x50, 0xFF};
+        body.insert(body.end(), gray.begin(), gray.end());
+        constexpr std::string_view markup = "<font color=\"#505050\">placeholder</font>";
+        body.insert(body.end(), markup.begin(), markup.end());
+        body.push_back(0);
+    } else {
+        body.push_back(0);
+    }
+    return tag(37, body, true);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> make_fixture(
+    bool occupy_text_input_depth_two = false) {
     constexpr std::uint16_t controller_id = 100;
     constexpr std::uint16_t donor_id = 101;
     constexpr std::uint16_t window_list_id = 102;
@@ -167,6 +187,15 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     std::vector<std::vector<std::uint8_t>> window_items{};
     window_items.push_back(place_object(45, controller_id, 0, "ControllSetting"));
 
+    std::vector<std::vector<std::uint8_t>> text_input_items{};
+    if (occupy_text_input_depth_two) {
+        text_input_items.push_back(place_object(2, 98, 0, "ExistingFrame"));
+    }
+    text_input_items.push_back(place_object(3, 98, -640, "Text_0", -4360));
+    text_input_items.push_back(place_object(4, 99, -640, "TextOnEmpty", -4360));
+    text_input_items.push_back(place_object(5, 101, 0, "Caption", -9520));
+    text_input_items.push_back(place_object(7, 102, 0, "Cursor"));
+
     std::vector<std::uint8_t> movie{
         'G', 'F', 'X', 11,
         0, 0, 0, 0,
@@ -182,6 +211,9 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     append_u16(movie, 0); // Frame rate.
     append_u16(movie, 1); // Frame count.
 
+    append_tag(movie, define_text_stub(98, false));
+    append_tag(movie, define_text_stub(99, true));
+    append_tag(movie, define_sprite(103, text_input_items));
     append_tag(movie, define_sprite(controller_id, controller_items));
     append_tag(movie, define_sprite(donor_id, donor_items));
     append_tag(movie, define_sprite(window_list_id, window_items));
@@ -202,6 +234,70 @@ int main() {
     ERUI_TEST_CHECK(initial.controller_sprite == 100);
     ERUI_TEST_CHECK(initial.window_list_sprite == 102);
     ERUI_TEST_CHECK(initial.controller_item_character == 200);
+    ERUI_TEST_CHECK(initial.host == erui::gfx::GfxHost::controller_settings);
+    ERUI_TEST_CHECK(initial.text_input_sprite == 103);
+    ERUI_TEST_CHECK(!initial.character_name_text_input);
+
+    const erui::gfx::Inspection initial_text_input =
+        erui::gfx::inspect_text_input_host(original);
+    ERUI_TEST_CHECK(initial_text_input.success());
+    ERUI_TEST_CHECK(
+        initial_text_input.host == erui::gfx::GfxHost::controller_settings);
+    ERUI_TEST_CHECK(initial_text_input.text_input_sprite == 103);
+
+    const erui::gfx::PatchResult character_name =
+        erui::gfx::patch_controller_panel(
+            original,
+            {
+                .controller_rows = 6,
+                .text_input_presentation =
+                    erui::gfx::TextInputPresentation::character_name,
+            });
+    ERUI_TEST_CHECK(character_name.success());
+    ERUI_TEST_CHECK(character_name.report.after.character_name_text_input);
+    ERUI_TEST_CHECK(!character_name.report.already_satisfied);
+    ERUI_TEST_CHECK(character_name.output.size() > original.size());
+
+    const erui::gfx::PatchResult character_name_second =
+        erui::gfx::patch_controller_panel(
+            character_name.output,
+            {
+                .controller_rows = 6,
+                .text_input_presentation =
+                    erui::gfx::TextInputPresentation::character_name,
+            });
+    ERUI_TEST_CHECK(character_name_second.success());
+    ERUI_TEST_CHECK(character_name_second.report.already_satisfied);
+    ERUI_TEST_CHECK(character_name_second.output == character_name.output);
+
+    const erui::gfx::PatchResult character_name_thirteen =
+        erui::gfx::patch_controller_panel(
+            original,
+            {
+                .controller_rows = 13,
+                .text_input_presentation =
+                    erui::gfx::TextInputPresentation::character_name,
+            });
+    ERUI_TEST_CHECK(character_name_thirteen.success());
+    ERUI_TEST_CHECK(character_name_thirteen.report.after.controller_rows == 13);
+    ERUI_TEST_CHECK(character_name_thirteen.report.after.character_name_text_input);
+    ERUI_TEST_CHECK(std::equal(
+        original.end() - 9,
+        original.end(),
+        character_name_thirteen.output.end() - 9));
+
+    const std::vector<std::uint8_t> occupied_text_input = make_fixture(true);
+    const erui::gfx::PatchResult reject_occupied_text_input =
+        erui::gfx::patch_controller_panel(
+            occupied_text_input,
+            {
+                .controller_rows = 6,
+                .text_input_presentation =
+                    erui::gfx::TextInputPresentation::character_name,
+            });
+    ERUI_TEST_CHECK(!reject_occupied_text_input.success());
+    ERUI_TEST_CHECK(
+        reject_occupied_text_input.error == erui::gfx::ErrorCode::unsupported_gfx);
 
     const erui::gfx::PatchResult seven = erui::gfx::patch_controller_panel(
         original,
@@ -260,6 +356,17 @@ int main() {
     const std::vector<std::uint8_t> real_input{
         std::istreambuf_iterator<char>(real_file),
         std::istreambuf_iterator<char>()};
+    const erui::gfx::Inspection real_text_input =
+        erui::gfx::inspect_controller_panel(real_input);
+    ERUI_TEST_CHECK(real_text_input.success());
+    ERUI_TEST_CHECK(
+        real_text_input.host == erui::gfx::GfxHost::controller_settings);
+    ERUI_TEST_CHECK(real_text_input.text_input_sprite == 103);
+    // Release packaging promises the complete optional presentation: the
+    // thirteen-row layout and the character-name idle frame. Test the checked-
+    // in asset itself so a locally patched deploy cannot hide a stale file.
+    ERUI_TEST_CHECK(real_text_input.controller_rows == 13);
+    ERUI_TEST_CHECK(real_text_input.character_name_text_input);
     const erui::gfx::PatchResult real_patch =
         erui::gfx::patch_controller_panel(
             real_input, {.controller_rows = 13});
@@ -271,6 +378,90 @@ int main() {
     ERUI_TEST_CHECK(real_second.success());
     ERUI_TEST_CHECK(real_second.report.already_satisfied);
     ERUI_TEST_CHECK(real_second.output == real_patch.output);
+
+    const erui::gfx::PatchResult real_character_name =
+        erui::gfx::patch_controller_panel(
+            real_input,
+            {
+                .controller_rows = 13,
+                .text_input_presentation =
+                    erui::gfx::TextInputPresentation::character_name,
+            });
+    ERUI_TEST_CHECK(real_character_name.success());
+    ERUI_TEST_CHECK(real_character_name.report.after.character_name_text_input);
+    ERUI_TEST_CHECK(real_character_name.report.already_satisfied);
+    ERUI_TEST_CHECK(real_character_name.output == real_input);
+    const erui::gfx::PatchResult real_character_name_second =
+        erui::gfx::patch_controller_panel(
+            real_character_name.output,
+            {
+                .controller_rows = 13,
+                .text_input_presentation =
+                    erui::gfx::TextInputPresentation::character_name,
+            });
+    ERUI_TEST_CHECK(real_character_name_second.success());
+    ERUI_TEST_CHECK(real_character_name_second.report.already_satisfied);
+    ERUI_TEST_CHECK(
+        real_character_name_second.output == real_character_name.output);
+#endif
+
+#if defined(ERNATIVEUI_TEST_ADVANCED_GFX)
+    std::ifstream advanced_file(
+        ERNATIVEUI_TEST_ADVANCED_GFX,
+        std::ios::binary);
+    ERUI_TEST_CHECK(advanced_file.good());
+    const std::vector<std::uint8_t> advanced_input{
+        std::istreambuf_iterator<char>(advanced_file),
+        std::istreambuf_iterator<char>()};
+
+    const erui::gfx::Inspection advanced_inspection =
+        erui::gfx::inspect_text_input_host(advanced_input);
+    ERUI_TEST_CHECK(advanced_inspection.success());
+    ERUI_TEST_CHECK(
+        advanced_inspection.host == erui::gfx::GfxHost::advanced_settings);
+    ERUI_TEST_CHECK(advanced_inspection.text_input_sprite == 61);
+    ERUI_TEST_CHECK(advanced_inspection.character_name_text_input);
+
+    const erui::gfx::Inspection no_controller =
+        erui::gfx::inspect_controller_panel(advanced_input);
+    ERUI_TEST_CHECK(!no_controller.success());
+    ERUI_TEST_CHECK(
+        no_controller.error == erui::gfx::ErrorCode::controller_panel_not_found);
+
+    const erui::gfx::PatchResult advanced_character_name =
+        erui::gfx::patch_text_input_presentation(
+            advanced_input,
+            erui::gfx::TextInputPresentation::character_name);
+    ERUI_TEST_CHECK(advanced_character_name.success());
+    ERUI_TEST_CHECK(advanced_character_name.report.already_satisfied);
+    ERUI_TEST_CHECK(advanced_character_name.report.bytes_added == 0);
+    ERUI_TEST_CHECK(
+        advanced_character_name.report.after.host ==
+            erui::gfx::GfxHost::advanced_settings);
+    ERUI_TEST_CHECK(
+        advanced_character_name.report.after.text_input_sprite == 61);
+    ERUI_TEST_CHECK(
+        advanced_character_name.report.after.character_name_text_input);
+    ERUI_TEST_CHECK(advanced_character_name.output == advanced_input);
+
+    const erui::gfx::PatchResult advanced_native =
+        erui::gfx::patch_text_input_presentation(
+            advanced_input,
+            erui::gfx::TextInputPresentation::native);
+    ERUI_TEST_CHECK(advanced_native.success());
+    ERUI_TEST_CHECK(advanced_native.report.already_satisfied);
+    ERUI_TEST_CHECK(advanced_native.report.bytes_added == 0);
+    ERUI_TEST_CHECK(advanced_native.output == advanced_input);
+
+    const erui::gfx::PatchResult advanced_second =
+        erui::gfx::patch_text_input_presentation(
+            advanced_character_name.output,
+            erui::gfx::TextInputPresentation::character_name);
+    ERUI_TEST_CHECK(advanced_second.success());
+    ERUI_TEST_CHECK(advanced_second.report.already_satisfied);
+    ERUI_TEST_CHECK(advanced_second.report.bytes_added == 0);
+    ERUI_TEST_CHECK(
+        advanced_second.output == advanced_character_name.output);
 #endif
     return 0;
 }

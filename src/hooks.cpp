@@ -4,6 +4,7 @@
 #include "native_dialog.hpp"
 #include "native_menu.hpp"
 #include "native_popup_choice.hpp"
+#include "native_text_input.hpp"
 #include "native_text_result.hpp"
 #include "native_title_bridge.hpp"
 #include "pagination.hpp"
@@ -628,6 +629,11 @@ void __fastcall page_frame_gate_detour(
     void* page,
     float frame_value,
     std::uint8_t* input_enabled) noexcept {
+    // TextInput setters may run on the host/client thread. Publish their
+    // canonical values into the native MenuString shadow only from this UI
+    // frame boundary, including while a native alert owns page input.
+    synchronize_pending_text_inputs();
+
     PageFrameFn original = g_original_page_frame.load(std::memory_order_acquire);
     if (!original) return;
     if (native_dialog_owns_menu_input() &&
@@ -639,6 +645,9 @@ void __fastcall page_frame_gate_detour(
 
 bool install_page_frame_gate(const GameAddresses& addresses) noexcept {
     if (!addresses.page_frame) return false;
+    if (g_original_page_frame.load(std::memory_order_acquire)) {
+        return true;
+    }
     auto result = SafetyHookInline::create(
         reinterpret_cast<void*>(addresses.page_frame),
         reinterpret_cast<void*>(&page_frame_gate_detour),
@@ -661,7 +670,7 @@ bool install_page_frame_gate(const GameAddresses& addresses) noexcept {
         return false;
     }
     erui::detail::logf(erui::LogLevel::info,
-        "Dialog page-frame input gate installed");
+        "Page-frame UI pump/input gate installed");
     return true;
 }
 
@@ -719,24 +728,39 @@ bool install_dialog_back_gate(const GameAddresses& addresses) noexcept {
     return true;
 }
 
-void reset_dialog_input_gates() noexcept {
+void reset_dialog_back_gate() noexcept {
     g_dialog_back_gate_hook.reset();
-    g_page_frame_gate_hook.reset();
     g_original_dialog_back.store(nullptr, std::memory_order_release);
+}
+
+void reset_page_frame_gate() noexcept {
+    g_page_frame_gate_hook.reset();
     g_original_page_frame.store(nullptr, std::memory_order_release);
 }
 
-bool install_dialog_input_gates(const GameAddresses& addresses) noexcept {
-    reset_dialog_input_gates();
+void reset_dialog_input_gates(bool preserve_page_frame) noexcept {
+    reset_dialog_back_gate();
+    if (!preserve_page_frame) {
+        reset_page_frame_gate();
+    }
+}
+
+bool install_dialog_input_gates(
+    const GameAddresses& addresses,
+    bool preserve_page_frame) noexcept {
+    reset_dialog_back_gate();
     if (!addresses.page_frame || !addresses.native_back) {
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert input ownership unavailable: page-frame or Back interface unresolved");
+        if (!preserve_page_frame) {
+            reset_page_frame_gate();
+        }
         return false;
     }
     if (!install_page_frame_gate(addresses) ||
         !install_dialog_back_gate(addresses)) {
-        reset_dialog_input_gates();
+        reset_dialog_input_gates(preserve_page_frame);
         return false;
     }
     return true;
@@ -951,7 +975,7 @@ TextHookInstallStatus install_text_hook(const GameAddresses& addresses) noexcept
 
 void reset_hooks() noexcept {
     g_scaleform_path_resolver_hook.reset();
-    reset_dialog_input_gates();
+    reset_dialog_input_gates(false);
     remove_native_popup_choice_bridge();
     g_sub_hook.reset();
     g_hub_hook.reset();
@@ -1190,6 +1214,8 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         (runtime.menu->modeled_submenu_count != 0 || root_overflow);
     const bool enable_popup_choices = enable_rows && runtime.menu &&
         runtime.menu->modeled_popup_choice_count != 0;
+    const bool enable_text_inputs = enable_rows && runtime.menu &&
+        runtime.menu->modeled_text_input_count != 0;
 
     if (enable_submenus) {
         std::size_t binding_capacity = 0;
@@ -1284,9 +1310,22 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
             "Custom text hook disabled; rows use a vanilla fallback message ID");
     }
 
+    // TextInput state may be changed from a client callback or the host
+    // worker. Its native MenuString shadow is therefore synchronized at the
+    // game's page-frame boundary. This frame hook is required independently
+    // of the optional native-alert transport, which merely shares it as an
+    // input gate when available.
+    if (enable_text_inputs && !install_page_frame_gate(addresses)) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "TextInput rows require the page-frame UI pump");
+        reset_hooks();
+        return HookInstallStatus::hook_failed;
+    }
+
     ModuleView game{};
     const bool dialog_input_ready = enable_text &&
-        install_dialog_input_gates(addresses);
+        install_dialog_input_gates(addresses, enable_text_inputs);
     if (!enable_text) {
         erui::detail::logf(
             erui::LogLevel::warning,
@@ -1299,14 +1338,14 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert transport unavailable: main executable could not be parsed");
-        reset_dialog_input_gates();
+        reset_dialog_input_gates(enable_text_inputs);
     } else if (!install_native_dialog_transport(game)) {
         // Alerts are an optional native route. A game update may invalidate
         // their semantic signatures without disabling registered menu rows.
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert transport was not installed; menu rows remain active");
-        reset_dialog_input_gates();
+        reset_dialog_input_gates(enable_text_inputs);
     }
 
     erui::detail::logf(

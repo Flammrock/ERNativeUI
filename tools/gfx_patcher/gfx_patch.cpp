@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <span>
@@ -20,13 +21,24 @@ namespace {
 constexpr std::uint16_t kTagEnd = 0;
 constexpr std::uint16_t kTagShowFrame = 1;
 constexpr std::uint16_t kTagPlaceObject2 = 26;
+constexpr std::uint16_t kTagDefineEditText = 37;
 constexpr std::uint16_t kTagDefineSprite = 39;
+constexpr std::uint16_t kTagPlaceObject3 = 70;
+constexpr std::uint16_t kTagDefineScalingGrid = 78;
+constexpr std::uint16_t kTagDefineExternalImage2 = 1009;
 constexpr std::uint16_t kControllerButtonSprite = 97;
 constexpr std::uint16_t kControllerCaptionWrapper = 101;
 constexpr std::uint16_t kControllerButtonLabelWrapper = 193;
 constexpr std::uint16_t kMinimumControllerRows = 6;
 constexpr std::uint16_t kMaximumControllerRows = 13;
 constexpr std::string_view kControllerPanelName = "ControllSetting";
+constexpr std::string_view kCharacterFrameName = "CharacterFrame";
+constexpr std::string_view kValueTextName = "Text_0";
+constexpr std::string_view kEmptyTextName = "TextOnEmpty";
+constexpr std::string_view kCaptionName = "Caption";
+constexpr std::string_view kCursorName = "Cursor";
+constexpr std::string_view kCharacterFrameExport = "MENU_FL_Cursor_EntWaku";
+constexpr std::string_view kCharacterFrameFile = "MENU_FL_Cursor_EntWaku.tga";
 
 struct TagView {
     std::uint16_t code{};
@@ -76,6 +88,26 @@ struct ControllerContext {
     std::uint16_t row_count{};
     std::vector<const Placement*> items{};
 };
+
+struct TextInputContext {
+    const Sprite* sprite{};
+    const Placement* value{};
+    const Placement* empty{};
+    const Placement* caption{};
+    const Placement* cursor{};
+    GfxHost host{GfxHost::unknown};
+};
+
+[[nodiscard]] bool has_character_name_text_input(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed) noexcept;
+
+[[nodiscard]] bool locate_text_input(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed,
+    TextInputContext& context,
+    ErrorCode& code,
+    std::string& error) noexcept;
 
 class BitReader {
 public:
@@ -604,6 +636,7 @@ void write_u32(std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint32
 }
 
 [[nodiscard]] Inspection make_inspection(
+    std::span<const std::uint8_t> bytes,
     const ParsedGfx& parsed,
     const ControllerContext& context) {
     Inspection result{};
@@ -613,6 +646,17 @@ void write_u32(std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint32
     result.controller_sprite = context.controller->id;
     result.controller_item_character = context.item_character_id;
     result.controller_rows = context.row_count;
+    TextInputContext text_input{};
+    ErrorCode ignored_code{};
+    std::string ignored_error{};
+    if (locate_text_input(
+            bytes, parsed, text_input, ignored_code, ignored_error)) {
+        result.host = text_input.host;
+        result.text_input_sprite = text_input.sprite->id;
+    }
+    // Presentation inspection is intentionally exact. A partial or modified
+    // CharacterFrame must not be reported as the supported patch.
+    result.character_name_text_input = has_character_name_text_input(bytes, parsed);
     return result;
 }
 
@@ -646,6 +690,13 @@ void append_u16(std::vector<std::uint8_t>& output, std::uint16_t value) {
     output.push_back(static_cast<std::uint8_t>(value >> 8U));
 }
 
+void append_u32(std::vector<std::uint8_t>& output, std::uint32_t value) {
+    output.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+    output.push_back(static_cast<std::uint8_t>(value >> 8U));
+    output.push_back(static_cast<std::uint8_t>(value >> 16U));
+    output.push_back(static_cast<std::uint8_t>(value >> 24U));
+}
+
 class BitWriter {
 public:
     explicit BitWriter(std::vector<std::uint8_t>& output) : output_(output) {}
@@ -659,10 +710,544 @@ public:
         }
     }
 
+    void write_signed(std::int32_t value, std::uint32_t count) {
+        const std::uint32_t mask = count == 32
+            ? std::numeric_limits<std::uint32_t>::max()
+            : ((1U << count) - 1U);
+        write(static_cast<std::uint32_t>(value) & mask, count);
+    }
+
+    void align() noexcept { bit_offset_ = 0; }
+
 private:
     std::vector<std::uint8_t>& output_;
     std::uint8_t bit_offset_{};
 };
+
+[[nodiscard]] std::uint32_t signed_bit_count(std::int32_t value) noexcept {
+    for (std::uint32_t bits = 1; bits < 32; ++bits) {
+        const std::int64_t minimum = -(std::int64_t{1} << (bits - 1));
+        const std::int64_t maximum = (std::int64_t{1} << (bits - 1)) - 1;
+        if (value >= minimum && value <= maximum) return bits;
+    }
+    return 32;
+}
+
+void append_matrix(
+    std::vector<std::uint8_t>& output,
+    std::int32_t x,
+    std::int32_t y,
+    std::optional<std::int32_t> scale_x = std::nullopt,
+    std::optional<std::int32_t> scale_y = std::nullopt) {
+    BitWriter writer(output);
+    const bool has_scale = scale_x.has_value() && scale_y.has_value();
+    writer.write(has_scale ? 1U : 0U, 1);
+    if (has_scale) {
+        const std::uint32_t bits = std::max(
+            signed_bit_count(*scale_x), signed_bit_count(*scale_y));
+        writer.write(bits, 5);
+        writer.write_signed(*scale_x, bits);
+        writer.write_signed(*scale_y, bits);
+    }
+    writer.write(0, 1); // no rotate/skew
+    const std::uint32_t translation_bits = std::max(
+        signed_bit_count(x), signed_bit_count(y));
+    writer.write(translation_bits, 5);
+    writer.write_signed(x, translation_bits);
+    writer.write_signed(y, translation_bits);
+    writer.align();
+}
+
+void append_character_frame_color_transform(std::vector<std::uint8_t>& output) {
+    BitWriter writer(output);
+    constexpr std::uint32_t bits = 10;
+    writer.write(0, 1); // no additive terms
+    writer.write(1, 1); // multiplicative terms follow
+    writer.write(bits, 4);
+    writer.write_signed(225, bits); // red
+    writer.write_signed(225, bits); // green
+    writer.write_signed(225, bits); // blue
+    writer.write_signed(256, bits); // alpha
+    writer.align();
+}
+
+[[nodiscard]] std::vector<std::uint8_t> make_tag(
+    std::uint16_t code,
+    std::span<const std::uint8_t> body,
+    bool force_long = false) {
+    std::vector<std::uint8_t> output{};
+    if (!force_long && body.size() < 0x3FU) {
+        append_u16(output, static_cast<std::uint16_t>((code << 6U) | body.size()));
+    } else {
+        append_u16(output, static_cast<std::uint16_t>((code << 6U) | 0x3FU));
+        append_u32(output, static_cast<std::uint32_t>(body.size()));
+    }
+    output.insert(output.end(), body.begin(), body.end());
+    return output;
+}
+
+[[nodiscard]] std::vector<std::uint8_t> make_character_frame_external_image(
+    std::uint16_t character_id) {
+    std::vector<std::uint8_t> body{};
+    append_u16(body, character_id);
+    append_u16(body, 0); // native DefineExternalImage2 id type
+    body.push_back(13); // native bitmap format
+    body.push_back(0);
+    append_u16(body, 428);
+    append_u16(body, 108);
+    body.push_back(static_cast<std::uint8_t>(kCharacterFrameExport.size()));
+    body.insert(body.end(), kCharacterFrameExport.begin(), kCharacterFrameExport.end());
+    body.push_back(static_cast<std::uint8_t>(kCharacterFrameFile.size()));
+    body.insert(body.end(), kCharacterFrameFile.begin(), kCharacterFrameFile.end());
+    return make_tag(kTagDefineExternalImage2, body);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> make_character_frame_wrapper(
+    std::uint16_t wrapper_id,
+    std::uint16_t image_id) {
+    std::vector<std::uint8_t> image_body{};
+    image_body.push_back(0x06U); // character + matrix
+    image_body.push_back(0x10U); // PlaceObject3 image flag
+    append_u16(image_body, 1);
+    append_u16(image_body, image_id);
+    append_matrix(image_body, -4193, -1080);
+
+    std::vector<std::uint8_t> body{};
+    append_u16(body, wrapper_id);
+    append_u16(body, 1);
+    const std::vector<std::uint8_t> image = make_tag(
+        kTagPlaceObject3, image_body, true);
+    body.insert(body.end(), image.begin(), image.end());
+    const std::vector<std::uint8_t> show_frame = make_tag(kTagShowFrame, {});
+    body.insert(body.end(), show_frame.begin(), show_frame.end());
+    const std::vector<std::uint8_t> end = make_tag(kTagEnd, {});
+    body.insert(body.end(), end.begin(), end.end());
+    return make_tag(kTagDefineSprite, body, true);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> make_character_frame_scaling_grid(
+    std::uint16_t wrapper_id) {
+    std::vector<std::uint8_t> body{};
+    append_u16(body, wrapper_id);
+    BitWriter rectangle(body);
+    constexpr std::uint32_t bits = 9;
+    rectangle.write(bits, 5);
+    rectangle.write_signed(-80, bits);
+    rectangle.write_signed(80, bits);
+    rectangle.write_signed(-160, bits);
+    rectangle.write_signed(180, bits);
+    rectangle.align();
+    return make_tag(kTagDefineScalingGrid, body);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> make_character_frame_placement(
+    std::uint16_t wrapper_id) {
+    constexpr std::uint8_t flags = 0x2EU; // character, matrix, color, name
+    std::vector<std::uint8_t> body{};
+    body.push_back(flags);
+    append_u16(body, 2);
+    append_u16(body, wrapper_id);
+    append_matrix(body, -487, -320, 65536, 31457);
+    append_character_frame_color_transform(body);
+    body.insert(body.end(), kCharacterFrameName.begin(), kCharacterFrameName.end());
+    body.push_back(0);
+    return make_tag(kTagPlaceObject2, body);
+}
+
+struct ExternalImage {
+    TagView tag{};
+    std::uint16_t character_id{};
+    std::uint16_t id_type{};
+    std::uint8_t bitmap_format{};
+    std::uint8_t reserved{};
+    std::uint16_t width{};
+    std::uint16_t height{};
+    std::string export_name{};
+    std::string file_name{};
+};
+
+[[nodiscard]] bool read_length_string(
+    std::span<const std::uint8_t> bytes,
+    std::size_t& offset,
+    std::size_t end,
+    std::string& value) {
+    if (offset >= end) return false;
+    const std::size_t length = bytes[offset++];
+    if (length > end - offset) return false;
+    value.assign(
+        reinterpret_cast<const char*>(bytes.data() + offset), length);
+    offset += length;
+    return true;
+}
+
+[[nodiscard]] bool parse_external_image(
+    std::span<const std::uint8_t> bytes,
+    const TagView& tag,
+    ExternalImage& image) {
+    if (tag.code != kTagDefineExternalImage2 ||
+        tag.body_start + 10 > tag.body_end) {
+        return false;
+    }
+    image = {};
+    image.tag = tag;
+    std::size_t offset = tag.body_start;
+    if (!read_u16(bytes, offset, image.character_id) ||
+        !read_u16(bytes, offset + 2, image.id_type) ||
+        !read_u16(bytes, offset + 6, image.width) ||
+        !read_u16(bytes, offset + 8, image.height)) {
+        return false;
+    }
+    image.bitmap_format = bytes[offset + 4];
+    image.reserved = bytes[offset + 5];
+    offset += 10;
+    return read_length_string(bytes, offset, tag.body_end, image.export_name) &&
+        read_length_string(bytes, offset, tag.body_end, image.file_name) &&
+        offset == tag.body_end;
+}
+
+[[nodiscard]] bool tag_equals(
+    std::span<const std::uint8_t> bytes,
+    const TagView& tag,
+    std::span<const std::uint8_t> expected) noexcept {
+    if (tag.tag_start > tag.body_end || tag.body_end > bytes.size() ||
+        tag.body_end - tag.tag_start != expected.size()) {
+        return false;
+    }
+    return std::equal(
+        bytes.begin() + static_cast<std::ptrdiff_t>(tag.tag_start),
+        bytes.begin() + static_cast<std::ptrdiff_t>(tag.body_end),
+        expected.begin());
+}
+
+[[nodiscard]] bool is_character_definition(std::uint16_t code) noexcept {
+    switch (code) {
+    case 2:  // DefineShape
+    case 6:  // DefineBits
+    case 7:  // DefineButton
+    case 10: // DefineFont
+    case 11: // DefineText
+    case 14: // DefineSound
+    case 20: // DefineBitsLossless
+    case 21: // DefineBitsJPEG2
+    case 22: // DefineShape2
+    case 32: // DefineShape3
+    case 33: // DefineText2
+    case 34: // DefineButton2
+    case 35: // DefineBitsJPEG3
+    case 36: // DefineBitsLossless2
+    case kTagDefineEditText:
+    case kTagDefineSprite:
+    case 46: // DefineMorphShape
+    case 48: // DefineFont2
+    case 60: // DefineVideoStream
+    case 75: // DefineFont3
+    case 83: // DefineShape4
+    case 84: // DefineMorphShape2
+    case 87: // DefineBinaryData
+    case 90: // DefineBitsJPEG4
+    case 91: // DefineFont4
+    case kTagDefineExternalImage2:
+        return true;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] std::optional<std::uint16_t> next_character_id(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed,
+    std::uint16_t minimum = 1) noexcept {
+    std::uint16_t maximum = static_cast<std::uint16_t>(minimum - 1U);
+    for (const TagView& tag : parsed.top_level_tags) {
+        if (!is_character_definition(tag.code)) continue;
+        std::uint16_t character_id{};
+        if (!read_u16(bytes, tag.body_start, character_id)) return std::nullopt;
+        maximum = std::max(maximum, character_id);
+    }
+    if (maximum == std::numeric_limits<std::uint16_t>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint16_t>(maximum + 1U);
+}
+
+[[nodiscard]] const TagView* find_character_definition(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed,
+    std::uint16_t code,
+    std::uint16_t character_id) noexcept {
+    const TagView* result{};
+    for (const TagView& tag : parsed.top_level_tags) {
+        if (tag.code != code) continue;
+        std::uint16_t candidate{};
+        if (!read_u16(bytes, tag.body_start, candidate) ||
+            candidate != character_id) {
+            continue;
+        }
+        if (result != nullptr) return nullptr;
+        result = &tag;
+    }
+    return result;
+}
+
+[[nodiscard]] bool find_character_frame_image(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed,
+    std::optional<std::uint16_t>& character_id,
+    std::string* error = nullptr) {
+    character_id.reset();
+    for (const TagView& tag : parsed.top_level_tags) {
+        if (tag.code != kTagDefineExternalImage2) continue;
+        ExternalImage image{};
+        if (!parse_external_image(bytes, tag, image)) {
+            if (error) *error = "malformed DefineExternalImage2 tag";
+            return false;
+        }
+        const bool related = image.export_name == kCharacterFrameExport ||
+            image.file_name == kCharacterFrameFile;
+        if (!related) continue;
+        if (image.export_name != kCharacterFrameExport ||
+            image.file_name != kCharacterFrameFile || image.id_type != 0 ||
+            image.bitmap_format != 13 || image.reserved != 0 ||
+            image.width != 428 || image.height != 108 || character_id) {
+            if (error) {
+                *error = "conflicting MENU_FL_Cursor_EntWaku external image definition";
+            }
+            return false;
+        }
+        character_id = image.character_id;
+    }
+    return true;
+}
+
+struct SequenceMatch {
+    std::size_t count{};
+    std::size_t offset{};
+};
+
+[[nodiscard]] SequenceMatch find_sequence(
+    std::span<const std::uint8_t> bytes,
+    std::span<const std::uint8_t> sequence) noexcept {
+    SequenceMatch result{};
+    auto begin = bytes.begin();
+    while (begin != bytes.end()) {
+        const auto found = std::search(begin, bytes.end(), sequence.begin(), sequence.end());
+        if (found == bytes.end()) break;
+        ++result.count;
+        result.offset = static_cast<std::size_t>(std::distance(bytes.begin(), found));
+        begin = std::next(found);
+    }
+    return result;
+}
+
+enum class PlaceholderColor : std::uint8_t {
+    invalid,
+    gray,
+    red,
+};
+
+[[nodiscard]] PlaceholderColor placeholder_color(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed,
+    std::uint16_t character_id,
+    const TagView** definition = nullptr) noexcept {
+    const TagView* tag = find_character_definition(
+        bytes, parsed, kTagDefineEditText, character_id);
+    if (!tag) return PlaceholderColor::invalid;
+    if (definition) *definition = tag;
+
+    constexpr std::array<std::uint8_t, 4> gray_rgba{0x50, 0x50, 0x50, 0xFF};
+    constexpr std::array<std::uint8_t, 4> red_rgba{0xFF, 0x00, 0x00, 0xFF};
+    constexpr std::array<std::uint8_t, 7> gray_html{'#', '5', '0', '5', '0', '5', '0'};
+    constexpr std::array<std::uint8_t, 7> red_html{'#', 'F', 'F', '0', '0', '0', '0'};
+    const std::span<const std::uint8_t> body = bytes.subspan(
+        tag->body_start, tag->body_end - tag->body_start);
+    const SequenceMatch gray_color = find_sequence(body, gray_rgba);
+    const SequenceMatch red_color = find_sequence(body, red_rgba);
+    const SequenceMatch gray_markup = find_sequence(body, gray_html);
+    const SequenceMatch red_markup = find_sequence(body, red_html);
+    if (gray_color.count == 1 && gray_markup.count == 1 &&
+        red_color.count == 0 && red_markup.count == 0) {
+        return PlaceholderColor::gray;
+    }
+    if (red_color.count == 1 && red_markup.count == 1 &&
+        gray_color.count == 0 && gray_markup.count == 0) {
+        return PlaceholderColor::red;
+    }
+    return PlaceholderColor::invalid;
+}
+
+[[nodiscard]] const Placement* find_unique_placement(
+    const Sprite& sprite,
+    std::string_view name) noexcept {
+    const Placement* result{};
+    for (const Placement& placement : sprite.placements) {
+        if (!placement.has_name || placement.name != name) continue;
+        if (result != nullptr) return nullptr;
+        result = &placement;
+    }
+    return result;
+}
+
+[[nodiscard]] std::size_t placement_name_count(
+    const Sprite& sprite,
+    std::string_view name) noexcept {
+    return static_cast<std::size_t>(std::count_if(
+        sprite.placements.begin(), sprite.placements.end(),
+        [name](const Placement& placement) {
+            return placement.has_name && placement.name == name;
+        }));
+}
+
+[[nodiscard]] bool matches_named_text_input_child(
+    const Placement& placement,
+    std::uint16_t depth,
+    std::int32_t x,
+    std::int32_t y) noexcept {
+    return placement.flags == 0x26U && placement.has_character &&
+        placement.has_matrix && placement.has_name &&
+        placement.depth == depth && placement.translation.x == x &&
+        placement.translation.y == y;
+}
+
+[[nodiscard]] bool locate_text_input(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed,
+    TextInputContext& context,
+    ErrorCode& code,
+    std::string& error) noexcept {
+    context = {};
+    std::size_t signature_count{};
+
+    for (const Sprite& sprite : parsed.sprites) {
+        const std::size_t value_count = placement_name_count(sprite, kValueTextName);
+        const std::size_t empty_count = placement_name_count(sprite, kEmptyTextName);
+        const std::size_t caption_count = placement_name_count(sprite, kCaptionName);
+        const std::size_t cursor_count = placement_name_count(sprite, kCursorName);
+        if (value_count == 0 || empty_count == 0 ||
+            caption_count == 0 || cursor_count == 0) {
+            continue;
+        }
+        ++signature_count;
+        if (signature_count != 1) {
+            code = ErrorCode::text_input_invalid;
+            error = "multiple sprites expose the native TextInput child signature";
+            return false;
+        }
+        if (value_count != 1 || empty_count != 1 ||
+            caption_count != 1 || cursor_count != 1) {
+            code = ErrorCode::text_input_invalid;
+            error = "TextInput named child placements are not unique";
+            return false;
+        }
+
+        const Placement* value = find_unique_placement(sprite, kValueTextName);
+        const Placement* empty = find_unique_placement(sprite, kEmptyTextName);
+        const Placement* caption = find_unique_placement(sprite, kCaptionName);
+        const Placement* cursor = find_unique_placement(sprite, kCursorName);
+        if (!value || !empty || !caption || !cursor || sprite.frame_count != 1 ||
+            !matches_named_text_input_child(*value, 3, -4360, -640) ||
+            !matches_named_text_input_child(*empty, 4, -4360, -640) ||
+            !matches_named_text_input_child(*cursor, 7, 0, 0) ||
+            caption->flags != 0x26U || !caption->has_character ||
+            !caption->has_matrix || !caption->has_name || caption->depth != 5 ||
+            caption->translation.y != 0 ||
+            (caption->translation.x != -9520 && caption->translation.x != -9120)) {
+            code = ErrorCode::text_input_invalid;
+            error = "TextInput child depth or transform contract is not recognized";
+            return false;
+        }
+        if (static_cast<std::size_t>(std::count_if(
+                sprite.tags.begin(), sprite.tags.end(),
+                [](const TagView& tag) { return tag.code == kTagShowFrame; })) != 1) {
+            code = ErrorCode::text_input_invalid;
+            error = "TextInput sprite does not contain exactly one ShowFrame tag";
+            return false;
+        }
+        const PlaceholderColor color = placeholder_color(
+            bytes, parsed, empty->character_id);
+        if (color != PlaceholderColor::gray && color != PlaceholderColor::red) {
+            code = ErrorCode::text_input_invalid;
+            error = "TextInput TextOnEmpty field is not the supported definition";
+            return false;
+        }
+
+        context.sprite = &sprite;
+        context.value = value;
+        context.empty = empty;
+        context.caption = caption;
+        context.cursor = cursor;
+        context.host = caption->translation.x == -9520
+            ? GfxHost::controller_settings
+            : GfxHost::advanced_settings;
+    }
+
+    if (signature_count == 0 || context.sprite == nullptr) {
+        code = ErrorCode::text_input_not_found;
+        error = "native TextInput sprite was not found";
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] Inspection make_text_input_inspection(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed,
+    const TextInputContext& context) {
+    Inspection result{};
+    result.gfx_version = parsed.version;
+    result.declared_length = parsed.declared_length;
+    result.host = context.host;
+    result.text_input_sprite = context.sprite->id;
+    result.character_name_text_input =
+        has_character_name_text_input(bytes, parsed);
+    return result;
+}
+
+[[nodiscard]] bool character_name_structure_matches(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed) noexcept {
+    TextInputContext context{};
+    ErrorCode code{};
+    std::string error{};
+    if (!locate_text_input(bytes, parsed, context, code, error)) return false;
+    const Sprite* text_input = context.sprite;
+    const Placement* frame = find_unique_placement(*text_input, kCharacterFrameName);
+    const Placement* empty = find_unique_placement(*text_input, kEmptyTextName);
+    if (!frame || !empty || !frame->has_character || !empty->has_character ||
+        !tag_equals(bytes, frame->tag,
+            make_character_frame_placement(frame->character_id))) {
+        return false;
+    }
+
+    std::optional<std::uint16_t> image_id{};
+    if (!find_character_frame_image(bytes, parsed, image_id) || !image_id) {
+        return false;
+    }
+    const TagView* external = find_character_definition(
+        bytes, parsed, kTagDefineExternalImage2, *image_id);
+    const TagView* wrapper = find_character_definition(
+        bytes, parsed, kTagDefineSprite, frame->character_id);
+    const TagView* grid = find_character_definition(
+        bytes, parsed, kTagDefineScalingGrid, frame->character_id);
+    if (!external || !wrapper || !grid ||
+        external->tag_start >= wrapper->tag_start ||
+        wrapper->tag_start >= text_input->tag.tag_start ||
+        grid->tag_start >= text_input->tag.tag_start ||
+        !tag_equals(bytes, *external, make_character_frame_external_image(*image_id)) ||
+        !tag_equals(bytes, *wrapper,
+            make_character_frame_wrapper(frame->character_id, *image_id)) ||
+        !tag_equals(bytes, *grid,
+            make_character_frame_scaling_grid(frame->character_id))) {
+        return false;
+    }
+    return placeholder_color(bytes, parsed, empty->character_id) == PlaceholderColor::red;
+}
+
+[[nodiscard]] bool has_character_name_text_input(
+    std::span<const std::uint8_t> bytes,
+    const ParsedGfx& parsed) noexcept {
+    return !bytes.empty() && character_name_structure_matches(bytes, parsed);
+}
 
 [[nodiscard]] std::vector<std::uint8_t> make_controller_placement(
     std::uint16_t character_id,
@@ -773,6 +1358,159 @@ private:
 
     error = "ControllSetting uses an unsupported short DefineSprite header";
     return false;
+}
+
+[[nodiscard]] bool patch_placeholder_red(
+    std::vector<std::uint8_t>& output,
+    const ParsedGfx& parsed,
+    std::string& error) {
+    TextInputContext context{};
+    ErrorCode code{};
+    if (!locate_text_input(output, parsed, context, code, error)) {
+        return false;
+    }
+    const Placement* empty = context.empty;
+    const TagView* definition{};
+    const PlaceholderColor color = placeholder_color(
+        output, parsed, empty->character_id, &definition);
+    if (color == PlaceholderColor::red) return true;
+    if (color != PlaceholderColor::gray || !definition) {
+        error = "Controller TextOnEmpty color definition is not recognized";
+        return false;
+    }
+
+    constexpr std::array<std::uint8_t, 4> gray_rgba{0x50, 0x50, 0x50, 0xFF};
+    constexpr std::array<std::uint8_t, 4> red_rgba{0xFF, 0x00, 0x00, 0xFF};
+    constexpr std::array<std::uint8_t, 7> gray_html{'#', '5', '0', '5', '0', '5', '0'};
+    constexpr std::array<std::uint8_t, 7> red_html{'#', 'F', 'F', '0', '0', '0', '0'};
+    const std::span<const std::uint8_t> body{
+        output.data() + definition->body_start,
+        definition->body_end - definition->body_start};
+    const SequenceMatch rgba = find_sequence(body, gray_rgba);
+    const SequenceMatch html = find_sequence(body, gray_html);
+    if (rgba.count != 1 || html.count != 1) {
+        error = "TextInput TextOnEmpty gray color is not unique";
+        return false;
+    }
+    std::copy(red_rgba.begin(), red_rgba.end(),
+        output.begin() + static_cast<std::ptrdiff_t>(definition->body_start + rgba.offset));
+    std::copy(red_html.begin(), red_html.end(),
+        output.begin() + static_cast<std::ptrdiff_t>(definition->body_start + html.offset));
+    return true;
+}
+
+[[nodiscard]] bool ensure_character_name_text_input(
+    std::vector<std::uint8_t>& output,
+    std::string& error,
+    bool& added) {
+    added = false;
+    ParsedGfx parsed{};
+    ErrorCode code{};
+    if (!parse_gfx(output, parsed, code, error)) return false;
+    if (character_name_structure_matches(output, parsed)) return true;
+
+    TextInputContext context{};
+    if (!locate_text_input(output, parsed, context, code, error)) {
+        return false;
+    }
+    const Sprite* text_input = context.sprite;
+    if (find_unique_placement(*text_input, kCharacterFrameName) != nullptr) {
+        error = "existing CharacterFrame does not match the supported presentation";
+        return false;
+    }
+    if (std::any_of(
+            text_input->placements.begin(), text_input->placements.end(),
+            [](const Placement& placement) { return placement.depth == 2; })) {
+        error = "TextInput depth 2 is already occupied";
+        return false;
+    }
+    const Placement* empty = find_unique_placement(*text_input, kEmptyTextName);
+    if (!empty || !empty->has_character ||
+        placeholder_color(output, parsed, empty->character_id) != PlaceholderColor::gray) {
+        error = "TextInput TextOnEmpty field is not the supported native definition";
+        return false;
+    }
+
+    std::optional<std::uint16_t> image_id{};
+    if (!find_character_frame_image(output, parsed, image_id, &error)) return false;
+    const std::optional<std::uint16_t> first_free = next_character_id(output, parsed);
+    if (!first_free) {
+        error = "no free GFX character ID remains for CharacterFrame";
+        return false;
+    }
+    std::uint16_t wrapper_id{};
+    std::vector<std::uint8_t> definitions{};
+    if (image_id) {
+        wrapper_id = *first_free;
+    } else {
+        if (*first_free == std::numeric_limits<std::uint16_t>::max()) {
+            error = "no two free GFX character IDs remain for CharacterFrame";
+            return false;
+        }
+        image_id = *first_free;
+        wrapper_id = static_cast<std::uint16_t>(*first_free + 1U);
+        const std::vector<std::uint8_t> external =
+            make_character_frame_external_image(*image_id);
+        definitions.insert(definitions.end(), external.begin(), external.end());
+    }
+    const std::vector<std::uint8_t> wrapper =
+        make_character_frame_wrapper(wrapper_id, *image_id);
+    const std::vector<std::uint8_t> grid =
+        make_character_frame_scaling_grid(wrapper_id);
+    definitions.insert(definitions.end(), wrapper.begin(), wrapper.end());
+    definitions.insert(definitions.end(), grid.begin(), grid.end());
+
+    // SWF/GFX character definitions must precede their first control-tag use.
+    // FFDec accepts a forward reference, but the game's Scaleform loader can
+    // silently discard it. Insert this dependency closure immediately before
+    // the TextInput sprite, whose depth-2 placement references the wrapper.
+    const std::size_t definitions_insertion = text_input->tag.tag_start;
+    if (definitions_insertion < parsed.top_level_start ||
+        definitions_insertion > parsed.declared_length ||
+        definitions.size() > std::numeric_limits<std::uint32_t>::max() -
+            parsed.declared_length) {
+        error = "could not insert CharacterFrame definitions before TextInput";
+        return false;
+    }
+    output.insert(
+        output.begin() + static_cast<std::ptrdiff_t>(definitions_insertion),
+        definitions.begin(), definitions.end());
+    write_u32(output, 4, parsed.declared_length +
+        static_cast<std::uint32_t>(definitions.size()));
+
+    if (!parse_gfx(output, parsed, code, error)) return false;
+    if (!locate_text_input(output, parsed, context, code, error)) {
+        error = "TextInput disappeared after CharacterFrame definitions: " + error;
+        return false;
+    }
+    text_input = context.sprite;
+    const std::optional<std::size_t> insertion = show_frame_offset(*text_input);
+    if (!insertion) {
+        error = "TextInput sprite has no ShowFrame tag";
+        return false;
+    }
+    const std::vector<std::uint8_t> placement =
+        make_character_frame_placement(wrapper_id);
+    if (!patch_tag_body_length(output, text_input->tag, placement.size(), error)) {
+        return false;
+    }
+    output.insert(
+        output.begin() + static_cast<std::ptrdiff_t>(*insertion),
+        placement.begin(), placement.end());
+    write_u32(output, 4, parsed.declared_length +
+        static_cast<std::uint32_t>(placement.size()));
+
+    if (!parse_gfx(output, parsed, code, error) ||
+        !patch_placeholder_red(output, parsed, error) ||
+        !parse_gfx(output, parsed, code, error)) {
+        return false;
+    }
+    if (!character_name_structure_matches(output, parsed)) {
+        error = "completed CharacterFrame presentation did not verify";
+        return false;
+    }
+    added = true;
+    return true;
 }
 
 [[nodiscard]] PatchResult fail(ErrorCode code, std::string message) {
@@ -916,6 +1654,34 @@ private:
 
 } // namespace
 
+Inspection inspect_text_input_host(
+    std::span<const std::uint8_t> input) noexcept {
+    try {
+        ParsedGfx parsed{};
+        ErrorCode code{};
+        std::string error{};
+        if (!parse_gfx(input, parsed, code, error)) {
+            Inspection inspection{};
+            inspection.error = code;
+            inspection.message = std::move(error);
+            return inspection;
+        }
+        TextInputContext context{};
+        if (!locate_text_input(input, parsed, context, code, error)) {
+            Inspection inspection{};
+            inspection.error = code;
+            inspection.message = std::move(error);
+            return inspection;
+        }
+        return make_text_input_inspection(input, parsed, context);
+    } catch (...) {
+        Inspection inspection{};
+        inspection.error = ErrorCode::invalid_gfx;
+        inspection.message = "unexpected exception while parsing the GFX";
+        return inspection;
+    }
+}
+
 Inspection inspect_controller_panel(std::span<const std::uint8_t> input) noexcept {
     try {
         ParsedGfx parsed{};
@@ -934,12 +1700,66 @@ Inspection inspect_controller_panel(std::span<const std::uint8_t> input) noexcep
             inspection.message = std::move(error);
             return inspection;
         }
-        return make_inspection(parsed, context);
+        return make_inspection(input, parsed, context);
     } catch (...) {
         Inspection inspection{};
         inspection.error = ErrorCode::invalid_gfx;
         inspection.message = "unexpected exception while parsing the GFX";
         return inspection;
+    }
+}
+
+PatchResult patch_text_input_presentation(
+    std::span<const std::uint8_t> input,
+    TextInputPresentation presentation) noexcept {
+    try {
+        if (presentation != TextInputPresentation::native &&
+            presentation != TextInputPresentation::character_name) {
+            return fail(
+                ErrorCode::invalid_argument,
+                "unknown TextInput presentation");
+        }
+
+        PatchResult result{};
+        result.report.before = inspect_text_input_host(input);
+        if (!result.report.before.success()) {
+            return fail(
+                result.report.before.error,
+                result.report.before.message);
+        }
+        result.output.assign(input.begin(), input.end());
+
+        bool presentation_added = false;
+        std::string error{};
+        if (presentation == TextInputPresentation::character_name &&
+            !ensure_character_name_text_input(
+                result.output, error, presentation_added)) {
+            return fail(ErrorCode::unsupported_gfx, std::move(error));
+        }
+
+        result.report.after = inspect_text_input_host(result.output);
+        if (!result.report.after.success() ||
+            result.report.after.host != result.report.before.host ||
+            result.report.after.text_input_sprite !=
+                result.report.before.text_input_sprite ||
+            (presentation == TextInputPresentation::character_name &&
+                !result.report.after.character_name_text_input)) {
+            return fail(
+                ErrorCode::output_verification_failed,
+                result.report.after.message.empty()
+                    ? "patched TextInput presentation did not verify"
+                    : result.report.after.message);
+        }
+        result.report.bytes_added = result.output.size() - input.size();
+        result.report.already_satisfied = !presentation_added;
+        result.message = presentation_added
+            ? "Character-name TextInput presentation added successfully"
+            : "TextInput presentation already satisfies the requested patch";
+        return result;
+    } catch (...) {
+        return fail(
+            ErrorCode::invalid_gfx,
+            "unexpected exception while patching the GFX");
     }
 }
 
@@ -966,7 +1786,7 @@ PatchResult patch_controller_panel(
         }
 
         PatchResult result{};
-        result.report.before = make_inspection(parsed, context);
+        result.report.before = make_inspection(input, parsed, context);
         if (context.row_count > options.controller_rows) {
             return fail(
                 ErrorCode::invalid_argument,
@@ -979,10 +1799,29 @@ PatchResult patch_controller_panel(
                     result.output, error, label_added)) {
                 return fail(ErrorCode::unsupported_gfx, std::move(error));
             }
+            bool presentation_added = false;
+            if (options.text_input_presentation ==
+                    TextInputPresentation::character_name &&
+                !ensure_character_name_text_input(
+                    result.output, error, presentation_added)) {
+                return fail(ErrorCode::unsupported_gfx, std::move(error));
+            }
             result.report.after = inspect_controller_panel(result.output);
+            if (!result.report.after.success() ||
+                (options.text_input_presentation ==
+                        TextInputPresentation::character_name &&
+                    !result.report.after.character_name_text_input)) {
+                return fail(
+                    ErrorCode::output_verification_failed,
+                    result.report.after.message.empty()
+                        ? "patched TextInput presentation did not verify"
+                        : result.report.after.message);
+            }
             result.report.bytes_added = result.output.size() - input.size();
-            result.report.already_satisfied = !label_added;
-            result.message = label_added
+            result.report.already_satisfied = !label_added && !presentation_added;
+            result.message = presentation_added
+                ? "Character-name TextInput presentation added successfully"
+                : label_added
                 ? "Controller button label field added successfully"
                 : "Controller panel already satisfies the requested patch";
             return result;
@@ -1067,10 +1906,20 @@ PatchResult patch_controller_panel(
                 result.output, error, label_added)) {
             return fail(ErrorCode::unsupported_gfx, std::move(error));
         }
+        bool presentation_added = false;
+        if (options.text_input_presentation ==
+                TextInputPresentation::character_name &&
+            !ensure_character_name_text_input(
+                result.output, error, presentation_added)) {
+            return fail(ErrorCode::unsupported_gfx, std::move(error));
+        }
         result.report.bytes_added = result.output.size() - input.size();
         result.report.after = inspect_controller_panel(result.output);
         if (!result.report.after.success() ||
-            result.report.after.controller_rows != options.controller_rows) {
+            result.report.after.controller_rows != options.controller_rows ||
+            (options.text_input_presentation ==
+                    TextInputPresentation::character_name &&
+                !result.report.after.character_name_text_input)) {
             return fail(
                 ErrorCode::output_verification_failed,
                 result.report.after.message.empty()
@@ -1100,8 +1949,24 @@ const char* error_name(ErrorCode error) noexcept {
         return "controller_items_invalid";
     case ErrorCode::donor_item_not_found:
         return "donor_item_not_found";
+    case ErrorCode::text_input_not_found:
+        return "text_input_not_found";
+    case ErrorCode::text_input_invalid:
+        return "text_input_invalid";
     case ErrorCode::output_verification_failed:
         return "output_verification_failed";
+    }
+    return "unknown";
+}
+
+const char* host_name(GfxHost host) noexcept {
+    switch (host) {
+    case GfxHost::unknown:
+        return "unknown";
+    case GfxHost::controller_settings:
+        return "Controller Settings (02_040_optionsetting.gfx)";
+    case GfxHost::advanced_settings:
+        return "Advanced Settings (02_042_pc_graphicsetting.gfx)";
     }
     return "unknown";
 }

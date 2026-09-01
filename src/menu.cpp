@@ -129,6 +129,22 @@ Page& Page::add_popup_choice(
     return *this;
 }
 
+Page& Page::add_text_input(
+    std::wstring label,
+    std::wstring help,
+    detail::TextInputState& state,
+    TextAction on_changed) {
+    ensure_mutable();
+    rows_.push_back(RowDefinition{
+        .kind = RowKind::text_input,
+        .label = std::move(label),
+        .help = std::move(help),
+        .text_input_state = &state,
+        .text_action = on_changed,
+    });
+    return *this;
+}
+
 Page& Page::add_button(
     std::wstring label,
     std::wstring help,

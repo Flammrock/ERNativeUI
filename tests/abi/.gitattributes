@@ -1,0 +1,3 @@
+# Frozen Git-blob identities are recorded over LF bytes.
+releases/*/include/ernativeui/erui.h text eol=lf
+releases/*/include/ernativeui/ERNativeUI.hpp text eol=lf

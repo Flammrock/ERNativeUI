@@ -209,6 +209,8 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             }
             compiled_row.action = row.action;
             compiled_row.value_action = row.value_action;
+            compiled_row.text_input_state = row.text_input_state;
+            compiled_row.text_action = row.text_action;
             compiled_row.enabled = row.enabled;
             if (row.kind == RowKind::popup_choice && row.byte_value) {
                 compiled_row.popup_choice_state.set_public_selection(
@@ -256,6 +258,8 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             else if (row.kind == RowKind::submenu) ++compiled->modeled_submenu_count;
             else if (row.kind == RowKind::popup_choice) {
                 ++compiled->modeled_popup_choice_count;
+            } else if (row.kind == RowKind::text_input) {
+                ++compiled->modeled_text_input_count;
             }
         }
     }

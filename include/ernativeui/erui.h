@@ -35,7 +35,8 @@ extern "C" {
 #define ERUI_VERSION_ENCODE(major, minor) \
     ((((uint32_t)(major)) << 16u) | ((uint32_t)(minor) & 0xFFFFu))
 #define ERUI_API_VERSION_1_0 ERUI_VERSION_ENCODE(1u, 0u)
-#define ERUI_API_VERSION_CURRENT ERUI_API_VERSION_1_0
+#define ERUI_API_VERSION_1_1 ERUI_VERSION_ENCODE(1u, 1u)
+#define ERUI_API_VERSION_CURRENT ERUI_API_VERSION_1_1
 
 typedef uint32_t ERUI_Result;
 enum {
@@ -52,7 +53,8 @@ enum {
     ERUI_CALLBACK_REJECTED = 10u,
     ERUI_INTERNAL_ERROR = 11u,
     ERUI_QUEUE_FULL = 12u,
-    ERUI_NOT_SUPPORTED = 13u
+    ERUI_NOT_SUPPORTED = 13u,
+    ERUI_BUFFER_TOO_SMALL = 14u
 };
 
 typedef uint64_t ERUI_ProviderHandle;
@@ -75,8 +77,18 @@ enum {
     ERUI_CAP_ALERT = UINT64_C(1) << 7,
     ERUI_CAP_INLINE_CHOICE = UINT64_C(1) << 8,
     ERUI_CAP_POPUP_CHOICE = UINT64_C(1) << 9,
-    ERUI_CAP_GAME_LANGUAGE = UINT64_C(1) << 10
+    ERUI_CAP_GAME_LANGUAGE = UINT64_C(1) << 10,
+    ERUI_CAP_TEXT_INPUT = UINT64_C(1) << 11
 };
+
+/*
+ * TextInput lengths are counts of UTF-16 code units, matching
+ * ERUI_Utf16View.length. They are not byte counts or Unicode grapheme counts.
+ * The current 1.1 contract accepts maximum_length values in 1..35; zero
+ * selects ERUI_TEXT_INPUT_DEFAULT_MAX_LENGTH.
+ */
+#define ERUI_TEXT_INPUT_DEFAULT_MAX_LENGTH 16u
+#define ERUI_TEXT_INPUT_MAX_LENGTH 35u
 
 /* UTF-8 is used for stable machine identifiers. */
 typedef struct ERUI_StringView {
@@ -162,6 +174,25 @@ typedef void (ERUI_CALL* ERUI_ButtonCallback)(void* user_data);
 typedef void (ERUI_CALL* ERUI_ValueChangedCallback)(
     void* user_data,
     uint8_t value);
+
+/*
+ * Borrowed callback data; the context and value expire when the call ends.
+ * The host calls changed_callback once after the player confirms a value that
+ * differs from the canonical value. Cancel, identical confirmation, and
+ * set_text_input_value do not invoke it.
+ */
+typedef struct ERUI_TextInputChangeContext {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_ProviderHandle provider;
+    ERUI_RowHandle row;
+    ERUI_Utf16View value;
+    uint32_t reserved[2];
+} ERUI_TextInputChangeContext;
+
+typedef void (ERUI_CALL* ERUI_TextInputChangedCallback)(
+    void* user_data,
+    const ERUI_TextInputChangeContext* context);
 
 /* Alert button layouts are closed choices, not combinable bit flags. */
 typedef uint32_t ERUI_AlertButtons;
@@ -260,6 +291,27 @@ typedef struct ERUI_ChoiceDesc {
     uint8_t initial_index;
     uint8_t reserved8[3];
 } ERUI_ChoiceDesc;
+
+/*
+ * The host copies all four views before add_text_input returns. The editable
+ * initial_value must contain no more than maximum_length UTF-16 code units.
+ * maximum_length is inclusive. Zero selects
+ * ERUI_TEXT_INPUT_DEFAULT_MAX_LENGTH; explicit values must be in
+ * 1..ERUI_TEXT_INPUT_MAX_LENGTH.
+ * changed_callback is optional; user_data must be null when it is null.
+ */
+typedef struct ERUI_TextInputDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_Utf16View label;
+    ERUI_Utf16View help;
+    ERUI_Utf16View initial_value;
+    ERUI_Utf16View placeholder;
+    ERUI_TextInputChangedCallback changed_callback;
+    void* user_data;
+    uint32_t maximum_length;
+    uint32_t reserved;
+} ERUI_TextInputDesc;
 
 typedef struct ERUI_SubmenuDesc {
     uint32_t size;
@@ -374,12 +426,50 @@ typedef struct ERUI_Api {
         const ERUI_AlertDesc* description);
     ERUI_Result (ERUI_CALL* get_game_language)(
         ERUI_GameLanguageInfo* out_language);
+
+    /* API 1.1 append-only TextInput block; the API 1.0 prefix ends above. */
+    ERUI_Result (ERUI_CALL* add_text_input)(
+        ERUI_ProviderHandle provider,
+        ERUI_PageHandle page,
+        const ERUI_TextInputDesc* description,
+        ERUI_RowHandle* out_row);
+    /*
+     * Copies value before returning and does not invoke changed_callback.
+     * If an editor is already active, Cancel preserves this programmatic
+     * value while a later confirmed player value replaces it.
+     */
+    ERUI_Result (ERUI_CALL* set_text_input_value)(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        const ERUI_Utf16View* value);
+    /*
+     * output_capacity and out_length count UTF-16 code units. Query with
+     * output == NULL and output_capacity == 0. Output is not NUL-terminated.
+     * An undersized buffer returns ERUI_BUFFER_TOO_SMALL, reports the required
+     * length through out_length, and leaves the output buffer unchanged.
+     */
+    ERUI_Result (ERUI_CALL* get_text_input_value)(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        uint16_t* output,
+        uint32_t output_capacity,
+        uint32_t* out_length);
 } ERUI_Api;
 
 /* Complete function-table prefix required by API 1.0 clients. */
 #define ERUI_API_V1_0_SIZE ((uint32_t)( \
     offsetof(ERUI_Api, get_game_language) + \
     sizeof(((ERUI_Api*)0)->get_game_language)))
+
+/*
+ * Complete table prefix currently required by unreleased API 1.1. This macro
+ * will grow as additional 1.1 features are appended before 1.1 is released;
+ * the frozen ERUI_API_V1_0_SIZE and its first 128 bytes never change.
+ */
+#define ERUI_API_V1_1_SIZE ((uint32_t)( \
+    offsetof(ERUI_Api, get_text_input_value) + \
+    sizeof(((ERUI_Api*)0)->get_text_input_value)))
+#define ERUI_API_CURRENT_SIZE ERUI_API_V1_1_SIZE
 
 typedef ERUI_Result (ERUI_CALL* ERUI_GetApiFn)(
     uint32_t requested_version,

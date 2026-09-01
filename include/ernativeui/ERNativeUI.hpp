@@ -35,6 +35,7 @@
 #include <string_view>
 #include <vector>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 namespace erui {
@@ -42,6 +43,23 @@ namespace erui {
 using RowHandle = ERUI_RowHandle;
 using ButtonCallback = void (ERUI_CALL*)(void*) noexcept;
 using ValueChangedCallback = void (ERUI_CALL*)(void*, std::uint8_t) noexcept;
+using TextInputChangedCallback = void (ERUI_CALL*)(
+    void*, const ERUI_TextInputChangeContext*) noexcept;
+
+enum class Capability : ERUI_Capabilities {
+    toggle = ERUI_CAP_TOGGLE,
+    slider = ERUI_CAP_SLIDER,
+    button = ERUI_CAP_BUTTON,
+    submenu = ERUI_CAP_SUBMENU,
+    pagination = ERUI_CAP_PAGINATION,
+    host_owned_values = ERUI_CAP_HOST_OWNED_VALUES,
+    page_presentation = ERUI_CAP_PAGE_PRESENTATION,
+    alert = ERUI_CAP_ALERT,
+    inline_choice = ERUI_CAP_INLINE_CHOICE,
+    popup_choice = ERUI_CAP_POPUP_CHOICE,
+    game_language = ERUI_CAP_GAME_LANGUAGE,
+    text_input = ERUI_CAP_TEXT_INPUT,
+};
 
 enum class GameLanguage : std::uint32_t {
     unknown = ERUI_GAME_LANGUAGE_UNKNOWN,
@@ -157,6 +175,21 @@ struct ChoiceOptions {
     std::uint8_t initial_index{0};
 };
 
+struct TextInputOptions {
+    std::wstring_view initial_value{};
+    std::wstring_view placeholder{};
+    // Counts UTF-16 code units, exactly like std::wstring_view::size() on
+    // Windows. This is not a byte or user-perceived-character count.
+    std::uint32_t maximum_length{ERUI_TEXT_INPUT_DEFAULT_MAX_LENGTH};
+};
+
+struct TextInputChange {
+    ERUI_ProviderHandle provider{};
+    RowHandle row{};
+    // Borrowed from the callback context and valid only for that invocation.
+    std::wstring_view value{};
+};
+
 struct AlertOptions {
     AlertButtons buttons{AlertButtons::ok};
     AlertPlacement placement{AlertPlacement::bottom};
@@ -212,6 +245,25 @@ inline void ERUI_CALL alert_callback_thunk(
         static_cast<AlertResponse>(response));
 }
 
+inline bool make_text_input_change(
+    const ERUI_TextInputChangeContext* context,
+    TextInputChange& output) noexcept {
+    if (!context || context->size < sizeof(ERUI_TextInputChangeContext) ||
+        context->value.reserved != 0 ||
+        (context->value.length != 0 && !context->value.data)) {
+        return false;
+    }
+    static_assert(sizeof(wchar_t) == sizeof(std::uint16_t),
+        "ERNativeUI requires Windows UTF-16 wchar_t");
+    const wchar_t* data = context->value.data
+        ? reinterpret_cast<const wchar_t*>(context->value.data)
+        : L"";
+    output.provider = context->provider;
+    output.row = context->row;
+    output.value = std::wstring_view(data, context->value.length);
+    return true;
+}
+
 inline bool view_size_fits(std::size_t size) noexcept {
     return size <= (std::numeric_limits<std::uint32_t>::max)();
 }
@@ -248,6 +300,7 @@ inline const wchar_t* result_name(ERUI_Result result) noexcept {
     case ERUI_INTERNAL_ERROR: return L"internal host error";
     case ERUI_QUEUE_FULL: return L"alert queue is full";
     case ERUI_NOT_SUPPORTED: return L"feature is unavailable for this game build";
+    case ERUI_BUFFER_TOO_SMALL: return L"output buffer is too small";
     default: return L"unknown host result";
     }
 }
@@ -278,6 +331,45 @@ inline LanguageInfo read_game_language(const ERUI_Api& api) {
     return language;
 }
 
+inline bool common_api_complete(const ERUI_Api& api) noexcept {
+    return api.register_provider && api.add_button && api.add_toggle &&
+        api.add_slider && api.add_inline_choice && api.add_popup_choice &&
+        api.add_submenu && api.set_page_presentation &&
+        api.commit_provider && api.abort_provider && api.set_row_value &&
+        api.get_row_value && api.enqueue_alert && api.get_game_language &&
+        (api.capabilities & ERUI_CAP_PAGE_PRESENTATION) != 0 &&
+        (api.capabilities & ERUI_CAP_ALERT) != 0 &&
+        (api.capabilities & ERUI_CAP_INLINE_CHOICE) != 0 &&
+        (api.capabilities & ERUI_CAP_POPUP_CHOICE) != 0 &&
+        (api.capabilities & ERUI_CAP_GAME_LANGUAGE) != 0;
+}
+
+inline bool api_complete_for_version(
+    const ERUI_Api& api,
+    std::uint32_t version) noexcept {
+    if (!common_api_complete(api) || api.api_version != version) return false;
+    if (version == ERUI_API_VERSION_1_0) {
+        return api.size == ERUI_API_V1_0_SIZE &&
+            (api.capabilities & ERUI_CAP_TEXT_INPUT) == 0;
+    }
+    if (version == ERUI_API_VERSION_1_1) {
+        return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
+            api.set_text_input_value && api.get_text_input_value &&
+            (api.capabilities & ERUI_CAP_TEXT_INPUT) != 0;
+    }
+    return false;
+}
+
+inline ERUI_Result request_api(
+    ERUI_GetApiFn get_api,
+    std::uint32_t version,
+    std::uint32_t table_size,
+    ERUI_Api& api) noexcept {
+    api = {};
+    api.size = table_size;
+    return get_api(version, &api);
+}
+
 inline ConnectionResult connect(std::chrono::milliseconds timeout) noexcept {
     ConnectionResult result{};
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -296,25 +388,25 @@ inline ConnectionResult connect(std::chrono::milliseconds timeout) noexcept {
             static_assert(sizeof(get_api) == sizeof(symbol),
                 "Windows function pointers must use one representation");
             std::memcpy(&get_api, &symbol, sizeof(get_api));
-            result.api = {};
-            result.api.size = sizeof(result.api);
-            const ERUI_Result status = get_api(ERUI_API_VERSION_CURRENT, &result.api);
+            std::uint32_t negotiated_version = ERUI_API_VERSION_1_1;
+            ERUI_Result status = request_api(
+                get_api,
+                negotiated_version,
+                ERUI_API_V1_1_SIZE,
+                result.api);
+            // Compatibility is deliberate: only a host's explicit rejection
+            // of 1.1 permits a freshly zeroed, exact-size 1.0 request.
+            if (status == ERUI_UNSUPPORTED_VERSION) {
+                negotiated_version = ERUI_API_VERSION_1_0;
+                status = request_api(
+                    get_api,
+                    negotiated_version,
+                    ERUI_API_V1_0_SIZE,
+                    result.api);
+            }
             if (status == ERUI_OK) {
-                const bool complete = result.api.register_provider &&
-                    result.api.add_button && result.api.add_toggle &&
-                    result.api.add_slider && result.api.add_inline_choice &&
-                    result.api.add_popup_choice && result.api.add_submenu &&
-                    result.api.set_page_presentation &&
-                    result.api.commit_provider && result.api.abort_provider &&
-                    result.api.set_row_value && result.api.get_row_value &&
-                    result.api.enqueue_alert && result.api.get_game_language &&
-                    (result.api.capabilities & ERUI_CAP_PAGE_PRESENTATION) != 0 &&
-                    (result.api.capabilities & ERUI_CAP_ALERT) != 0 &&
-                    (result.api.capabilities & ERUI_CAP_INLINE_CHOICE) != 0 &&
-                    (result.api.capabilities & ERUI_CAP_POPUP_CHOICE) != 0 &&
-                    (result.api.capabilities & ERUI_CAP_GAME_LANGUAGE) != 0;
-                if (!complete ||
-                    result.api.api_version != ERUI_API_VERSION_CURRENT) {
+                if (!api_complete_for_version(
+                        result.api, negotiated_version)) {
                     result.error = Error(ErrorCode::incompatible_api,
                         ERUI_UNSUPPORTED_VERSION,
                         L"ERNativeUI returned an incomplete or incompatible API table.");
@@ -555,6 +647,84 @@ public:
             L"add_popup_choice");
     }
 
+    RowHandle add_text_input(
+        std::wstring_view label,
+        std::wstring_view help,
+        const TextInputOptions& options,
+        TextInputChangedCallback callback = nullptr,
+        void* user_data = nullptr) noexcept {
+        if (!draft_ || !draft_->open() || draft_->failed_) {
+            return ERUI_INVALID_ROW;
+        }
+        if (!draft_->api_.add_text_input ||
+            (draft_->api_.capabilities & ERUI_CAP_TEXT_INPUT) == 0) {
+            draft_->record(ERUI_NOT_SUPPORTED, L"add_text_input");
+            return ERUI_INVALID_ROW;
+        }
+        if (!detail::view_size_fits(label.size()) ||
+            !detail::view_size_fits(help.size()) ||
+            !detail::view_size_fits(options.initial_value.size()) ||
+            !detail::view_size_fits(options.placeholder.size()) ||
+            options.maximum_length > ERUI_TEXT_INPUT_MAX_LENGTH ||
+            options.initial_value.size() >
+                (options.maximum_length == 0
+                    ? ERUI_TEXT_INPUT_DEFAULT_MAX_LENGTH
+                    : options.maximum_length) ||
+            (!callback && user_data)) {
+            draft_->record(ERUI_INVALID_ARGUMENT, L"add_text_input");
+            return ERUI_INVALID_ROW;
+        }
+
+        ERUI_TextInputDesc description{};
+        description.size = sizeof(description);
+        description.label = detail::utf16_view(label);
+        description.help = detail::utf16_view(help);
+        description.initial_value = detail::utf16_view(
+            options.initial_value);
+        description.placeholder = detail::utf16_view(options.placeholder);
+        description.changed_callback =
+            reinterpret_cast<ERUI_TextInputChangedCallback>(callback);
+        description.user_data = user_data;
+        description.maximum_length = options.maximum_length;
+        ERUI_RowHandle row{};
+        draft_->record(draft_->api_.add_text_input(
+            draft_->provider_, page_, &description, &row),
+            L"add_text_input");
+        return row;
+    }
+
+    template <auto Function>
+    RowHandle add_text_input(
+        std::wstring_view label,
+        std::wstring_view help,
+        const TextInputOptions& options) noexcept {
+        using Expected = void (*)(const TextInputChange&) noexcept;
+        static_assert(std::is_same<decltype(Function), Expected>::value,
+            "TextInput callback must be void(const TextInputChange&) noexcept");
+        return add_text_input(
+            label,
+            help,
+            options,
+            &text_input_thunk<Function>);
+    }
+
+    template <auto Function, typename State>
+    RowHandle add_text_input(
+        std::wstring_view label,
+        std::wstring_view help,
+        const TextInputOptions& options,
+        State& state) noexcept {
+        using Expected = void (*)(State&, const TextInputChange&) noexcept;
+        static_assert(std::is_same<decltype(Function), Expected>::value,
+            "Stateful TextInput callback must be void(State&, const TextInputChange&) noexcept");
+        return add_text_input(
+            label,
+            help,
+            options,
+            &stateful_text_input_thunk<Function, State>,
+            &state);
+    }
+
     Page add_submenu(
         std::wstring_view label,
         std::wstring_view help,
@@ -634,6 +804,27 @@ private:
     template <void (*Function)() noexcept>
     static void ERUI_CALL button_thunk(void*) noexcept { Function(); }
 
+    template <auto Function>
+    static void ERUI_CALL text_input_thunk(
+        void*,
+        const ERUI_TextInputChangeContext* context) noexcept {
+        TextInputChange change{};
+        if (detail::make_text_input_change(context, change)) {
+            Function(change);
+        }
+    }
+
+    template <auto Function, typename State>
+    static void ERUI_CALL stateful_text_input_thunk(
+        void* user_data,
+        const ERUI_TextInputChangeContext* context) noexcept {
+        auto* state = static_cast<State*>(user_data);
+        TextInputChange change{};
+        if (state && detail::make_text_input_change(context, change)) {
+            Function(*state, change);
+        }
+    }
+
     using AddChoiceFunction = ERUI_Result (ERUI_CALL*)(
         ERUI_ProviderHandle,
         ERUI_PageHandle,
@@ -708,6 +899,13 @@ private:
 class Menu {
 public:
     Page root() noexcept { return Page(draft_, draft_ ? draft_->root_ : 0); }
+    [[nodiscard]] bool supports(Capability capability) const noexcept {
+        const auto bit = static_cast<ERUI_Capabilities>(capability);
+        return draft_ && (draft_->api_.capabilities & bit) == bit;
+    }
+    [[nodiscard]] std::uint32_t api_version() const noexcept {
+        return draft_ ? draft_->api_.api_version : 0;
+    }
     [[nodiscard]] const LanguageInfo& game_language() const noexcept {
         static const LanguageInfo unavailable{};
         return draft_ ? draft_->language_ : unavailable;
@@ -732,6 +930,76 @@ public:
     ERUI_Result get_value(RowHandle row, std::uint8_t& value) const noexcept {
         return valid() ? api_.get_row_value(provider_, row, &value)
             : static_cast<ERUI_Result>(ERUI_INVALID_HANDLE);
+    }
+    ERUI_Result set_text(
+        RowHandle row,
+        std::wstring_view value) const noexcept {
+        if (!valid()) return ERUI_INVALID_HANDLE;
+        if (!supports(Capability::text_input) ||
+            !api_.set_text_input_value) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if (!detail::view_size_fits(value.size()) ||
+            value.size() > ERUI_TEXT_INPUT_MAX_LENGTH) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+        const ERUI_Utf16View native_value = detail::utf16_view(value);
+        return api_.set_text_input_value(provider_, row, &native_value);
+    }
+    ERUI_Result get_text(
+        RowHandle row,
+        std::wstring& output) const noexcept {
+        if (!valid()) return ERUI_INVALID_HANDLE;
+        if (!supports(Capability::text_input) ||
+            !api_.get_text_input_value) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        try {
+            for (unsigned attempt = 0; attempt < 3; ++attempt) {
+                std::uint32_t required{};
+                ERUI_Result result = api_.get_text_input_value(
+                    provider_, row, nullptr, 0, &required);
+                if (result != ERUI_OK) return result;
+                if (required == 0) {
+                    std::wstring empty{};
+                    output.swap(empty);
+                    return ERUI_OK;
+                }
+
+                std::vector<std::uint16_t> storage(required);
+                std::uint32_t actual{};
+                result = api_.get_text_input_value(
+                    provider_,
+                    row,
+                    storage.data(),
+                    static_cast<std::uint32_t>(storage.size()),
+                    &actual);
+                if (result == ERUI_BUFFER_TOO_SMALL) continue;
+                if (result != ERUI_OK) return result;
+                if (actual > storage.size()) return ERUI_INTERNAL_ERROR;
+
+                std::wstring value(actual, L'\0');
+                if (actual != 0) {
+                    std::memcpy(
+                        value.data(),
+                        storage.data(),
+                        static_cast<std::size_t>(actual) *
+                            sizeof(std::uint16_t));
+                }
+                output.swap(value);
+                return ERUI_OK;
+            }
+            return ERUI_BUFFER_TOO_SMALL;
+        } catch (...) {
+            return ERUI_OUT_OF_MEMORY;
+        }
+    }
+    [[nodiscard]] bool supports(Capability capability) const noexcept {
+        const auto bit = static_cast<ERUI_Capabilities>(capability);
+        return valid() && (api_.capabilities & bit) == bit;
+    }
+    [[nodiscard]] std::uint32_t api_version() const noexcept {
+        return valid() ? api_.api_version : 0;
     }
     ERUI_Result alert(
         std::wstring_view message,

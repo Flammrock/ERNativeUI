@@ -42,6 +42,7 @@ public:
     [[nodiscard]] std::size_t committed_root_row_count() const noexcept;
 
     ERUI_Result register_provider(
+        std::uint32_t negotiated_api_version,
         const ERUI_ProviderDesc* description,
         ERUI_ProviderHandle* out_provider,
         ERUI_PageHandle* out_root_page) noexcept;
@@ -70,6 +71,11 @@ public:
         ERUI_PageHandle page,
         const ERUI_ChoiceDesc* description,
         ERUI_RowHandle* out_row) noexcept;
+    ERUI_Result add_text_input(
+        ERUI_ProviderHandle provider,
+        ERUI_PageHandle page,
+        const ERUI_TextInputDesc* description,
+        ERUI_RowHandle* out_row) noexcept;
     ERUI_Result add_submenu(
         ERUI_ProviderHandle provider,
         ERUI_PageHandle parent_page,
@@ -90,6 +96,16 @@ public:
         ERUI_ProviderHandle provider,
         ERUI_RowHandle row,
         std::uint8_t* out_value) noexcept;
+    ERUI_Result set_text_input_value(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        const ERUI_Utf16View* value) noexcept;
+    ERUI_Result get_text_input_value(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        std::uint16_t* output,
+        std::uint32_t output_capacity,
+        std::uint32_t* out_length) noexcept;
     ERUI_Result enqueue_alert(
         ERUI_ProviderHandle provider,
         const ERUI_AlertDesc* description) noexcept;
@@ -103,17 +119,20 @@ private:
         slider,
         inline_choice,
         popup_choice,
+        text_input,
         submenu,
     };
 
     struct Row {
         ERUI_RowHandle handle{};
+        ERUI_ProviderHandle provider{};
         RowKind kind{RowKind::button};
         std::wstring label{};
         std::wstring help{};
         bool enabled{true};
         ERUI_ButtonCallback button_callback{};
         ERUI_ValueChangedCallback changed_callback{};
+        ERUI_TextInputChangedCallback text_changed_callback{};
         void* user_data{};
         alignas(4) volatile std::uint8_t native_value{};
         std::atomic<std::uint8_t> public_value{};
@@ -121,6 +140,7 @@ private:
         std::atomic_bool pending_write{false};
         erui::SliderSpec slider{};
         std::vector<std::wstring> choices{};
+        std::unique_ptr<erui::detail::TextInputState> text_input_state{};
         ERUI_PageHandle child_page{};
     };
 
@@ -141,6 +161,7 @@ private:
         ERUI_ProviderHandle handle{};
         HMODULE owner_module{};
         HMODULE pinned_module{};
+        std::uint32_t api_version{};
         std::string id{};
         std::wstring display_name{};
         std::int32_t priority{};
@@ -155,6 +176,9 @@ private:
 
     static void button_bridge(void* user_data) noexcept;
     static void value_bridge(std::uint8_t value, void* user_data) noexcept;
+    static void text_input_bridge(
+        std::wstring_view value,
+        void* user_data) noexcept;
     static bool page_title_bridge(
         const erui::PageTitleFormatRequest& request,
         std::wstring& output,

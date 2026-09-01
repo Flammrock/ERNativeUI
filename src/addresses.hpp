@@ -101,11 +101,39 @@ using TextResolverFn = void*(__fastcall*)(
 using ScaleformPathResolverFn = void*(__fastcall*)(
     void* movie_context,
     void* destination,
-    const char* path);
+    const char* path_format,
+    ...);
 using ScaleformTextSetterFn = void(__fastcall*)(
     void* scaleform_value,
     const wchar_t* text);
 using ScaleformResultDestructorFn = void(__fastcall*)(void* nested_member);
+
+// Exact-build native TextInput interfaces. These remain private implementation
+// details behind the stable C ABI.
+using TextInputRowProducerFn = void*(__fastcall*)(
+    void* page,
+    void* text_references,
+    void* bound_value,
+    void* editor_factory,
+    void* initial_text,
+    void* placeholder_text,
+    void* completion_action,
+    void* disabled_predicate,
+    std::uint8_t enabled);
+using NativeMenuStringConstructorFn = void*(__fastcall*)(void* destination);
+using NativeMenuStringBorrowedConstructorFn = void*(__fastcall*)(
+    void* destination,
+    const wchar_t* borrowed_literal);
+using NativeMenuStringDestructorFn = void(__fastcall*)(void* value);
+using TextInputEditorFactoryFn = void*(__fastcall*)(
+    void* destination,
+    void* parent,
+    void* bound_text,
+    void* native_completion_action,
+    const std::int32_t* screen_position);
+using TextInputEditorFactoryBuilderFn = void*(__fastcall*)(
+    void* destination,
+    TextInputEditorFactoryFn factory_function);
 
 struct GameAddresses {
     std::uint8_t* game_image_base{};
@@ -141,6 +169,21 @@ struct GameAddresses {
     ScaleformTextSetterFn scaleform_text_setter{};
     ScaleformResultDestructorFn scaleform_result_destructor{};
 
+    TextInputRowProducerFn text_input_row_producer{};
+    NativeMenuStringConstructorFn native_menu_string_constructor{};
+    NativeMenuStringBorrowedConstructorFn
+        native_menu_string_borrowed_constructor{};
+    NativeMenuStringDestructorFn native_menu_string_destructor{};
+    TextInputEditorFactoryBuilderFn text_input_editor_factory_builder{};
+    TextInputEditorFactoryFn text_input_editor_factory{};
+
+    [[nodiscard]] bool text_input_complete() const noexcept {
+        return text_input_row_producer && native_menu_string_constructor &&
+            native_menu_string_borrowed_constructor &&
+            native_menu_string_destructor &&
+            text_input_editor_factory_builder && text_input_editor_factory;
+    }
+
     [[nodiscard]] bool title_bridge_complete() const noexcept {
         return scaleform_path_resolver && scaleform_text_setter &&
             scaleform_result_destructor;
@@ -151,6 +194,7 @@ struct GameAddresses {
         bool require_buttons,
         bool require_submenus,
         bool require_popup_choices,
+        bool require_text_inputs,
         bool require_custom_text) const noexcept;
 };
 
@@ -162,6 +206,7 @@ bool resolve_game_addresses(
     bool require_submenus,
     bool require_native_back,
     bool require_popup_choices,
+    bool require_text_inputs,
     bool require_custom_text) noexcept;
 
 } // namespace erui::native

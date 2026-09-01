@@ -72,11 +72,13 @@ const auto result = erui::register_menu(options, [](erui::Menu& menu) {
 });
 ```
 
-`register_menu` discovers the host, requests the exact API 1.0 contract,
-creates a private draft, runs the builder, and commits. A public commit waits
-for the bounded startup merge and native hook installation: success therefore
-means the host reached `runtime_ready`; a game-signature failure returns
-`ERUI_HOST_FAILED` instead of reporting a misleading successful menu.
+`register_menu` discovers the host, negotiates the newest contract known to
+the header, creates a private draft, runs the builder, and commits. The
+unreleased 1.1 wrapper falls back to an exact API 1.0 request when necessary;
+new rows must still be capability-gated. A public commit waits for the bounded
+startup merge and native hook installation: success therefore means the host
+reached `runtime_ready`; a game-signature failure returns `ERUI_HOST_FAILED`
+instead of reporting a misleading successful menu.
 
 If a builder throws or any row operation fails, the wrapper aborts the draft.
 `Page` values are builder handles. They may be copied for convenient fluent
@@ -147,6 +149,68 @@ matching function-table pointers after negotiation. Choice rows intentionally
 have no public disabled flag because the required native behavior has not been
 established. The recovered native storage and list construction are documented
 in [Native popup choices](NATIVE_POPUP_CHOICES.md).
+
+## TextInput (unreleased API 1.1)
+
+TextInput is implemented in the current development headers and host for live
+validation, but it is not part of the released 1.0 ABI. API 1.1 remains
+unfrozen and its append-only table will grow as other accepted 1.1 features
+are added. Do not publish a client that requires this development surface
+until ERNativeUI 1.1 is released.
+
+Gate the optional row so a client using only older features can continue on
+an API 1.0 host:
+
+```cpp
+std::mutex alias_mutex;
+std::wstring alias = L"Tarnished";
+erui::RowHandle alias_row{};
+
+void alias_changed(const erui::TextInputChange& change) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(alias_mutex);
+        alias.assign(change.value); // Copy the borrowed callback view.
+    } catch (...) {
+        // Never let an exception cross a callback boundary.
+    }
+}
+
+if (menu.supports(erui::Capability::text_input)) {
+    erui::TextInputOptions input{};
+    input.initial_value = alias;
+    input.placeholder = L"Enter an alias";
+    input.maximum_length = 16;
+
+    alias_row = menu.root().add_text_input<&alias_changed>(
+        L"Player Alias", L"Choose the name used by this mod.", input);
+}
+```
+
+The host copies the label, help, initial value, and placeholder before the
+builder returns. The C++ option defaults to 16; at the raw C boundary, zero
+also selects 16. Explicit values must be 1 through 35 UTF-16 code units. On
+Windows that is the unit counted by `std::wstring_view::size()`; it is not a
+byte count or a count of user-perceived characters. The limit is fixed when
+the row is registered.
+
+A callback runs after the player confirms a value different from the current
+canonical value. Cancel, an unchanged confirmation, and a programmatic write
+do not invoke it. `TextInputChange::value` is valid only for that invocation,
+so retain a copy rather than the view.
+
+After commit, `Registration::set_text(row, value)` copies a new canonical
+value and `Registration::get_text(row, output)` copies the current value into
+a caller-owned `std::wstring`. Both return `ERUI_Result`; programmatic writes
+never truncate and reject values beyond that row's registered maximum.
+Native presentation updates are marshalled to the next UI-frame boundary. If
+the player is already editing, the editor continues with its private starting
+copy: Cancel preserves the programmatic value, while Confirm replaces it with
+the player's confirmed value. This is the deliberate last-completed-action
+policy; no client thread mutates Elden Ring UI storage directly.
+Strict-C clients use the append-only `ERUI_TextInputDesc` and
+`add_text_input`, `set_text_input_value`, and `get_text_input_value` table
+entries after checking `ERUI_CAP_TEXT_INPUT`. No STL object or allocation
+crosses the DLL boundary.
 
 ## Page presentation
 

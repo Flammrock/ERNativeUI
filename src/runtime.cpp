@@ -5,6 +5,7 @@
 #include "module.hpp"
 #include "runtime_log.hpp"
 #include "runtime_state.hpp"
+#include "native_text_input.hpp"
 
 #include <Windows.h>
 
@@ -15,6 +16,7 @@ namespace erui {
 namespace {
 
 InstallResult fail_install(InstallError error) noexcept {
+    erui::native::reset_native_text_inputs();
     detail::runtime_state().menu.reset();
     detail::runtime_state().installed.store(false, std::memory_order_release);
     return InstallResult{error};
@@ -56,6 +58,8 @@ const char* row_kind_name(RowKind kind) noexcept {
         return "inline-choice";
     case RowKind::popup_choice:
         return "popup-choice";
+    case RowKind::text_input:
+        return "text-input";
     case RowKind::button:
         return "button";
     case RowKind::submenu:
@@ -213,13 +217,14 @@ InstallResult install_impl(
 
     detail::logf(
         LogLevel::info,
-        "Compiled menu: pages=%zu rootRows=%zu tabs=%zu modelButtons=%zu modelSubmenus=%zu popupChoices=%zu customTexts=%zu pagination=%d",
+        "Compiled menu: pages=%zu rootRows=%zu tabs=%zu modelButtons=%zu modelSubmenus=%zu popupChoices=%zu textInputs=%zu customTexts=%zu pagination=%d",
         runtime.menu->pages.size(),
         runtime.menu->root_page().rows.size(),
         runtime.menu->tab_page_indices.size(),
         runtime.menu->modeled_button_count,
         runtime.menu->modeled_submenu_count,
         runtime.menu->modeled_popup_choice_count,
+        runtime.menu->modeled_text_input_count,
         runtime.menu->texts.size(),
         runtime.menu->pagination_required_for_capacity(
             options.controller_visual_capacity) ? 1 : 0);
@@ -246,6 +251,8 @@ InstallResult install_impl(
     bool require_submenus = options.enable_row_injection &&
         runtime.menu->root_plan(options.controller_visual_capacity)
             .pages.slices.size() > 1;
+    const bool require_text_inputs = options.enable_row_injection &&
+        runtime.menu->modeled_text_input_count != 0;
     if (options.enable_row_injection) {
         for (std::size_t page_index = 0;
              page_index < runtime.menu->pages.size(); ++page_index) {
@@ -274,6 +281,7 @@ InstallResult install_impl(
                 require_buttons,
                 require_submenus,
                 runtime.menu->modeled_popup_choice_count != 0,
+                require_text_inputs,
                 options.enable_custom_text) ||
             (active_pagination && !addresses.native_back)) {
             detail::logf(
@@ -293,9 +301,18 @@ InstallResult install_impl(
                 require_submenus,
                 active_pagination,
                 runtime.menu->modeled_popup_choice_count != 0,
+                require_text_inputs,
                 options.enable_custom_text)) {
             return fail_install(InstallError::address_resolution_failed);
         }
+    }
+
+    if (require_text_inputs &&
+        !erui::native::prepare_native_text_inputs(*runtime.menu, addresses)) {
+        detail::logf(
+            LogLevel::error,
+            "Failed to prepare native TextInput bindings");
+        return fail_install(InstallError::address_resolution_failed);
     }
 
     const erui::native::HookInstallStatus hook_status =
@@ -325,6 +342,7 @@ void uninstall() noexcept {
         return;
     }
     erui::native::remove_native_menu_hooks();
+    erui::native::reset_native_text_inputs();
     runtime.button_action_hits.store(0, std::memory_order_release);
     runtime.diagnostic_button_action_logs.store(0, std::memory_order_release);
     runtime.button_action_faults.store(0, std::memory_order_release);
@@ -379,6 +397,15 @@ std::size_t poll_changes() noexcept {
     std::size_t changes = 0;
     for (detail::CompiledPage& page : runtime.menu->pages) {
         for (detail::CompiledRow& row : page.rows) {
+            if (row.kind == RowKind::text_input) {
+                if (!row.text_input_state) continue;
+                std::wstring value{};
+                while (row.text_input_state->pop_committed_change(value)) {
+                    ++changes;
+                    row.text_action.invoke(value);
+                }
+                continue;
+            }
             if (!row.byte_value) {
                 continue;
             }
