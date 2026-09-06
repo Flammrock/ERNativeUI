@@ -44,6 +44,12 @@ struct TextInputText {
     const wchar_t* extended_placeholder;
 };
 
+struct ColorPickerText {
+    const wchar_t* showcase;
+    const wchar_t* root_accent;
+    const wchar_t* subpage_accent;
+};
+
 inline const Text& text(erui::GameLanguage language) noexcept {
     static constexpr Text english{
         L"Tarnished UI Showcase", L"Showcase Enabled", L"Showcase Intensity",
@@ -315,6 +321,70 @@ inline const TextInputText& text_input_text(
         L"Demostración de entrada de texto", L"Nota del jugador",
         L"Escribe una nota", L"Nota ampliada",
         L"Escribe un texto más largo"};
+
+    switch (language) {
+    case erui::GameLanguage::german: return german;
+    case erui::GameLanguage::french: return french;
+    case erui::GameLanguage::italian: return italian;
+    case erui::GameLanguage::korean: return korean;
+    case erui::GameLanguage::spanish: return spanish;
+    case erui::GameLanguage::chinese_simplified: return schinese;
+    case erui::GameLanguage::chinese_traditional: return tchinese;
+    case erui::GameLanguage::russian: return russian;
+    case erui::GameLanguage::thai: return thai;
+    case erui::GameLanguage::japanese: return japanese;
+    case erui::GameLanguage::polish: return polish;
+    case erui::GameLanguage::arabic: return arabic;
+    case erui::GameLanguage::portuguese_brazil: return brazilian;
+    case erui::GameLanguage::spanish_latin_america: return latam;
+    default: return english;
+    }
+}
+
+inline const ColorPickerText& color_picker_text(
+    erui::GameLanguage language) noexcept {
+    static constexpr ColorPickerText english{
+        L"Color Picker Showcase", L"Root Accent Color",
+        L"Subpage Accent Color"};
+    static constexpr ColorPickerText german{
+        L"Farbauswahl-Demo", L"Akzentfarbe der Hauptseite",
+        L"Akzentfarbe der Unterseite"};
+    static constexpr ColorPickerText french{
+        L"Vitrine du sélecteur de couleur", L"Couleur d'accent principale",
+        L"Couleur d'accent de la sous-page"};
+    static constexpr ColorPickerText italian{
+        L"Demo selettore colore", L"Colore principale",
+        L"Colore della sottopagina"};
+    static constexpr ColorPickerText korean{
+        L"색상 선택 쇼케이스", L"기본 페이지 강조색",
+        L"하위 페이지 강조색"};
+    static constexpr ColorPickerText spanish{
+        L"Demostración del selector de color", L"Color de acento principal",
+        L"Color de acento de la subpágina"};
+    static constexpr ColorPickerText schinese{
+        L"颜色选择器展示", L"主页面强调色", L"子页面强调色"};
+    static constexpr ColorPickerText tchinese{
+        L"顏色選擇器展示", L"主頁面強調色", L"子頁面強調色"};
+    static constexpr ColorPickerText russian{
+        L"Демонстрация выбора цвета", L"Цвет главной страницы",
+        L"Цвет вложенной страницы"};
+    static constexpr ColorPickerText thai{
+        L"ตัวอย่างตัวเลือกสี", L"สีเน้นหน้าหลัก", L"สีเน้นหน้าย่อย"};
+    static constexpr ColorPickerText japanese{
+        L"カラーピッカーショーケース", L"メインページのアクセント色",
+        L"サブページのアクセント色"};
+    static constexpr ColorPickerText polish{
+        L"Prezentacja wyboru koloru", L"Kolor strony głównej",
+        L"Kolor podstrony"};
+    static constexpr ColorPickerText arabic{
+        L"عرض منتقي الألوان", L"لون تمييز الصفحة الرئيسية",
+        L"لون تمييز الصفحة الفرعية"};
+    static constexpr ColorPickerText brazilian{
+        L"Demonstração do seletor de cores", L"Cor de destaque principal",
+        L"Cor de destaque da subpágina"};
+    static constexpr ColorPickerText latam{
+        L"Demostración del selector de color", L"Color de acento principal",
+        L"Color de acento de la subpágina"};
 
     switch (language) {
     case erui::GameLanguage::german: return german;

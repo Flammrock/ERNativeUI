@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
     provider.size = sizeof(provider);
     provider.api_version = ERUI_API_VERSION_1_0;
     provider.owner_module = GetModuleHandleW(NULL);
-    provider.provider_id = string_view("tests.v1-0-to-current-smoke");
+    provider.provider_id = string_view("tests v1/legacy");
     provider.display_name = utf16_view(L"Frozen client to current host");
     CHECK(block.api.register_provider(
         &provider, &provider_handle, &root) == ERUI_OK);

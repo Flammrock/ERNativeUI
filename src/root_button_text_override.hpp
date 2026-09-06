@@ -4,7 +4,7 @@
 
 namespace erui::native {
 
-// The native Controller-page action-row constructor requests these two fixed
+// The native Game Options action-row constructor requests these two fixed
 // messages while building its richer left-side label/help object. Restrict
 // substitution to the constructing thread so vanilla rows remain untouched.
 constexpr std::uint32_t root_button_native_label_id = 0x1B199;

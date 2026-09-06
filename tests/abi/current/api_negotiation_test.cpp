@@ -45,6 +45,9 @@ int check_v1_0_prefix(ERUI_GetApiFn get_api) {
     CHECK(api->get_game_language != nullptr);
 #if defined(ERUI_API_VERSION_1_1)
     CHECK((api->capabilities & ERUI_CAP_TEXT_INPUT) == 0);
+    CHECK((api->capabilities & ERUI_CAP_COLOR_PICKER) == 0);
+    CHECK((api->capabilities & ERUI_CAP_BUILTIN_PAGES) == 0);
+    CHECK((api->capabilities & ERUI_CAP_INPUT_BINDINGS) == 0);
 #endif
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_0_SIZE,
@@ -81,11 +84,28 @@ int check_selected_current(ERUI_GetApiFn get_api) {
     CHECK(api.add_text_input != nullptr);
     CHECK(api.set_text_input_value != nullptr);
     CHECK(api.get_text_input_value != nullptr);
+    CHECK((api.capabilities & ERUI_CAP_COLOR_PICKER) != 0);
+    CHECK(api.add_color_picker != nullptr);
+    CHECK(api.set_color_picker_value != nullptr);
+    CHECK(api.get_color_picker_value != nullptr);
+    CHECK((api.capabilities & ERUI_CAP_BUILTIN_PAGES) != 0);
+    CHECK(api.get_builtin_page != nullptr);
+    CHECK((api.capabilities & ERUI_CAP_INPUT_BINDINGS) != 0);
+    CHECK(api.add_input_section != nullptr);
+    CHECK(api.add_input_action != nullptr);
+    CHECK(api.set_assignments_changed_handler != nullptr);
+    CHECK(api.set_action_inputs != nullptr);
+    CHECK(api.get_action_inputs != nullptr);
+    CHECK(api.get_action_default_inputs != nullptr);
+    CHECK(api.reset_action_inputs != nullptr);
+    CHECK((api.capabilities & ERUI_CAP_STORAGE) != 0);
+    CHECK(api.open_storage != nullptr);
+    CHECK(api.storage_get_info != nullptr);
 #endif
     return 0;
 }
 
-int check_old_host_fallback(ERUI_GetApiFn get_api) {
+int check_old_host_exact_versions(ERUI_GetApiFn get_api) {
 #if defined(ERUI_API_VERSION_1_1)
     ERUI_Api strict{};
     strict.size = ERUI_API_V1_1_SIZE;
@@ -95,15 +115,25 @@ int check_old_host_fallback(ERUI_GetApiFn get_api) {
         ERUI_UNSUPPORTED_VERSION);
     CHECK(std::memcmp(before.data(), &strict, sizeof(strict)) == 0);
 
-    ERUI_Api fallback{};
-    fallback.size = ERUI_API_V1_0_SIZE;
-    CHECK(get_api(ERUI_API_VERSION_1_0, &fallback) == ERUI_OK);
-    CHECK(fallback.api_version == ERUI_API_VERSION_1_0);
-    CHECK(fallback.size == ERUI_API_V1_0_SIZE);
-    CHECK((fallback.capabilities & ERUI_CAP_TEXT_INPUT) == 0);
-    CHECK(fallback.add_text_input == nullptr);
-    CHECK(fallback.set_text_input_value == nullptr);
-    CHECK(fallback.get_text_input_value == nullptr);
+    ERUI_Api selected_v1_0{};
+    selected_v1_0.size = ERUI_API_V1_0_SIZE;
+    CHECK(get_api(ERUI_API_VERSION_1_0, &selected_v1_0) == ERUI_OK);
+    CHECK(selected_v1_0.api_version == ERUI_API_VERSION_1_0);
+    CHECK(selected_v1_0.size == ERUI_API_V1_0_SIZE);
+    CHECK((selected_v1_0.capabilities & ERUI_CAP_TEXT_INPUT) == 0);
+    CHECK(selected_v1_0.add_text_input == nullptr);
+    CHECK(selected_v1_0.set_text_input_value == nullptr);
+    CHECK(selected_v1_0.get_text_input_value == nullptr);
+    CHECK((selected_v1_0.capabilities & ERUI_CAP_COLOR_PICKER) == 0);
+    CHECK(selected_v1_0.add_color_picker == nullptr);
+    CHECK(selected_v1_0.set_color_picker_value == nullptr);
+    CHECK(selected_v1_0.get_color_picker_value == nullptr);
+    CHECK((selected_v1_0.capabilities & ERUI_CAP_BUILTIN_PAGES) == 0);
+    CHECK(selected_v1_0.get_builtin_page == nullptr);
+    CHECK((selected_v1_0.capabilities & ERUI_CAP_INPUT_BINDINGS) == 0);
+    CHECK(selected_v1_0.add_input_section == nullptr);
+    CHECK(selected_v1_0.add_input_action == nullptr);
+    CHECK(selected_v1_0.open_storage == nullptr);
 #else
     CHECK(check_v1_0_prefix(get_api) == 0);
 #endif
@@ -128,7 +158,7 @@ int main(int argc, char** argv) {
         result = check_v1_0_prefix(host.get_api);
         if (result == 0) result = check_selected_current(host.get_api);
     } else if (std::strcmp(argv[2], "old-host") == 0) {
-        result = check_old_host_fallback(host.get_api);
+        result = check_old_host_exact_versions(host.get_api);
     } else {
         result = 2;
     }

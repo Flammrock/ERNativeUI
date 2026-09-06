@@ -2,6 +2,7 @@
 
 #include "dialog_modal_state.hpp"
 #include "native_dialog_presentation.hpp"
+#include "color_picker.hpp"
 #include "runtime_log.hpp"
 
 #include <Windows.h>
@@ -28,6 +29,8 @@ constexpr std::size_t kMaximumMessageLength = 4096;
 constexpr std::uint64_t kRetirementGraceMs = 10000;
 constexpr std::uint64_t kRetiredCollectionPeriodMs = 1000;
 
+using LowerFrontendUpdateFn = void(__fastcall*)(void*, float, std::uint8_t*);
+using TitleTopUpdateFn = void(__fastcall*)(void*, float, std::uint8_t*);
 using PopupUpdateFn = void(__fastcall*)(void*, float, void*);
 using MenuWindowJobPollFn = void*(__fastcall*)(void*, void*, void*);
 using DialogInitializeFn = void(__fastcall*)(void*);
@@ -53,6 +56,8 @@ struct AlertRequest {
     void* native_job{};
     bool owns_native_job{};
     NativeDialogPresentation presentation{};
+    std::uint64_t lower_gate_baseline{};
+    std::uint64_t title_gate_baseline{};
     std::atomic<ERUI_AlertResponse> response{ERUI_ALERT_RESPONSE_NONE};
 };
 
@@ -68,6 +73,10 @@ struct RetiredText {
     std::uint64_t expires_at{};
 };
 
+SafetyHookInline g_lower_frontend_update_hook{};
+std::atomic<LowerFrontendUpdateFn> g_original_lower_frontend_update{};
+SafetyHookInline g_title_top_update_hook{};
+std::atomic<TitleTopUpdateFn> g_original_title_top_update{};
 SafetyHookInline g_popup_update_hook{};
 std::atomic<PopupUpdateFn> g_original_popup_update{};
 SafetyHookInline g_menu_window_job_poll_hook{};
@@ -95,6 +104,8 @@ DialogModalState g_modal_state{};
 std::atomic_bool g_queue_work{};
 std::atomic_flag g_scheduling = ATOMIC_FLAG_INIT;
 std::atomic<std::uint64_t> g_next_collection_tick{};
+std::atomic<std::uint64_t> g_lower_gate_frames{};
+std::atomic<std::uint64_t> g_title_gate_frames{};
 thread_local bool g_dispatching_popup_input{};
 
 void release_job(void* job) noexcept {
@@ -230,6 +241,13 @@ ScheduleResult invoke_schedule_job(
     AlertRequest* request,
     unsigned long& exception) noexcept {
     exception = 0;
+    // The character color editor uses MenuWindowJob rather than CSPopupMenu's
+    // +0x298 slot, so the native slot alone cannot serialize these transports.
+    // Keep the FIFO request active and retry after the color editor reaches a
+    // terminal state; no alert is rejected or dropped.
+    if (color_picker_session_active()) {
+        return ScheduleResult::waiting_for_popup_manager;
+    }
     const PopupAccess popup = popup_access();
     if (!popup.manager || !popup.context) {
         return ScheduleResult::waiting_for_popup_manager;
@@ -297,6 +315,10 @@ ScheduleResult invoke_schedule_job(
         // Publish the owner before the job. Readers acquire the job first and
         // can then safely reconcile the exact popup slot even if native code
         // clears it between two sampled frames.
+        request->lower_gate_baseline =
+            g_lower_gate_frames.load(std::memory_order_relaxed);
+        request->title_gate_baseline =
+            g_title_gate_frames.load(std::memory_order_relaxed);
         g_modal_state.publish(popup.manager, submitted_job);
         if (installed_reference) {
             release_job(installed_reference);
@@ -446,17 +468,75 @@ void observe_composite_completion(void* popup) noexcept {
     if (!request) return;
 
     const bool dismissed = completion.loss == DialogModalLoss::dismissed;
+    const std::uint64_t lower_gate_frames =
+        g_lower_gate_frames.load(std::memory_order_relaxed) -
+        request->lower_gate_baseline;
+    const std::uint64_t title_gate_frames =
+        g_title_gate_frames.load(std::memory_order_relaxed) -
+        request->title_gate_baseline;
     erui::detail::logf(
         dismissed ? erui::LogLevel::info : erui::LogLevel::warning,
         dismissed
-            ? "Native alert dismissed from blocking slot: sequence=%llu"
-            : "Native alert lost blocking-slot ownership: sequence=%llu",
-        static_cast<unsigned long long>(request->sequence));
+            ? "Native alert dismissed from blocking slot: sequence=%llu lowerGateFrames=%llu titleGateFrames=%llu"
+            : "Native alert lost blocking-slot ownership: sequence=%llu lowerGateFrames=%llu titleGateFrames=%llu",
+        static_cast<unsigned long long>(request->sequence),
+        static_cast<unsigned long long>(lower_gate_frames),
+        static_cast<unsigned long long>(title_gate_frames));
     retire_request(
         request,
         dismissed ? ERUI_OK : ERUI_INTERNAL_ERROR,
         GetTickCount64());
     g_queue_work.store(true, std::memory_order_release);
+}
+
+void __fastcall lower_frontend_update_detour(
+    void* frontend,
+    float elapsed_seconds,
+    std::uint8_t* input_enabled) noexcept {
+    const LowerFrontendUpdateFn original =
+        g_original_lower_frontend_update.load(std::memory_order_acquire);
+    if (!original) return;
+
+    // The outer frontend frame updates this lower tree before it updates
+    // CSPopupMenu. Its ordinary input-enabled byte reaches only one branch;
+    // title and character-creation siblings continue consuming X/O and
+    // navigation. Pause the complete lower tree while our exact blocking
+    // task owns CSPopupMenu. The outer frame still proceeds to the separately
+    // invoked popup update below, so the dialog keeps exclusive input focus.
+    const PopupAccess popup = popup_access();
+    if (popup.manager &&
+        g_modal_state.owns(popup.manager, popup.blocking_job)) {
+        g_lower_gate_frames.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    original(frontend, elapsed_seconds, input_enabled);
+}
+
+void __fastcall title_top_update_detour(
+    void* title,
+    float elapsed_seconds,
+    std::uint8_t* input_enabled) noexcept {
+    const TitleTopUpdateFn original =
+        g_original_title_top_update.load(std::memory_order_acquire);
+    if (!original) return;
+
+    // TitleTopDialog is a child of CSPopupMenu rather than the lower frontend
+    // tree. Giving CSPopupMenu a private true byte keeps an owned native alert
+    // interactive, but also reaches this underlying title task. Give only
+    // TitleTopDialog a private false byte while the exact +0x298 job belongs
+    // to ERNativeUI. Its visual/state frame still runs, the surrounding task
+    // list performs its normal FD4Time wrapper teardown, and CSPopupMenu
+    // continues on to poll the alert—including its dismissal frame—without
+    // letting movement or X/O bleed through to the title screen.
+    const PopupAccess popup = popup_access();
+    if (popup.manager &&
+        g_modal_state.owns(popup.manager, popup.blocking_job)) {
+        g_title_gate_frames.fetch_add(1, std::memory_order_relaxed);
+        std::uint8_t title_input_disabled = 0;
+        original(title, elapsed_seconds, &title_input_disabled);
+        return;
+    }
+    original(title, elapsed_seconds, input_enabled);
 }
 
 void __fastcall popup_update_detour(
@@ -531,12 +611,15 @@ void* __fastcall menu_window_job_poll_detour(
                 std::memory_order_release, std::memory_order_relaxed);
         }
     }
+    observe_color_picker_job_poll(job, scheduler_state);
     return status;
 }
 
 bool resolve_transport(
     const ModuleView& game,
     std::uint8_t*& poll_target,
+    std::uint8_t*& lower_frontend_update_target,
+    std::uint8_t*& title_top_update_target,
     std::uint8_t*& popup_update_target) {
     // This wrapper is a semantic anchor for the real CSPopupMenu submission
     // route: it resolves CSMenuManImp::popup_menu at +0x80, builds a job using
@@ -573,8 +656,37 @@ bool resolve_transport(
     const ScanResult update_scan =
         game.scan_executable(popup_update_call_pattern);
     if (!update_scan.address || update_scan.matches != 1) return false;
+    lower_frontend_update_target = resolve_rel32_call(
+        game, update_scan.address + 0x15);
     popup_update_target = resolve_rel32_call(
         game, update_scan.address + 0x2F);
+
+    // This dispatcher has one caller: the outer frontend update anchored
+    // above. Validate its concrete entry as a second exact-build guard before
+    // allowing a modal early return there.
+    constexpr std::string_view lower_frontend_update_pattern =
+        "48 8B C4 55 57 41 56 48 8D 68 A1 "
+        "48 81 EC B0 00 00 00 "
+        "48 C7 45 B7 FE FF FF FF "
+        "48 89 58 10 48 89 70 18 0F 29 70 D8";
+    if (!lower_frontend_update_target ||
+        !game.matches(
+            lower_frontend_update_target,
+            lower_frontend_update_pattern)) {
+        return false;
+    }
+
+    // CS::TitleTopDialog::frame is a CSPopupMenu child and therefore needs a
+    // narrower modal gate than the lower frontend dispatcher above. RTTI
+    // identifies this exact entry as TitleTopDialog's vtable slot 2.
+    constexpr std::string_view title_top_update_pattern =
+        "48 8B C4 55 56 57 48 81 EC D0 01 00 00 "
+        "48 C7 44 24 28 FE FF FF FF 48 89 58 20 0F 29 70 D8 "
+        "48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 B0 01 00 00";
+    const ScanResult title_top_scan =
+        game.scan_executable(title_top_update_pattern);
+    if (!title_top_scan.address || title_top_scan.matches != 1) return false;
+    title_top_update_target = title_top_scan.address;
 
     constexpr std::string_view wrapper_pattern =
         "44 89 4C 24 20 44 89 44 24 18 48 89 54 24 10 48 89 4C 24 08 "
@@ -602,7 +714,9 @@ bool resolve_transport(
     g_release_reference = reinterpret_cast<ReleaseReferenceFn>(
         resolve_rel32_call(game, poll_target + 0x114));
 
-    return popup_update_target && g_fe_manager_slot &&
+    return lower_frontend_update_target && title_top_update_target &&
+        popup_update_target &&
+        g_fe_manager_slot &&
         g_initialize && g_set_fields &&
         g_set_fixed_option && g_set_global_option && g_build &&
         g_install_blocking_job && g_release_reference;
@@ -614,8 +728,15 @@ bool install_native_dialog_transport(const ModuleView& game) noexcept {
     remove_native_dialog_transport();
     try {
         std::uint8_t* poll_target{};
+        std::uint8_t* lower_frontend_update_target{};
+        std::uint8_t* title_top_update_target{};
         std::uint8_t* popup_update_target{};
-        if (!resolve_transport(game, poll_target, popup_update_target)) {
+        if (!resolve_transport(
+                game,
+                poll_target,
+                lower_frontend_update_target,
+                title_top_update_target,
+                popup_update_target)) {
             erui::detail::logf(
                 erui::LogLevel::warning,
                 "Native alert transport unavailable: one or more semantic signatures were unresolved");
@@ -636,6 +757,30 @@ bool install_native_dialog_transport(const ModuleView& game) noexcept {
                 erui::LogLevel::warning,
                 "Native alert transport unavailable: CSPopupMenu update hook creation failed (SafetyHook error type %u)",
                 static_cast<unsigned>(update_hook.error().type));
+            return false;
+        }
+        auto lower_frontend_update_hook = SafetyHookInline::create(
+            lower_frontend_update_target,
+            reinterpret_cast<void*>(&lower_frontend_update_detour),
+            SafetyHookInline::StartDisabled);
+        if (!lower_frontend_update_hook) {
+            erui::detail::logf(
+                erui::LogLevel::warning,
+                "Native alert transport unavailable: lower frontend update hook creation failed (SafetyHook error type %u)",
+                static_cast<unsigned>(
+                    lower_frontend_update_hook.error().type));
+            return false;
+        }
+        auto title_top_update_hook = SafetyHookInline::create(
+            title_top_update_target,
+            reinterpret_cast<void*>(&title_top_update_detour),
+            SafetyHookInline::StartDisabled);
+        if (!title_top_update_hook) {
+            erui::detail::logf(
+                erui::LogLevel::warning,
+                "Native alert transport unavailable: TitleTopDialog update hook creation failed (SafetyHook error type %u)",
+                static_cast<unsigned>(
+                    title_top_update_hook.error().type));
             return false;
         }
         auto poll_hook = SafetyHookInline::create(
@@ -678,11 +823,55 @@ bool install_native_dialog_transport(const ModuleView& game) noexcept {
             g_original_popup_update.store(nullptr, std::memory_order_release);
             return false;
         }
+        g_lower_frontend_update_hook =
+            std::move(*lower_frontend_update_hook);
+        g_original_lower_frontend_update.store(
+            g_lower_frontend_update_hook.original<LowerFrontendUpdateFn>(),
+            std::memory_order_release);
+        if (auto enabled = g_lower_frontend_update_hook.enable(); !enabled) {
+            erui::detail::logf(
+                erui::LogLevel::warning,
+                "Native alert transport unavailable: lower frontend update hook enable failed (SafetyHook error type %u)",
+                static_cast<unsigned>(enabled.error().type));
+            g_lower_frontend_update_hook.reset();
+            g_original_lower_frontend_update.store(
+                nullptr, std::memory_order_release);
+            g_menu_window_job_poll_hook.reset();
+            g_original_menu_window_job_poll.store(
+                nullptr, std::memory_order_release);
+            g_popup_update_hook.reset();
+            g_original_popup_update.store(nullptr, std::memory_order_release);
+            return false;
+        }
+        g_title_top_update_hook = std::move(*title_top_update_hook);
+        g_original_title_top_update.store(
+            g_title_top_update_hook.original<TitleTopUpdateFn>(),
+            std::memory_order_release);
+        if (auto enabled = g_title_top_update_hook.enable(); !enabled) {
+            erui::detail::logf(
+                erui::LogLevel::warning,
+                "Native alert transport unavailable: TitleTopDialog update hook enable failed (SafetyHook error type %u)",
+                static_cast<unsigned>(enabled.error().type));
+            g_title_top_update_hook.reset();
+            g_original_title_top_update.store(
+                nullptr, std::memory_order_release);
+            g_lower_frontend_update_hook.reset();
+            g_original_lower_frontend_update.store(
+                nullptr, std::memory_order_release);
+            g_menu_window_job_poll_hook.reset();
+            g_original_menu_window_job_poll.store(
+                nullptr, std::memory_order_release);
+            g_popup_update_hook.reset();
+            g_original_popup_update.store(nullptr, std::memory_order_release);
+            return false;
+        }
         g_available.store(true, std::memory_order_release);
         erui::detail::logf(
             erui::LogLevel::info,
-            "Native alert transport installed: blockingInstall=%p popupUpdate=%p MenuWindowJob=%p RVA=0x%llX queueCapacity=%zu",
+            "Native alert transport installed: blockingInstall=%p lowerFrontendUpdate=%p titleTopUpdate=%p popupUpdate=%p MenuWindowJob=%p RVA=0x%llX queueCapacity=%zu",
             reinterpret_cast<void*>(g_install_blocking_job),
+            lower_frontend_update_target,
+            title_top_update_target,
             popup_update_target,
             poll_target,
             static_cast<unsigned long long>(
@@ -698,6 +887,11 @@ bool install_native_dialog_transport(const ModuleView& game) noexcept {
 
 void remove_native_dialog_transport() noexcept {
     g_available.store(false, std::memory_order_release);
+    g_title_top_update_hook.reset();
+    g_original_title_top_update.store(nullptr, std::memory_order_release);
+    g_lower_frontend_update_hook.reset();
+    g_original_lower_frontend_update.store(
+        nullptr, std::memory_order_release);
     g_popup_update_hook.reset();
     g_original_popup_update.store(nullptr, std::memory_order_release);
     g_menu_window_job_poll_hook.reset();
@@ -711,6 +905,8 @@ void remove_native_dialog_transport() noexcept {
     g_install_blocking_job = nullptr;
     g_release_reference = nullptr;
     g_modal_state.reset();
+    g_lower_gate_frames.store(0, std::memory_order_relaxed);
+    g_title_gate_frames.store(0, std::memory_order_relaxed);
     g_queue_work.store(false, std::memory_order_release);
     g_scheduling.clear(std::memory_order_release);
     g_next_collection_tick.store(0, std::memory_order_release);

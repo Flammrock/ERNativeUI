@@ -5,6 +5,7 @@
 #include "module.hpp"
 #include "runtime_log.hpp"
 #include "runtime_state.hpp"
+#include "native_input_bindings.hpp"
 #include "native_text_input.hpp"
 
 #include <Windows.h>
@@ -16,6 +17,8 @@ namespace erui {
 namespace {
 
 InstallResult fail_install(InstallError error) noexcept {
+    erui::native::remove_native_input_bindings();
+    erui::native::remove_native_menu_hooks();
     erui::native::reset_native_text_inputs();
     detail::runtime_state().menu.reset();
     detail::runtime_state().installed.store(false, std::memory_order_release);
@@ -60,6 +63,8 @@ const char* row_kind_name(RowKind kind) noexcept {
         return "popup-choice";
     case RowKind::text_input:
         return "text-input";
+    case RowKind::color_picker:
+        return "color-picker";
     case RowKind::button:
         return "button";
     case RowKind::submenu:
@@ -105,14 +110,14 @@ void log_compiled_menu_diagnostics(const detail::CompiledMenu& menu) noexcept {
 
     detail::logf(
         LogLevel::trace,
-        "diagnostic: runtimeApi=0x%08X RuntimeOptionsSize=%zu logSinkOffset=%zu rootPage=%zu pagination=%d controllerCapacity=%u",
+        "diagnostic: runtimeApi=0x%08X RuntimeOptionsSize=%zu logSinkOffset=%zu rootPage=%zu pagination=%d gameOptionsCapacity=%u",
         static_cast<unsigned>(runtime_api_version),
         sizeof(RuntimeOptions),
         offsetof(RuntimeOptions, log_sink),
         menu.root_page_index,
         menu.pagination_required_for_capacity(
-            detail::runtime_state().options.controller_visual_capacity) ? 1 : 0,
-        static_cast<unsigned>(detail::runtime_state().options.controller_visual_capacity));
+            detail::runtime_state().options.game_options_visual_capacity) ? 1 : 0,
+        static_cast<unsigned>(detail::runtime_state().options.game_options_visual_capacity));
 
     for (std::size_t page_index = 0; page_index < menu.pages.size(); ++page_index) {
         const detail::CompiledPage& page = menu.pages[page_index];
@@ -197,10 +202,10 @@ InstallResult install_impl(
 
     if (!options.enable_row_injection ||
         options.injection_cooldown_ms > 5000 ||
-        options.controller_visual_capacity <
-             detail::controller_vanilla_capacity ||
-        options.controller_visual_capacity >
-             detail::controller_max_visual_capacity) {
+        options.game_options_visual_capacity <
+             detail::game_options_vanilla_capacity ||
+        options.game_options_visual_capacity >
+             detail::game_options_max_visual_capacity) {
         detail::logf(LogLevel::error, "Invalid ERNativeUI runtime options");
         return fail_install(InstallError::invalid_options);
     }
@@ -217,7 +222,7 @@ InstallResult install_impl(
 
     detail::logf(
         LogLevel::info,
-        "Compiled menu: pages=%zu rootRows=%zu tabs=%zu modelButtons=%zu modelSubmenus=%zu popupChoices=%zu textInputs=%zu customTexts=%zu pagination=%d",
+        "Compiled menu: pages=%zu rootRows=%zu tabs=%zu modelButtons=%zu modelSubmenus=%zu popupChoices=%zu textInputs=%zu colorPickers=%zu inputBindingSections=%zu inputBindings=%zu customTexts=%zu pagination=%d",
         runtime.menu->pages.size(),
         runtime.menu->root_page().rows.size(),
         runtime.menu->tab_page_indices.size(),
@@ -225,9 +230,12 @@ InstallResult install_impl(
         runtime.menu->modeled_submenu_count,
         runtime.menu->modeled_popup_choice_count,
         runtime.menu->modeled_text_input_count,
+        runtime.menu->modeled_color_picker_count,
+        runtime.menu->input_binding_sections.size(),
+        runtime.menu->modeled_input_binding_count,
         runtime.menu->texts.size(),
         runtime.menu->pagination_required_for_capacity(
-            options.controller_visual_capacity) ? 1 : 0);
+            options.game_options_visual_capacity) ? 1 : 0);
     log_compiled_menu_diagnostics(*runtime.menu);
 
     erui::native::ModuleView game{};
@@ -246,13 +254,38 @@ InstallResult install_impl(
 
     const bool active_pagination = options.enable_row_injection &&
         runtime.menu->pagination_required_for_capacity(
-            options.controller_visual_capacity);
-    bool require_buttons = active_pagination;
+            options.game_options_visual_capacity);
+    bool has_non_game_builtin_rows = false;
+    for (std::uint8_t native_category = 1;
+         native_category < runtime.menu->builtin_page_indices.size();
+         ++native_category) {
+        const detail::CompiledPage* const builtin =
+            runtime.menu->builtin_page(native_category);
+        if (builtin && !builtin->rows.empty()) {
+            has_non_game_builtin_rows = true;
+            break;
+        }
+    }
+    // A built-in panel's free slots are a live GFX property. Even a page that
+    // contains only toggles may need a native Next action and Back-enabled
+    // continuation, so resolve those shared interfaces conservatively.
+    const bool runtime_capacity_pagination =
+        options.enable_row_injection && has_non_game_builtin_rows;
+    // ColorPicker reuses Elden Ring's native action-row controller even when
+    // its GFX presentation is redirected to the standalone color widget.
+    // Resolve that controller for a color-only menu too; otherwise the host
+    // would install successfully while silently omitting every ColorPicker.
+    bool require_buttons = active_pagination || runtime_capacity_pagination ||
+        runtime.menu->modeled_color_picker_count != 0;
     bool require_submenus = options.enable_row_injection &&
-        runtime.menu->root_plan(options.controller_visual_capacity)
-            .pages.slices.size() > 1;
+        (runtime.menu->root_plan(options.game_options_visual_capacity)
+            .pages.slices.size() > 1 || runtime_capacity_pagination);
+    const bool require_native_back =
+        active_pagination || runtime_capacity_pagination;
     const bool require_text_inputs = options.enable_row_injection &&
         runtime.menu->modeled_text_input_count != 0;
+    const bool require_input_bindings =
+        runtime.menu->modeled_input_binding_count != 0;
     if (options.enable_row_injection) {
         for (std::size_t page_index = 0;
              page_index < runtime.menu->pages.size(); ++page_index) {
@@ -283,7 +316,7 @@ InstallResult install_impl(
                 runtime.menu->modeled_popup_choice_count != 0,
                 require_text_inputs,
                 options.enable_custom_text) ||
-            (active_pagination && !addresses.native_back)) {
+            (require_native_back && !addresses.native_back)) {
             detail::logf(
                 LogLevel::error,
                 "Pre-resolved native interfaces do not satisfy the compiled menu");
@@ -299,7 +332,7 @@ InstallResult install_impl(
                 options.enable_row_injection,
                 require_buttons,
                 require_submenus,
-                active_pagination,
+                require_native_back,
                 runtime.menu->modeled_popup_choice_count != 0,
                 require_text_inputs,
                 options.enable_custom_text)) {
@@ -315,9 +348,25 @@ InstallResult install_impl(
         return fail_install(InstallError::address_resolution_failed);
     }
 
+    if (require_input_bindings &&
+        !erui::native::prepare_native_input_bindings(*runtime.menu)) {
+        detail::logf(
+            LogLevel::error,
+            "Failed to prepare native input bindings");
+        return fail_install(InstallError::address_resolution_failed);
+    }
+
     const erui::native::HookInstallStatus hook_status =
         erui::native::install_native_menu_hooks(addresses);
     if (hook_status != erui::native::HookInstallStatus::success) {
+        return fail_install(InstallError::hook_install_failed);
+    }
+
+    if (require_input_bindings &&
+        !erui::native::install_native_input_bindings()) {
+        detail::logf(
+            LogLevel::error,
+            "Failed to install native input-binding hooks");
         return fail_install(InstallError::hook_install_failed);
     }
 
@@ -341,6 +390,7 @@ void uninstall() noexcept {
     if (!runtime.installed.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
+    erui::native::remove_native_input_bindings();
     erui::native::remove_native_menu_hooks();
     erui::native::reset_native_text_inputs();
     runtime.button_action_hits.store(0, std::memory_order_release);
@@ -393,6 +443,8 @@ std::size_t poll_changes() noexcept {
     if (!runtime.installed.load(std::memory_order_acquire) || !runtime.menu) {
         return 0;
     }
+
+    native::dispatch_native_input_binding_events();
 
     std::size_t changes = 0;
     for (detail::CompiledPage& page : runtime.menu->pages) {

@@ -8,6 +8,7 @@
 
 namespace erui::detail {
 struct CompiledRow;
+struct CompiledMenu;
 }
 
 namespace erui::native {
@@ -29,6 +30,15 @@ struct RowInjectionOutcome {
 RowInjectionOutcome inject_registered_rows(
     void* page,
     const GameAddresses& addresses) noexcept;
+
+// Copies the resolved physical slice into output. Built-in page slices are
+// computed from their live first-page capacity without allocation; ordinary
+// submenu and Game Options routes use the compiler's immutable plans.
+[[nodiscard]] bool resolve_page_route_slice(
+    const erui::detail::CompiledMenu& menu,
+    erui::detail::PageRoute route,
+    erui::detail::PageSlice& output) noexcept;
+
 RowInjectionOutcome inject_page_route(
     void* page,
     erui::detail::PageRoute route,

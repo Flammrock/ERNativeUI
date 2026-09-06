@@ -129,10 +129,10 @@ function(erui_add_abi_release release_token)
             COMMAND ERNativeUIAbiNegotiationCurrent
                 "$<TARGET_FILE:${contract_host}>" old-host)
     endif()
-    if(TARGET ERNativeUIAbiCurrentWrapperFallback)
+    if(TARGET ERNativeUIAbiCurrentConnectionRejectsV1_0)
         add_test(NAME
-            "ERNativeUI.ABI.Compat.CurrentTo${release_upper}.Wrapper"
-            COMMAND ERNativeUIAbiCurrentWrapperFallback
+            "ERNativeUI.ABI.Compat.CurrentTo${release_upper}.ConnectionRejects"
+            COMMAND ERNativeUIAbiCurrentConnectionRejectsV1_0
                 "$<TARGET_FILE:${contract_host}>")
     endif()
     if(TARGET ERNativeUIAbiDescriptorGuardCurrent)

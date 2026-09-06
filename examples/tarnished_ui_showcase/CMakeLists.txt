@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(TarnishedUIShowcase LANGUAGES CXX)
-    find_package(ERNativeUI 0.9 CONFIG REQUIRED)
+    find_package(ERNativeUI 1.1.0 CONFIG REQUIRED)
     set(ERNATIVEUI_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy" CACHE PATH
         "Directory in which the example DLL is staged")
 endif()

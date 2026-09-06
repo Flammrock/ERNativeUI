@@ -30,7 +30,9 @@ struct CapturedTitleTarget {
     void* persistent_result{};
 
     [[nodiscard]] bool valid() const noexcept {
-        return route.valid() && route.kind != erui::detail::PageRouteKind::root_main &&
+        return route.valid() &&
+            route.kind != erui::detail::PageRouteKind::root_main &&
+            route.kind != erui::detail::PageRouteKind::builtin_main &&
             movie_context && persistent_result;
     }
 
@@ -57,6 +59,7 @@ public:
         void* persistent_result) noexcept {
         if (!path || !pending_route.valid() ||
             pending_route.kind == erui::detail::PageRouteKind::root_main ||
+            pending_route.kind == erui::detail::PageRouteKind::builtin_main ||
             !movie_context || !persistent_result || !is_source_path(path)) {
             return nullptr;
         }

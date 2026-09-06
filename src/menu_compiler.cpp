@@ -1,8 +1,11 @@
 #include "menu_compiler.hpp"
 
+#include <algorithm>
+#include <iterator>
 #include <string>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 namespace erui::detail {
 namespace {
@@ -98,6 +101,66 @@ void compile_physical_titles(
     }
 }
 
+void compile_builtin_physical_titles(
+    CompiledMenu& compiled,
+    const Page& input,
+    CompiledPage& output,
+    std::size_t page_index) {
+    auto plan = std::make_unique<BuiltinPhysicalTitlePlan>();
+    const std::size_t logical_row_count = output.rows.size();
+    for (std::uint8_t first_page_capacity = 1;
+         first_page_capacity <= builtin_page_max_first_capacity;
+         ++first_page_capacity) {
+        PageSlice first_slice{};
+        if (!resolve_paginated_slice(
+                page_index,
+                logical_row_count,
+                first_page_capacity,
+                native_subpage_capacity,
+                0,
+                first_slice)) {
+            throw std::logic_error(
+                "built-in page title plan could not resolve its first slice");
+        }
+        // The native main page keeps Elden Ring's localized title. It needs no
+        // ERNativeUI title metadata unless a continuation actually exists.
+        if (first_slice.slice_count <= 1) continue;
+
+        const auto existing = std::find_if(
+            plan->variants.begin(),
+            plan->variants.end(),
+            [&](const BuiltinPhysicalTitleVariant& variant) {
+                return variant.slice_count == first_slice.slice_count;
+            });
+        std::size_t variant_index{};
+        if (existing == plan->variants.end()) {
+            BuiltinPhysicalTitleVariant variant{};
+            variant.slice_count = first_slice.slice_count;
+            compile_physical_titles(
+                compiled,
+                input,
+                output,
+                page_index,
+                first_slice.slice_count,
+                variant.title_ids);
+            plan->variants.push_back(std::move(variant));
+            variant_index = plan->variants.size() - 1;
+        } else {
+            variant_index = static_cast<std::size_t>(
+                std::distance(plan->variants.begin(), existing));
+        }
+        if (variant_index >= BuiltinPhysicalTitlePlan::invalid_variant) {
+            throw std::logic_error(
+                "built-in page title variant range was exhausted");
+        }
+        plan->variant_by_capacity[first_page_capacity] =
+            static_cast<std::uint8_t>(variant_index);
+    }
+    if (!plan->variants.empty()) {
+        output.builtin_physical_title_plan = std::move(plan);
+    }
+}
+
 } // namespace
 
 std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
@@ -115,6 +178,9 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
     std::size_t estimated_text_count = 6 + menu.pages_.size() * 2;
     for (const auto& page : menu.pages_) {
         estimated_text_count += page->rows_.size() * 2;
+    }
+    for (const auto& section : menu.input_binding_sections_) {
+        estimated_text_count += 1 + section->bindings_.size();
     }
     compiled->text_bindings.reserve(estimated_text_count);
 
@@ -164,6 +230,29 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
     }
     compiled->root_page_index = root_it->second;
 
+    for (std::size_t destination_index = 0;
+         destination_index < menu.builtin_pages_.size();
+         ++destination_index) {
+        const Page* page = menu.builtin_pages_[destination_index];
+        if (!page) continue;
+        const auto found = page_indices.find(page);
+        if (found == page_indices.end()) {
+            throw std::logic_error(
+                "built-in page is not owned by its menu");
+        }
+        const auto destination = static_cast<BuiltinPage>(destination_index);
+        const std::uint8_t native_id = native_category_id(destination);
+        if (native_id >= compiled->builtin_page_indices.size()) {
+            throw std::logic_error("built-in page has no native category");
+        }
+        compiled->builtin_page_indices[native_id] = found->second;
+        compiled->pages[found->second].builtin_page = destination;
+    }
+    if (compiled->builtin_page_index(native_category_id(
+            BuiltinPage::game_options)) != compiled->root_page_index) {
+        throw std::logic_error("Game Options page is not the legacy root");
+    }
+
     for (const Page* tab : menu.tab_pages_) {
         const auto tab_it = page_indices.find(tab);
         if (tab_it == page_indices.end()) {
@@ -182,7 +271,9 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             // Disabled buttons/submenus are therefore omitted consistently
             // from both materialization and pagination.
             if (!row.enabled &&
-                (row.kind == RowKind::button || row.kind == RowKind::submenu)) {
+                (row.kind == RowKind::button ||
+                    row.kind == RowKind::color_picker ||
+                    row.kind == RowKind::submenu)) {
                 continue;
             }
             const std::size_t compiled_row_index = output.rows.size();
@@ -211,6 +302,8 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             compiled_row.value_action = row.value_action;
             compiled_row.text_input_state = row.text_input_state;
             compiled_row.text_action = row.text_action;
+            compiled_row.color_picker_state = row.color_picker_state;
+            compiled_row.color_action = row.color_action;
             compiled_row.enabled = row.enabled;
             if (row.kind == RowKind::popup_choice && row.byte_value) {
                 compiled_row.popup_choice_state.set_public_selection(
@@ -230,6 +323,50 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
         }
     }
 
+    compiled->input_binding_sections.reserve(
+        menu.input_binding_sections_.size());
+    for (std::size_t section_index = 0;
+         section_index < menu.input_binding_sections_.size();
+         ++section_index) {
+        const InputBindingSection& input =
+            *menu.input_binding_sections_[section_index];
+        if (input.bindings_.empty()) continue;
+
+        CompiledInputBindingSection output{};
+        output.label_id = compiled->texts.add(input.label_);
+        register_text_binding(
+            *compiled,
+            output.label_id,
+            TextRole::input_binding_section,
+            section_index);
+        output.bindings.reserve(input.bindings_.size());
+        for (std::size_t binding_index = 0;
+             binding_index < input.bindings_.size();
+             ++binding_index) {
+            const InputBindingSection::Definition& definition =
+                input.bindings_[binding_index];
+            const TextId label_id = compiled->texts.add(definition.label);
+            register_text_binding(
+                *compiled,
+                label_id,
+                TextRole::input_binding_label,
+                section_index,
+                binding_index);
+            output.bindings.push_back({
+                .handle = definition.handle,
+                .provider_id = input.provider_id_,
+                .binding_id = definition.binding_id,
+                .label_id = label_id,
+                .default_inputs = definition.default_inputs,
+                .current_inputs = definition.current_inputs,
+                .action = definition.action,
+                .assignments_changed = definition.assignments_changed,
+            });
+            ++compiled->modeled_input_binding_count;
+        }
+        compiled->input_binding_sections.push_back(std::move(output));
+    }
+
     compiled->reachable_pages.assign(compiled->pages.size(), false);
     std::vector<std::size_t> pending_pages{};
     pending_pages.reserve(compiled->pages.size());
@@ -241,6 +378,9 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
         }
     };
     mark_reachable(compiled->root_page_index);
+    for (const std::size_t index : compiled->builtin_page_indices) {
+        if (index != invalid_compiled_index) mark_reachable(index);
+    }
     for (const std::size_t index : compiled->tab_page_indices) mark_reachable(index);
     for (std::size_t cursor = 0; cursor < pending_pages.size(); ++cursor) {
         const std::size_t page_index = pending_pages[cursor];
@@ -260,6 +400,8 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
                 ++compiled->modeled_popup_choice_count;
             } else if (row.kind == RowKind::text_input) {
                 ++compiled->modeled_text_input_count;
+            } else if (row.kind == RowKind::color_picker) {
+                ++compiled->modeled_color_picker_count;
             }
         }
     }
@@ -291,7 +433,7 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
 
     compiled->page_plans.resize(compiled->pages.size());
     for (std::size_t page_index = 0; page_index < compiled->pages.size(); ++page_index) {
-        if (page_index == compiled->root_page_index) {
+        if (compiled->is_builtin_page_index(page_index)) {
             continue;
         }
         compiled->page_plans[page_index] = paginate_subpage(
@@ -303,10 +445,10 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
         }
     }
 
-    for (std::uint8_t capacity = controller_vanilla_capacity;
-         capacity <= controller_max_visual_capacity; ++capacity) {
+    for (std::uint8_t capacity = game_options_vanilla_capacity;
+         capacity <= game_options_max_visual_capacity; ++capacity) {
         RootPagePlan& plan = compiled->root_plans[
-            capacity - controller_vanilla_capacity];
+            capacity - game_options_vanilla_capacity];
         plan = paginate_root_page(
             compiled->root_page_index,
             compiled->root_page().rows.size(),
@@ -317,7 +459,7 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
     }
 
     for (std::size_t page_index = 0; page_index < compiled->pages.size(); ++page_index) {
-        if (page_index == compiled->root_page_index) continue;
+        if (compiled->is_builtin_page_index(page_index)) continue;
         compile_physical_titles(
             *compiled,
             *menu.pages_[page_index],
@@ -326,9 +468,9 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             compiled->page_plans[page_index].slices.size(),
             compiled->pages[page_index].physical_title_ids);
     }
-    for (std::uint8_t capacity = controller_vanilla_capacity;
-         capacity <= controller_max_visual_capacity; ++capacity) {
-        const std::size_t index = capacity - controller_vanilla_capacity;
+    for (std::uint8_t capacity = game_options_vanilla_capacity;
+         capacity <= game_options_max_visual_capacity; ++capacity) {
+        const std::size_t index = capacity - game_options_vanilla_capacity;
         compile_physical_titles(
             *compiled,
             *menu.root_page_,
@@ -336,6 +478,22 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             compiled->root_page_index,
             compiled->root_plans[index].pages.slices.size(),
             compiled->root_physical_title_ids[index]);
+    }
+    // Category zero is Game Options and already uses the root-title plans
+    // above. Other built-in panels reveal their free capacity only after the
+    // native materializer runs, so compile deduplicated variants for every
+    // capacity accepted by the runtime validator.
+    for (std::uint8_t native_category = 1;
+         native_category < compiled->builtin_page_indices.size();
+         ++native_category) {
+        const std::size_t page_index =
+            compiled->builtin_page_index(native_category);
+        if (page_index >= compiled->pages.size()) continue;
+        compile_builtin_physical_titles(
+            *compiled,
+            *menu.pages_[page_index],
+            compiled->pages[page_index],
+            page_index);
     }
 
     compiled->texts.freeze();

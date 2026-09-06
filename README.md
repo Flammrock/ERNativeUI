@@ -2,655 +2,268 @@
 
 ![ERNativeUI banner](assets/ernativeui-banner.png)
 
-ERNativeUI is a process-wide native menu host for Elden Ring mods. One
-`ERNativeUI.dll` owns the game hooks and combines settings registered by any
-number of client mods into Elden Ring's real **System -> Game Options** UI.
-It uses native controls, focus, help text, controller/mouse navigation,
-subpages, and the native Back stack--not an ImGui or DirectX overlay.
+<p align="center">
+  <strong>One native UI host. Multiple client mods. A menu that belongs in Elden Ring.</strong>
+</p>
 
-ERNativeUI is my first mod. It is released under the MIT License;
-contributions, forks, and improvements are welcome as long as the license
-terms and copyright notice are preserved.
+<p align="center">
+  <a href="https://github.com/Flammrock/ERNativeUI/releases/latest">Download</a>
+  · <a href="https://www.nexusmods.com/eldenring/mods/10767">Nexus Mods</a>
+  · <a href="docs/README.md">Documentation</a>
+  · <a href="docs/getting-started/first-mod.md">Build your first mod</a>
+  · <a href="examples/README.md">Examples</a>
+</p>
 
-> ERNativeUI is for offline use with Easy Anti-Cheat disabled. Native addresses
-> are game-version-sensitive. Hot unloading the host or a registered client is
-> not supported.
+ERNativeUI lets mod authors add settings and interactions directly to Elden
+Ring's native interface. One process-wide `ERNativeUI.dll` owns the game hooks
+and merges content registered by multiple client mods through a stable C ABI
+or a friendly header-only C++17 wrapper.
 
-### Solid Uncapper compatibility
+This is not an ImGui or DirectX overlay. ERNativeUI uses Elden Ring's own
+controls, pages, dialogs, focus, help text, transitions, controller input,
+mouse input, and Back stack.
 
-ERNativeUI can coexist with Solid Uncapper's native in-game menu. List
-`Solid Uncapper.dll` before `ERNativeUI.dll` in Mod Engine 2's `external_dlls`.
-ERNativeUI captures the shared native interfaces early, waits for Solid
-Uncapper's asynchronous menu initialization, validates its three detours, and
-then installs a cooperative hook chain. DLL list order alone is insufficient
-because both mods finish initialization on worker threads.
+> ERNativeUI is a Windows x64 mod for offline play with Easy Anti-Cheat
+> disabled. Native integration is game-version-sensitive; use a release that
+> explicitly supports the installed Elden Ring executable.
 
-## What it provides
+<p align="center">
+  <img src="assets/ernativeui-separator-1.png" alt="">
+</p>
 
-- One canonical runtime, regardless of how many mods register settings.
-- Native toggles, byte sliders, inline choices, popup-list choices, buttons,
-  nested submenus, labels, and help text.
-- Automatic global root pagination and per-submenu pagination.
-- Automatic per-slice page titles, with an optional provider formatter.
-- Native Previous/Next navigation, including Elden Ring's real page-pop path.
-- FIFO native modal alerts with selectable buttons and bottom/center placement.
-- Host-owned toggle/slider/choice storage with callback notification and
-  get/set APIs.
-- Deterministic provider order: priority, provider ID, then insertion order.
-- A strict C11-compatible ABI in `erui.h`.
-- A friendly, header-only C++17 client API in `ERNativeUI.hpp`.
-- Runtime game-language discovery with a known-language enum and Steam's exact
-  identifier for forward-compatible localization.
-- No client import library, static library, shared STL objects, or allocator
-  ownership across the DLL boundary.
+## Why ERNativeUI?
+
+- **Native by design:** menus look and behave like part of Elden Ring.
+- **One shared host:** several mods can contribute content without each one
+  installing a competing set of UI hooks.
+- **A compiler-friendly SDK:** strict C11 ABI, header-only C++17 wrapper, and
+  no client import library or shared STL ownership.
+- **More than settings rows:** built-in pages, submenus, pagination, dialogs,
+  localization, input bindings, and provider storage share one system.
+- **Fail-safe native integration:** signatures and object boundaries are
+  validated instead of assuming that an old address is still correct.
+- **Open and reproducible:** the implementation, API, tests, GFX tooling, and
+  reverse-engineering research are available to the community.
 
 ## Showcase
 
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="assets/screenshots/01.png" alt="ERNativeUI settings integrated into Elden Ring Game Options"><br>
-      <sub>Native controls from multiple client mods integrated into Game Options.</sub>
+      <a href="docs/guides/controls/README.md"><img src="docs/assets/images/controls/overview/game-options-controls-overview.png" alt="ERNativeUI controls integrated into Elden Ring Game Options"></a><br>
+      <sub>Settings from multiple client mods, merged into Game Options.</sub>
     </td>
     <td width="50%" align="center">
-      <img src="assets/screenshots/02.png" alt="Localized native greeting dialog"><br>
-      <sub>A localized message using Elden Ring's native dialog presentation.</sub>
+      <a href="docs/guides/native-dialogs.md"><img src="docs/assets/images/dialogs/native-alert-ok-bottom.png" alt="Native greeting dialog with an OK button"></a><br>
+      <sub>A localizable client message using Elden Ring's native dialog.</sub>
     </td>
   </tr>
   <tr>
     <td width="50%" align="center">
-      <img src="assets/screenshots/03.png" alt="Paginated ERNativeUI settings page"><br>
+      <a href="docs/guides/controls/text-input.md"><img src="docs/assets/images/controls/text-input/text-input_fullscreen_after_set.png" alt="Native ERNativeUI text input with a confirmed player name"></a><br>
+      <sub>Native text entry with placeholders, confirmed-value callbacks, and persisted values.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/color-picker.md"><img src="docs/assets/images/controls/color-picker/color-picker_fullscreen_after_click.png" alt="Native Elden Ring color palette opened from an ERNativeUI color picker"></a><br>
+      <sub>Preset palettes and Elden Ring's custom RGB color editor.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/menus-and-pages.md"><img src="docs/assets/images/menus/pagination-middle-page.png" alt="Paginated ERNativeUI settings page"></a><br>
       <sub>Automatic pagination, native navigation, and per-page titles.</sub>
     </td>
     <td width="50%" align="center">
-      <img src="assets/screenshots/04.png" alt="Native inline and popup choice controls"><br>
-      <sub>Inline choices and native popup selection lists.</sub>
+      <a href="docs/guides/controls/popup-choice.md"><img src="docs/assets/images/controls/popup-choice/popup-choice-list-open.png" alt="Native popup choice list opened by ERNativeUI"></a><br>
+      <sub>Native selection lists for settings with several named choices.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/input-bindings.md"><img src="docs/assets/images/input-bindings/controller-bindings-section.png" alt="ERNativeUI actions added to Elden Ring Button Settings"></a><br>
+      <sub>Client-defined controller actions in Button Settings.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/input-bindings.md"><img src="docs/assets/images/input-bindings/keyboard-mouse-bindings-section.png" alt="ERNativeUI actions added to Elden Ring Key Bindings"></a><br>
+      <sub>Native keyboard and mouse assignment and remapping.</sub>
     </td>
   </tr>
   <tr>
     <td colspan="2" align="center">
-      <img src="assets/screenshots/05.png" alt="Native two-button modal dialog" width="75%"><br>
-      <sub>Native modal variants with configurable buttons and placement.</sub>
+      <a href="docs/guides/native-dialogs.md"><img src="docs/assets/images/dialogs/native-alert-ok-cancel-bottom.png" alt="Native two-button modal dialog" width="75%"></a><br>
+      <sub>Modal messages with configurable buttons and placement.</sub>
     </td>
   </tr>
 </table>
 
-## Architecture
-
-```text
-Client DLLs built with              One shared host                    Elden Ring
-the header-only SDK                 ---------------                    ----------
-----------------------              ERNativeUI.dll
-ModClient1.dll --+                  -> provider registry
-ModClient2.dll --+-- stable C ABI --> merged menu model
-ModClient3.dll --+                  -> global pagination
-                                     -> native rows, text and values
-                                     -> one set of hooks -------------> Game Options UI
-                                               |
-                                               +-- invokes client callbacks
-```
-
-Client mods own their gameplay logic and callbacks. They never install menu
-hooks or create pagination rows: each mod declares logical content through the
-header-only API, and the single host copies it, combines every provider, and
-materializes the resulting native UI.
-
-Detailed design and maintenance material:
-
-- [Public API](docs/API.md)
-- [ABI stability contract](docs/ABI_STABILITY.md)
-- [Architecture and lifecycle](docs/ARCHITECTURE.md)
-- [Native addresses and pagination research](docs/NATIVE_ADDRESSES_AND_PAGINATION.md)
-- [Native dialogs and modal input research](docs/NATIVE_DIALOGS.md)
-- [Native popup-choice research](docs/NATIVE_POPUP_CHOICES.md)
-- [Mod compatibility](docs/COMPATIBILITY.md)
-- [Release and versioning guide](docs/RELEASING.md)
-- [Page titles and presentation](docs/PAGE_PRESENTATION.md)
-- [GFX patcher](docs/GFX_PATCHER.md)
-- [Validation checklist](VALIDATION.md)
-
-## Player installation
-
-Place the host and desired client mods where Mod Engine 2 can load them, with
-the host listed first:
-
-```toml
-[modengine]
-external_dlls = [
-    "mod\\ERNativeUI\\ERNativeUI.dll",
-    "mod\\ERNativeUI\\examples\\TarnishedUIShowcase.dll",
-    "mod\\MyMod\\MyMod.dll"
-]
-```
-
-`ERNativeUI.ini` is created beside `ERNativeUI.dll` from an embedded default
-when missing. Existing files are never overwritten. Do not load the template
-DLL in a normal setup; it is a source starting point for developers.
-
-Client mods discover the already-loaded host dynamically. They do not call
-`LoadLibrary`, and a missing host disables only their optional configuration
-menu instead of preventing the client DLL from loading.
-
-Only one canonical `ERNativeUI.dll` should be installed. Individual client
-mods should declare it as a dependency rather than bundle private copies.
-
-## Mod-author quick start
-
-Requires Windows x64 and C++17 or newer:
-
-```cpp
-#include <ernativeui/ERNativeUI.hpp>
-
-HMODULE module;
-
-void apply() noexcept
-{
-    // Keep UI-thread callbacks short.
-}
-
-void ERUI_CALL enabled_changed(void*, std::uint8_t value) noexcept
-{
-    // Copy value into your mod state and persist it if desired.
-}
-
-DWORD WINAPI initialize(void*) noexcept
-{
-    erui::ProviderOptions options{};
-    options.provider_id = "com.example.my-mod";
-    options.display_name = L"My Mod";
-    options.owner_module = module;
-
-    const auto result = erui::register_menu(options, [](erui::Menu& menu) {
-        auto root = menu.root();
-        root.add_toggle(
-            L"Enabled",
-            L"Enable or disable My Mod.",
-            1,
-            &enabled_changed);
-        root.add_button<&apply>(
-            L"Apply",
-            L"Apply the current settings.");
-
-        auto advanced = root.add_submenu(
-            L"Advanced",
-            L"Open advanced settings.");
-        advanced.set_presentation(L"My Mod - Advanced", L"Advanced Settings");
-        advanced.add_button<&apply>(L"Apply Advanced", L"Apply these values.");
-    });
-
-    if (!result) {
-        OutputDebugStringW(result.error().message().c_str());
-    }
-    return 0;
-}
-```
-
-Start registration from a worker after `DllMain` returns. A complete,
-extensively commented starting project is in [examples/template](examples/template).
-The buildable [Tarnished UI Showcase](examples/tarnished_ui_showcase) exercises
-host-owned values, callbacks, both native choice presentations, submenus, and
-33-row pagination, translated for every language currently reported by Elden
-Ring. The smaller [Localized Greeting](examples/localized_greeting) demonstrates
-the recommended localization and fallback pattern.
-
-## Localization
-
-ERNativeUI asks the Steamworks API used by Elden Ring for the active game
-language. It does not inspect the Windows locale, parse Steam configuration
-files, hook Steam functions, or depend on a game RVA.
-
-Call `erui::query_game_language()` before registration when the provider name
-must be translated. `Menu::game_language()` and
-`Registration::game_language()` expose the same owned snapshot later. Each
-`LanguageInfo` contains a convenient `GameLanguage` classification plus the
-exact Steam identifier. For example, Korean is `koreana`, Brazilian Portuguese
-is `brazilian`, and Latin American Spanish is `latam`.
-
-Use English when discovery is unavailable. If `known` is `unknown` but
-`identifier` is non-empty, a mod can recognize a newer or community locale
-without waiting for an ERNativeUI update.
-
-ERNativeUI's own navigation strings are loaded from UTF-8
-`locales/<identifier>.ini` beside the host DLL. Missing files and keys fall
-back independently to English embedded in the DLL. Shipped files cover every
-currently reported non-English Elden Ring locale; translators can edit or add
-files without rebuilding the host. See the
-[locale format](assets/locales/README.md).
-
-Choice rows use an option index as their value and accept between 1 and 32
-non-empty UTF-16 labels. The host copies the option array and its strings
-synchronously:
-
-```cpp
-const std::wstring_view presets[] = {
-    L"Minimal", L"Balanced", L"Maximum"
-};
-erui::ChoiceOptions preset{};
-preset.values = presets;
-preset.count = std::size(presets);
-preset.initial_index = 1;
-root.add_inline_choice(
-    L"Inline Rendering Preset",
-    L"Change a named preset with left/right input.",
-    preset,
-    &preset_changed);
-
-root.add_popup_choice(
-    L"Popup Rendering Preset",
-    L"Open Elden Ring's native selection list.",
-    preset,
-    &popup_preset_changed);
-```
-
-`add_inline_choice` changes in place with left/right input;
-`add_popup_choice` renders as an action row and opens a native list. Their
-callbacks and `Registration::get_value`/`set_value` all use the same
-zero-based selected index. Choice rows are always interactive because the
-corresponding native constructors have no proven disabled-state parameter.
-
-### Development preview: TextInput
-
-The current development branch implements a capability-gated TextInput for
-the unreleased API 1.1. It is not available in the published 1.0 SDK and the
-1.1 function table is not frozen yet. A newer client should check
-`menu.supports(erui::Capability::text_input)` before adding one, allowing all
-of its API 1.0 rows to remain usable with an older host.
-
-`TextInputOptions` supplies copied initial and placeholder text plus a limit.
-The C++ option defaults to 16; at the raw C boundary, zero also selects 16.
-Explicit values must be 1 through 35 UTF-16 code units. A confirmed changed
-value is delivered as a borrowed `TextInputChange`; copy it inside the
-callback. A retained registration can use `set_text` and `get_text` for
-programmatic copy-in/copy-out. The limit is fixed per row at registration
-time. See the [API guide](docs/API.md#textinput-unreleased-api-11) and
-[native investigation](docs/analysis/TEXT_INPUT.md).
-
-### CMake client integration
-
-When ERNativeUI is included as a subdirectory:
-
-```cmake
-target_link_libraries(MyMod PRIVATE ERNativeUI::SDK)
-target_compile_features(MyMod PRIVATE cxx_std_17)
-```
-
-`ERNativeUI::SDK` is an `INTERFACE` target: it adds headers and the C++17
-requirement only. Despite the word `target_link_libraries`, no ERNativeUI
-binary is linked into the client. Strict-C clients use `ERNativeUI::CABI`.
-
-Against an installed SDK:
-
-```cmake
-find_package(ERNativeUI 0.9 CONFIG REQUIRED)
-target_link_libraries(MyMod PRIVATE ERNativeUI::SDK)
-```
-
-You may also add `include/` directly to the include path. There is no required
-`ERNativeUI.lib` or MinGW `.dll.a`.
-
-## C ABI and compiler compatibility
-
-The host exports exactly one public symbol, `ERUI_GetApi`, which accepts the
-supported exact API version and fills the corresponding function table.
-
-The DLL boundary contains only fixed-width integers, explicitly sized POD
-descriptors, UTF-8/UTF-16 pointer-and-length views, opaque 64-bit handles, and
-plain `__cdecl` function pointers. Input strings are copied synchronously.
-STL types, C++ exceptions and cross-module allocation ownership never cross
-the boundary.
-
-This permits, for example, an MSVC C++20 host and a MinGW C++17 client. The
-normal suite compiles `erui.h` as C11 and the wrapper as C++17; the documented
-release validation also runs strict MinGW C11/C++17 smoke commands.
-
-The host itself must use an MSVC-compatible ABI (MSVC or clang-cl) because one
-private Elden Ring action-row interface directly consumes an MSVC
-`std::function`. No such compiler-owned object crosses the public client ABI.
-
-## Registration lifecycle
-
-The v1 host exposes its API during a bounded startup registration phase.
-Providers build private drafts and publish them with one atomic commit. The
-host waits until provider activity is quiet and no draft is active for
-`RegistrationQuietMs`, bounded by `RegistrationMaxWaitMs`, then freezes the
-merged registry and installs one immutable native runtime.
-
-`commit_provider` waits for that final installation. A successful wrapper
-result means the native runtime is ready; a broken game signature reports
-`ERUI_HOST_FAILED`. Do registration from a worker, never from `DllMain`.
-
-This deliberately avoids replacing page objects while Elden Ring is using
-them. A client arriving after the startup phase receives
-`ERUI_REGISTRATION_CLOSED` and logs a clean error. The defaults are 750 ms of
-quiet time and a 5-second absolute startup window.
-
-Committed provider DLLs are pinned until process exit because the host retains
-callback addresses. Buttons run synchronously on Elden Ring's UI thread;
-toggle, slider, and choice notifications run on the host polling worker. No
-callback may throw through the C ABI.
-
-## Native modal alerts
-
-`Registration::alert()` queues an Elden Ring message with native localized
-buttons. `AlertOptions` selects `ok`, `cancel`, `yes`, `no`, `ok_cancel`,
-`yes_no`, or `dismiss_only`, and places the presentation at `bottom` or
-`center`. The C++ defaults are an OK button at the bottom, so the short
-convenience overload remains useful for ordinary notices.
-
-```cpp
-void ERUI_CALL alert_closed(
-    void*, ERUI_Result result, erui::AlertResponse response) noexcept {
-    if (result == ERUI_OK && response == erui::AlertResponse::primary) {
-        // The player selected YES.
-    }
-}
-
-erui::AlertOptions options{};
-options.buttons = erui::AlertButtons::yes_no;
-options.placement = erui::AlertPlacement::center;
-
-registration.alert(
-    L"Apply the recommended settings?", options, &alert_closed);
-```
-
-For one-button layouts, every successful close, including Back, reports
-`primary`. For two-button layouts, the left button reports `primary`; the
-right button and Back report `secondary`. A successful no-button alert reports
-`dismissed`. `none` accompanies an operational failure or a completion for
-which no trustworthy native response payload was available; inspect the
-`ERUI_Result` first.
-
-Requests from every provider share one bounded FIFO; completion callbacks are
-dispatched asynchronously by the host worker. While an ERNativeUI alert is
-visible, matching Game Options pages cannot move or activate a row, and the
-page's native Back action is suppressed. Back is still delivered to the popup
-when it is a valid alert response. Normal page input resumes after dismissal.
-This also covers alerts queued programmatically rather than from a particular
-button callback.
-
-The alert path uses a game-owned blocking-task slot and refuses to replace an
-existing Elden Ring dialog. If any required game-version-sensitive signature
-is unavailable, alert calls return `ERUI_NOT_SUPPORTED` while registered menu
-rows continue to work. See
-[Native dialogs and modal input research](docs/NATIVE_DIALOGS.md) for the
-ownership model, recovered ABI, and maintenance evidence.
-
-## Pagination
-
-Subpages have a conservative capacity of 15 native rows:
-
-```text
-first overflow slice:  14 content + Next
-middle slice:          Previous + 13 content + Next
-final slice:           Previous + up to 14 content
-```
-
-The existing Controller Settings page contains four vanilla rows. A vanilla
-six-row GFX leaves two custom slots; the optional 13-row patched GFX leaves
-nine. The host reads the live page capacity and reserves one custom slot for
-Next when necessary.
-
-Every continuation is a real native child page. Previous invokes the validated
-native Back wrapper, so Elden Ring restores the actual parent stack state.
-
-Paginated submenu titles default to `Title (n/t)`. The existing shared
-Controller Settings page keeps Elden Ring's outer `Configuration` heading;
-shared-root continuations use `ERNativeUI`, while provider-owned submenus may
-override their outer title. Modders can also supply a bounded startup-time
-formatter for per-slice titles. See
-[Page titles and presentation](docs/PAGE_PRESENTATION.md) for the API,
-lifetime rules, and the native GFX research behind this behavior.
-
-## Optional GFX presentation patches
-
-ERNativeUI includes an optional 13-row `02_040_optionsetting.gfx` for a more
-spacious Controller Settings page. The DLL also supports Elden Ring's native
-six-row asset without modification and reads capacities 6 through 13 from the
-live page object. The bundled `02_040` and
-`02_042_pc_graphicsetting.gfx` also carry the narrow, reproducible
-character-name TextInput presentation used by root and Advanced Settings rows.
-TextInput remains functional without those visual patches, but its idle field
-uses the game's plain settings style. `ERNativeUIGfxPatcher.exe` can reproduce
-both transformations from your own UXM-extracted assets. See
-[GFX patcher guide](docs/GFX_PATCHER.md).
-
-## Build, test and deploy
-
-Requirements:
-
-- CMake 3.28 or newer
-- Visual Studio 2022 or newer with x64 C++ tools
-- Git
-
-```bat
-build.bat
-```
-
-`build.bat` configures, builds, and tests in one step. The equivalent individual
-commands used by CI are shown below.
-
-### Build
-
-```bat
-cmake --preset windows-release
-cmake --build --preset windows-release
-```
-
-### Test
-
-```bat
-ctest --preset windows-release
-```
-
-All native-model, frozen-ABI, wrapper, pagination, dialog, choice, and GFX tests
-must pass before deployment.
-
-### Deploy for local testing
-
-Every successful build stages Mod Engine 2-ready files under:
-
-```text
-build/preset-release/deploy/Release/
-+-- ERNativeUI.dll
-+-- ERNativeUI.ini
-+-- README.md, VALIDATION.md
-+-- LICENSE.txt, THIRD_PARTY_NOTICES.txt
-+-- locales/
-+-- menu/
-|   `-- win/
-|       +-- 02_040_optionsetting.gfx
-|       `-- 02_042_pc_graphicsetting.gfx
-+-- docs/
-|   +-- API.md
-|   +-- GFX_PATCHER.md
-|   `-- native and architecture documentation
-+-- licenses/
-`-- examples/
-    +-- TarnishedUIShowcase.dll
-    `-- MyERNativeUIMod.dll
-```
-
-Copy the required DLLs and loose `menu` directory from this staging tree into
-your Mod Engine 2 mod directory, then list the host and desired client DLLs in
-your Mod Engine 2 configuration.
-
-Create a conventional install tree for SDK or relocation testing with:
-
-```bat
-cmake --install build/preset-release --config Release --prefix dist/ERNativeUI
-```
-
-### Package a release locally
-
-Create the same Windows archive published on GitHub with:
-
-```powershell
-./tools/package_release.ps1 `
-  -BuildDirectory build/preset-release `
-  -Version 0.9.0
-```
-
-When preparing a Nexus upload, explicitly request the additional flattened,
-Mod Engine 2-ready archive:
-
-```powershell
-./tools/package_release.ps1 `
-  -BuildDirectory build/preset-release `
-  -Version 0.9.0 `
-  -IncludeNexus
-```
-
-Both commands write under `dist/release/`. GitHub Actions intentionally runs
-the first form and uploads only `ERNativeUI-X.Y.Z-windows-x64.zip`.
-
-The generated host import library is a build by-product and is not installed
-or required by clients.
-
-Useful options:
-
-```text
-ERNATIVEUI_BUILD_HOST
-ERNATIVEUI_BUILD_EXAMPLES
-ERNATIVEUI_BUILD_GFX_PATCHER
-ERNATIVEUI_BUILD_TESTS
-ERNATIVEUI_DEPLOY_DIR
-BUILD_TESTING
-```
-
-## Runtime configuration
-
-```ini
-[Logging]
-# Disabled by default. Set to 1 temporarily when troubleshooting.
-EnableLog = 0
-
-[Runtime]
-RegistrationQuietMs = 750
-RegistrationMaxWaitMs = 5000
-InjectionCooldownMs = 250
-
-[Diagnostics]
-EnableDiagnostics = 0
-```
-
-When `EnableLog = 1`, logs are written to `ERNativeUI.log` beside the host DLL.
-With the default value `0`, the host does not create, truncate, append to, or
-flush a log file. An old log is left untouched. Diagnostics add address
-resolution, registry, pagination, native row and callback traces and are useful
-only while logging is enabled.
-
-## Roadmap: 1.1.0
-
-Version 1.1.0 is an additive release in active development. A checked item
-below is implemented in the development tree; it is not a released or frozen
-API promise until every 1.1 release gate passes. The current TextInput block is
-therefore available for validation, while the API 1.1 table and its final size
-will grow with Color Picker and other accepted 1.1 features. Mod authors should
-continue targeting the published 1.0 SDK for releases today.
-
-Reverse-engineering results may refine implementation details, but must not
-weaken the released 1.0 ABI.
-The public [native UI research notebook](docs/analysis/README.md) records the
-evidence, rejected hypotheses, object lifetimes, and remaining runtime probes
-behind this roadmap.
-
-### Compatibility foundation
-
-- [x] Preserve the complete API 1.0 binary contract and continue accepting
-  explicit `ERUI_API_VERSION_1_0` requests.
-- [x] Add an append-only development API 1.1 table and exact 1.1-to-1.0
-  negotiation in the C++ wrapper.
-- [x] Make new capabilities optional so 1.1 clients using only 1.0 features
-  can still operate with a 1.0 host.
-- [x] Add regression tests using unchanged C and C++17 clients built with the
-  released 1.0 headers against the 1.1 host.
-
-### Native text input
-
-- [Research notebook and discovery plan](docs/analysis/TEXT_INPUT.md)
-- [Unreleased API usage](docs/API.md#textinput-unreleased-api-11)
-- [API-version compatibility test plan](docs/analysis/API_VERSION_COMPATIBILITY_TESTS.md)
-- [x] Recover native TextInput construction and activation, root/subpage GFX
-  presentation, confirmed persistence, and independent per-row limits.
-- [x] Implement bounded host-owned UTF-16 storage, a confirmation callback,
-  fixed per-row maximum length, and programmatic copy-in/copy-out.
-- [x] Add capability-gated C and C++17 text-input APIs without exposing game or
-  STL objects across the DLL boundary.
-- [x] Add maintained template documentation and a production showcase
-  submenu built only through the public API.
-- [ ] Complete callback/cancel/same-value, keyboard, controller, mouse,
-  IME/localized text, pagination, and modal-input validation.
-- [ ] Freeze the final API 1.1 table only after all accepted 1.1 additions and
-  compatibility fixtures are complete.
-
-### Any built-in Game Options tab
-
-- [ ] Identify and validate the native handler, page context, capacity, and
-  presentation behavior for every built-in Game Options tab.
-- [ ] Add a stable public placement identifier, with Controller Settings
-  remaining the default for existing clients.
-- [ ] Merge providers deterministically and paginate independently within each
-  selected built-in tab.
-- [ ] Detect unsupported game builds or foreign hook conflicts and disable only
-  the affected tab integration safely.
-
-### Custom top-level tabs
-
-- [ ] Recover top-level tab creation, selection, teardown, mouse navigation,
-  and LB/RB or L1/R1 navigation.
-- [ ] Define a custom-tab descriptor with localized name, icon metadata,
-  ordering, and unambiguous lifetime rules.
-- [ ] Support any number of logical custom tabs through host-owned
-  virtualization or pagination rather than assuming a fixed GFX capacity.
-- [ ] Define deterministic merging when several providers request custom tabs.
-- [ ] Provide documented icon requirements, validation, fallbacks, and an
-  example custom tab.
-
-### Site of Grace menu integration
-
-- [ ] Recover and document the Site of Grace menu's row construction, action,
-  focus, Back, page-open, and teardown interfaces.
-- [ ] Add an optional capability for providers to register Site of Grace rows.
-- [ ] Support actions that invoke callbacks, enqueue native dialogs, or open
-  provider-owned pages.
-- [ ] Keep Game Options functional when Grace-menu interfaces are unavailable
-  or conflict with another mod.
-- [ ] Validate repeated resting, travel, page navigation, dialog ownership,
-  save reloads, and interaction with other Grace-menu mods.
-
-### 1.1.0 release gates
-
-- [ ] Pass the complete automated suite under MSVC and the public-header tests
-  under both MSVC and MinGW-w64.
-- [ ] Live-test the native six-row and optional thirteen-row Game Options
-  layouts, all supported input devices, and all Steam languages.
-- [ ] Re-run standalone and Solid Uncapper compatibility matrices; record
-  Seamless Co-op and DLC results when testers can provide them.
-- [ ] Update the SDK, template, examples, API reference, native research notes,
-  compatibility guide, Nexus instructions, and migration notes.
-
-## Current limitations
-
-- Windows x64 only.
-- The host requires an MSVC-compatible compiler ABI; clients may use MinGW.
-- Offline/EAC-disabled use only.
-- Host and registered providers cannot hot-unload.
-- Provider topology is immutable after the bounded startup phase in ABI v1.
-- Native signatures must be updated when a game update changes the relevant
-  machine code.
-- Client exceptions must not cross callbacks; use `noexcept` functions.
-- A custom top-level Game Options tab remains outside the production backend.
+<p align="center">
+  <img src="assets/ernativeui-separator-2.png" alt="">
+</p>
+
+## Supported controls
+
+Every control below has a focused guide with a minimal example, complete
+options, screenshots, and links to its native implementation research.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/button.md"><img src="docs/assets/images/controls/button/button_control.png" alt="ERNativeUI native Button control"></a><br>
+      <strong><a href="docs/guides/controls/button.md">Button</a></strong><br>
+      <sub>Trigger a client-mod action.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/submenu.md"><img src="docs/assets/images/controls/submenu/submenu_control.png" alt="ERNativeUI native Submenu control"></a><br>
+      <strong><a href="docs/guides/controls/submenu.md">Submenu</a></strong><br>
+      <sub>Organize settings in native child pages.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/toggle.md"><img src="docs/assets/images/controls/toggle/toggle_control.png" alt="ERNativeUI native Toggle control"></a><br>
+      <strong><a href="docs/guides/controls/toggle.md">Toggle</a></strong><br>
+      <sub>Expose a native on/off setting.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/slider.md"><img src="docs/assets/images/controls/slider/slider_control.png" alt="ERNativeUI native Slider control"></a><br>
+      <strong><a href="docs/guides/controls/slider.md">Slider</a></strong><br>
+      <sub>Adjust a bounded numeric value.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/inline-choice.md"><img src="docs/assets/images/controls/inline-choice/inline-choice_control.png" alt="ERNativeUI native Inline Choice control"></a><br>
+      <strong><a href="docs/guides/controls/inline-choice.md">Inline choice</a></strong><br>
+      <sub>Cycle through named options in place.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/popup-choice.md"><img src="docs/assets/images/controls/popup-choice/popup-choice_control.png" alt="ERNativeUI native Popup Choice control"></a><br>
+      <strong><a href="docs/guides/controls/popup-choice.md">Popup choice</a></strong><br>
+      <sub>Select an option from a native list.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/text-input.md"><img src="docs/assets/images/controls/text-input/text-input_control.png" alt="ERNativeUI native TextInput control"></a><br>
+      <strong><a href="docs/guides/controls/text-input.md">TextInput</a></strong><br>
+      <sub>Edit text with a placeholder and configurable limit.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/color-picker.md"><img src="docs/assets/images/controls/color-picker/color-picker_control.png" alt="ERNativeUI native ColorPicker control"></a><br>
+      <strong><a href="docs/guides/controls/color-picker.md">ColorPicker</a></strong><br>
+      <sub>Choose a color with native palette and RGB editors.</sub>
+    </td>
+  </tr>
+</table>
+
+## More than controls
+
+- Add ordinary rows to supported built-in Configuration pages, including
+  Game Options, Camera Options, Display, Sound, Network, Keyboard/Mouse, and
+  Graphics. [Learn about menus and pages](docs/guides/menus-and-pages.md).
+- Build nested submenus while ERNativeUI handles capacity, pagination, titles,
+  Next, Previous, and the native Back stack.
+- Queue native modal dialogs with configurable button combinations and bottom
+  or centered placement. [Learn about dialogs](docs/guides/native-dialogs.md).
+- Register controller, keyboard, and mouse actions that players can reassign
+  in Elden Ring's binding screens. [Learn about input bindings](docs/guides/input-bindings.md).
+- Follow the selected game language while preserving unknown Steam language
+  identifiers for future locales. [Learn about localization](docs/guides/localization.md).
+- Load, mutate, and explicitly save provider-owned configuration, or use the
+  header-only input-assignment codec with another storage system.
+  [Learn about storage](docs/guides/storage.md).
+- Optionally install reproducible GFX presentation patches for expanded page
+  capacity and enhanced TextInput and ColorPicker presentation.
+  [Learn about GFX presentation](docs/guides/presentation-and-gfx.md).
+
+The complete supported surface, minimum API versions, capabilities, and limits
+live in the [feature matrix](docs/features.md).
+
+<p align="center">
+  <img src="assets/ernativeui-separator-2.png" alt="">
+</p>
+
+## Get started
+
+### Players
+
+Download ERNativeUI from [Nexus Mods](https://www.nexusmods.com/eldenring/mods/10767)
+or [GitHub Releases](https://github.com/Flammrock/ERNativeUI/releases/latest),
+then follow the [player installation guide](docs/getting-started/player-installation.md).
+Install one canonical host and load it before ordinary ERNativeUI client mods.
+
+### Mod authors
+
+The GitHub Windows package contains the host, public headers, CMake package,
+examples, tools, and documentation. Client mods need only `erui.h`, or
+`erui.h` plus `ERNativeUI.hpp`; they do not link an ERNativeUI import library.
+
+1. [Install the SDK](docs/getting-started/setup.md).
+2. [Build “Hello, Tarnished!”](docs/getting-started/first-mod.md).
+3. Continue from the [commented template](examples/template/README.md) or
+   browse the [buildable examples](examples/README.md).
+
+MSVC, clang-cl, and MinGW-w64 client mods can use the same stable host ABI.
+
+## Compatibility at a glance
+
+- Windows x64, offline play, and Easy Anti-Cheat disabled are required.
+- Mod Engine 2 is the primary supported loader.
+- Load exactly one `ERNativeUI.dll` for all client mods.
+- Use a release that names the installed Elden Ring executable after every
+  game update.
+- Solid Uncapper coexistence has a documented load order and tested matrix.
+- Seamless Co-op 2.0.1 was live-tested with the Elden Ring 2.7.0.0 reference
+  executable, with no incompatibility observed for that exact combination.
+- Shadow of the Erdtree remains explicitly unverified until its live matrix
+  is completed.
+- Host and committed client DLLs must remain loaded until process exit.
+
+See [Game and mod compatibility](docs/compatibility.md) for exact tested
+versions, optional GFX conflicts, Solid Uncapper setup, and useful bug reports.
+
+<p align="center">
+  <img src="assets/ernativeui-separator-2.png" alt="">
+</p>
+
+## Documentation
+
+| I want to... | Start here |
+|---|---|
+| Install ERNativeUI as a player | [Player installation](docs/getting-started/player-installation.md) |
+| Create my first client mod | [Getting started](docs/getting-started/README.md) |
+| Add menus, controls, dialogs, bindings, or localization | [Mod-author guides](docs/guides/README.md) |
+| Check supported features and exact API contracts | [Feature matrix](docs/features.md) · [API reference](docs/reference/README.md) |
+| Understand the host/client architecture | [How ERNativeUI works](docs/how-it-works.md) |
+| Reproduce the native UI research | [Research library](docs/research/README.md) |
+| Build, test, contribute, or publish | [Contributing](docs/contributing/README.md) · [Release guide](docs/contributing/releasing.md) |
+
+The [documentation home](docs/README.md) provides the complete reader-oriented
+index.
+
+## Versioning
+
+ERNativeUI release versions and ERUI public API versions are independent.
+Within a compatible `1.x` host line, earlier published `1.x` APIs remain
+available, so a client built with API 1.0 continues to work with a compatible
+newer 1.x host. A future host major may drop earlier-major APIs unless its
+release explicitly preserves them.
+
+Read [Versioning](docs/versioning.md), the
+[changelog](CHANGELOG.md), and the [API migration guides](docs/migrations/README.md)
+before declaring a client dependency.
+
+<p align="center">
+  <img src="assets/ernativeui-separator-2.png" alt="">
+</p>
 
 ## License and contributions
 
-ERNativeUI is licensed under the [MIT License](LICENSE.txt). You may use,
-modify, redistribute, fork, or enhance it--including for other mods--provided
-the MIT license terms and copyright notice are retained.
+ERNativeUI is my first mod. It is released under the
+[MIT License](LICENSE.txt): you may use, modify, redistribute, fork, or improve
+it while preserving the license terms and copyright notice.
 
-Bug reports, compatibility updates, documentation improvements, examples and
-carefully reviewed native-interface research are welcome.
-
-GitHub releases are managed by Release Please from Conventional Commits. Each
-release contains one full Windows SDK/runtime archive. Nexus packaging remains
-an explicit local maintainer operation. Maintainers should follow
-[the release guide](docs/RELEASING.md).
+Bug reports, compatibility updates, documentation improvements, examples, and
+carefully validated native-interface research are welcome. Read the
+[contribution guide](docs/contributing/README.md) or open a
+[GitHub issue](https://github.com/Flammrock/ERNativeUI/issues).

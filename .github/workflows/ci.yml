@@ -28,6 +28,17 @@ jobs:
       - name: Audit installation
         run: cmake --install build/preset-release --config Release --prefix build/install-audit
 
+      - name: Configure installed-package C consumer
+        run: >-
+          cmake -S tests/package_c_consumer -B build/package-c-consumer -A x64
+          -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/install-audit
+
+      - name: Build installed-package C consumer
+        run: cmake --build build/package-c-consumer --config Release
+
+      - name: Run installed-package C consumer
+        run: ./build/package-c-consumer/Release/ERNativeUICPackageConsumer.exe
+
       - name: Upload install-tree artifact
         uses: actions/upload-artifact@v4
         with:

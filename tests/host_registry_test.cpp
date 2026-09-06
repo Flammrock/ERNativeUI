@@ -1,5 +1,6 @@
 #include "host_registry.hpp"
 #include "menu_compiler.hpp"
+#include "steam_language.hpp"
 
 #include <Windows.h>
 
@@ -11,6 +12,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -37,6 +39,17 @@ ERUI_Utf16View utf16(std::wstring_view value) {
 
 void ERUI_CALL changed(void* user_data, std::uint8_t value) {
     *static_cast<std::uint8_t*>(user_data) = value;
+}
+
+struct ValueObservation {
+    std::uint8_t value{};
+    unsigned calls{};
+};
+
+void ERUI_CALL observe_value(void* user_data, std::uint8_t value) {
+    auto& observation = *static_cast<ValueObservation*>(user_data);
+    observation.value = value;
+    ++observation.calls;
 }
 
 void ERUI_CALL pressed(void* user_data) {
@@ -68,6 +81,67 @@ void ERUI_CALL text_changed(
             static_cast<std::size_t>(context->value.length) *
                 sizeof(std::uint16_t));
     }
+    ++observation.calls;
+}
+
+struct ColorObservation {
+    ERUI_ProviderHandle provider{};
+    ERUI_RowHandle row{};
+    ERUI_Color value{};
+    unsigned calls{};
+};
+
+struct BindingObservation {
+    ERUI_ProviderHandle provider{};
+    ERUI_InputActionHandle action{};
+    ERUI_InputDevices devices{};
+    unsigned calls{};
+};
+
+void ERUI_CALL binding_activated(
+    void* user_data,
+    const ERUI_InputActionActivatedContext* context) {
+    auto& observation = *static_cast<BindingObservation*>(user_data);
+    ERUI_TEST_CHECK(context != nullptr);
+    ERUI_TEST_CHECK(context->size == sizeof(*context));
+    ERUI_TEST_CHECK(context->flags == 0);
+    ERUI_TEST_CHECK(context->reserved == 0);
+    observation.provider = context->provider;
+    observation.action = context->action;
+    observation.devices = context->devices;
+    ++observation.calls;
+}
+
+ERUI_ActionInputs default_action_inputs() {
+    ERUI_ActionInputs result{};
+    result.size = sizeof(result);
+    result.controller = {
+        ERUI_INPUT_SLOT_BOUND,
+        ERUI_CONTROLLER_BUTTON_RIGHT_TRIGGER,
+    };
+    result.keyboard = {
+        ERUI_INPUT_SLOT_BOUND,
+        ERUI_KEYBOARD_KEY_F,
+    };
+    result.mouse = {
+        ERUI_INPUT_SLOT_UNBOUND,
+        ERUI_MOUSE_BUTTON_INVALID,
+    };
+    return result;
+}
+
+void ERUI_CALL color_changed(
+    void* user_data,
+    const ERUI_ColorPickerChangeContext* context) {
+    auto& observation = *static_cast<ColorObservation*>(user_data);
+    ERUI_TEST_CHECK(context != nullptr);
+    ERUI_TEST_CHECK(context->size == sizeof(*context));
+    ERUI_TEST_CHECK(context->flags == 0);
+    ERUI_TEST_CHECK(context->reserved == 0);
+    ERUI_TEST_CHECK(context->value.reserved == 0);
+    observation.provider = context->provider;
+    observation.row = context->row;
+    observation.value = context->value;
     ++observation.calls;
 }
 
@@ -118,7 +192,7 @@ void verify_text_input_length_contract() {
     provider.size = sizeof(provider);
     provider.api_version = ERUI_API_VERSION_1_1;
     provider.owner_module = GetModuleHandleW(nullptr);
-    provider.provider_id = ascii("com.example.text-input-lengths");
+    provider.provider_id = ascii("text-input-lengths");
     provider.display_name = utf16(L"TextInput length contract");
 
     ERUI_ProviderHandle provider_handle{};
@@ -234,12 +308,305 @@ void verify_text_input_length_contract() {
     }
 }
 
+void verify_programmatic_value_writes_are_silent() {
+    erui::host::Registry registry{};
+    registry.open_registration();
+
+    ERUI_ProviderDesc provider{};
+    provider.size = sizeof(provider);
+    provider.api_version = ERUI_API_VERSION_1_1;
+    provider.owner_module = GetModuleHandleW(nullptr);
+    provider.provider_id = ascii("silent-value-writes");
+    provider.display_name = utf16(L"Silent value writes");
+
+    ERUI_ProviderHandle provider_handle{};
+    ERUI_PageHandle root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_1,
+        &provider,
+        &provider_handle,
+        &root) == ERUI_OK);
+
+    std::array<ValueObservation, 4> observations{};
+    std::array<ERUI_RowHandle, 4> handles{};
+
+    ERUI_ToggleDesc toggle{};
+    toggle.size = sizeof(toggle);
+    toggle.label = utf16(L"Toggle");
+    toggle.changed_callback = &observe_value;
+    toggle.user_data = &observations[0];
+    toggle.enabled = 1;
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, root, &toggle, &handles[0]) == ERUI_OK);
+
+    ERUI_SliderDesc slider{};
+    slider.size = sizeof(slider);
+    slider.label = utf16(L"Slider");
+    slider.changed_callback = &observe_value;
+    slider.user_data = &observations[1];
+    slider.minimum = 0;
+    slider.maximum = 10;
+    slider.step = 2;
+    slider.initial_value = 3;
+    slider.enabled = 1;
+    ERUI_TEST_CHECK(registry.add_slider(
+        provider_handle, root, &slider, &handles[1]) == ERUI_OK);
+
+    const ERUI_Utf16View options[] = {
+        utf16(L"First"), utf16(L"Second"), utf16(L"Third")};
+    ERUI_ChoiceDesc choice{};
+    choice.size = sizeof(choice);
+    choice.label = utf16(L"Inline choice");
+    choice.changed_callback = &observe_value;
+    choice.user_data = &observations[2];
+    choice.options = options;
+    choice.option_count = 3;
+    choice.initial_index = 0;
+    ERUI_TEST_CHECK(registry.add_inline_choice(
+        provider_handle, root, &choice, &handles[2]) == ERUI_OK);
+
+    choice.label = utf16(L"Popup choice");
+    choice.user_data = &observations[3];
+    choice.initial_index = 1;
+    ERUI_TEST_CHECK(registry.add_popup_choice(
+        provider_handle, root, &choice, &handles[3]) == ERUI_OK);
+
+    ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
+    std::uint8_t initial_slider_value{};
+    ERUI_TEST_CHECK(registry.get_row_value(
+        provider_handle, handles[1], &initial_slider_value) == ERUI_OK);
+    ERUI_TEST_CHECK(initial_slider_value == 2);
+    ERUI_TEST_CHECK(observations[1].calls == 0);
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+    ERUI_TEST_CHECK(compiled->root_page().rows.size() == handles.size());
+
+    // Mirrors the value-specific part of runtime::poll_changes. Keeping the
+    // callback bridge under test avoids installing native game hooks here.
+    const auto poll_row = [](erui::detail::CompiledRow& row) {
+        std::uint8_t current = *row.byte_value;
+        if (row.kind == erui::RowKind::toggle) {
+            current = current == 0 ? 0 : 1;
+        } else if (row.kind == erui::RowKind::slider) {
+            const int clamped = std::clamp<int>(
+                current, row.slider.minimum, row.slider.maximum);
+            const int offset = clamped - row.slider.minimum;
+            current = static_cast<std::uint8_t>(row.slider.minimum +
+                (offset / row.slider.step) * row.slider.step);
+        } else if (row.kind == erui::RowKind::inline_choice) {
+            if (current >= row.choice_ids.size()) current = 0;
+        } else if (row.kind == erui::RowKind::popup_choice) {
+            current = erui::detail::synchronize_popup_choice_state(
+                *row.byte_value,
+                row.popup_choice_state,
+                row.last_observed_value,
+                row.choice_ids.size());
+        }
+        *row.byte_value = current;
+        if (current == row.last_observed_value) return false;
+        row.last_observed_value = current;
+        row.value_action.invoke(current);
+        return true;
+    };
+
+    constexpr std::array<std::uint8_t, 4> programmed{1, 6, 2, 0};
+    for (std::size_t index = 0; index < handles.size(); ++index) {
+        ERUI_TEST_CHECK(registry.set_row_value(
+            provider_handle, handles[index], programmed[index]) == ERUI_OK);
+    }
+    registry.apply_pending_values();
+
+    for (std::size_t index = 0; index < observations.size(); ++index) {
+        erui::detail::CompiledRow& row = compiled->root_page().rows[index];
+        ERUI_TEST_CHECK(*row.byte_value == programmed[index]);
+        ERUI_TEST_CHECK(poll_row(row));
+        ERUI_TEST_CHECK(observations[index].calls == 0);
+    }
+    ERUI_TEST_CHECK(compiled->root_page().rows[3]
+        .popup_choice_state.native_selection() == 1);
+
+    // A second client write may arrive after one value was applied but before
+    // the worker polls it. Both native transitions remain callback-silent,
+    // and get_row_value keeps reporting the newer client value throughout.
+    erui::detail::CompiledRow& racing_slider =
+        compiled->root_page().rows[1];
+    ERUI_TEST_CHECK(registry.set_row_value(
+        provider_handle, handles[1], 4) == ERUI_OK);
+    registry.apply_pending_values();
+    ERUI_TEST_CHECK(registry.set_row_value(
+        provider_handle, handles[1], 6) == ERUI_OK);
+    ERUI_TEST_CHECK(poll_row(racing_slider));
+    ERUI_TEST_CHECK(observations[1].calls == 0);
+    std::uint8_t racing_public_value{};
+    ERUI_TEST_CHECK(registry.get_row_value(
+        provider_handle, handles[1], &racing_public_value) == ERUI_OK);
+    ERUI_TEST_CHECK(racing_public_value == 6);
+    registry.apply_pending_values();
+    ERUI_TEST_CHECK(poll_row(racing_slider));
+    ERUI_TEST_CHECK(observations[1].calls == 0);
+
+    constexpr std::array<std::uint8_t, 4> player_values{0, 8, 1, 2};
+    for (std::size_t index = 0; index < observations.size(); ++index) {
+        erui::detail::CompiledRow& row = compiled->root_page().rows[index];
+        if (row.kind == erui::RowKind::popup_choice) {
+            row.popup_choice_state.set_public_selection(player_values[index]);
+        } else {
+            *row.byte_value = player_values[index];
+        }
+        ERUI_TEST_CHECK(poll_row(row));
+        ERUI_TEST_CHECK(observations[index].calls == 1);
+        ERUI_TEST_CHECK(observations[index].value == player_values[index]);
+    }
+}
+
+void verify_provider_identifier_contract() {
+    erui::host::Registry registry{};
+    registry.open_registration();
+
+    ERUI_ProviderDesc provider{};
+    provider.size = sizeof(provider);
+    provider.api_version = ERUI_API_VERSION_1_1;
+    provider.owner_module = GetModuleHandleW(nullptr);
+    provider.display_name = utf16(L"Identifier Test");
+
+    constexpr std::array<const char*, 9> valid_ids{
+        "my-mod",
+        "My_Mod",
+        "mod.example-2",
+        "Az09_.-",
+        ".",
+        "..",
+        ".leading",
+        "trailing.",
+        "two..dots",
+    };
+    for (const char* id : valid_ids) {
+        provider.provider_id = ascii(id);
+        ERUI_ProviderHandle handle{};
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_1, &provider, &handle, &root) == ERUI_OK);
+        ERUI_TEST_CHECK(handle != ERUI_INVALID_PROVIDER);
+        ERUI_TEST_CHECK(root != ERUI_INVALID_PAGE);
+        ERUI_TEST_CHECK(registry.abort_provider(handle) == ERUI_OK);
+    }
+
+    constexpr std::array<const char*, 7> invalid_ids{
+        "",
+        "my mod",
+        "my/mod",
+        "my\\mod",
+        "my:mod",
+        "my@mod",
+        "m\xC3\xB6" "d",
+    };
+    for (const char* id : invalid_ids) {
+        provider.provider_id = ascii(id);
+        ERUI_ProviderHandle handle{UINT64_C(0xA55AA55AA55AA55A)};
+        ERUI_PageHandle root{UINT64_C(0x5AA55AA55AA55AA5)};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_1, &provider, &handle, &root) ==
+            ERUI_INVALID_ARGUMENT);
+        ERUI_TEST_CHECK(handle == ERUI_INVALID_PROVIDER);
+        ERUI_TEST_CHECK(root == ERUI_INVALID_PAGE);
+    }
+
+    constexpr char embedded_nul_id[]{'m', 'y', '\0', 'm', 'o', 'd'};
+    provider.provider_id.data = embedded_nul_id;
+    provider.provider_id.length = static_cast<std::uint32_t>(
+        sizeof embedded_nul_id);
+    provider.provider_id.reserved = 0;
+    ERUI_ProviderHandle embedded_nul_handle{};
+    ERUI_PageHandle embedded_nul_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_1,
+        &provider,
+        &embedded_nul_handle,
+        &embedded_nul_root) == ERUI_INVALID_ARGUMENT);
+
+    const std::string maximum_id(255, 'a');
+    provider.provider_id.data = maximum_id.data();
+    provider.provider_id.length = static_cast<std::uint32_t>(maximum_id.size());
+    provider.provider_id.reserved = 0;
+    ERUI_ProviderHandle maximum_handle{};
+    ERUI_PageHandle maximum_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_1,
+        &provider,
+        &maximum_handle,
+        &maximum_root) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.abort_provider(maximum_handle) == ERUI_OK);
+
+    provider.provider_id = ascii("mod");
+    ERUI_ProviderHandle lowercase_handle{};
+    ERUI_PageHandle lowercase_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_1,
+        &provider,
+        &lowercase_handle,
+        &lowercase_root) == ERUI_OK);
+    provider.provider_id = ascii("Mod");
+    ERUI_ProviderHandle uppercase_handle{};
+    ERUI_PageHandle uppercase_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_1,
+        &provider,
+        &uppercase_handle,
+        &uppercase_root) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.abort_provider(uppercase_handle) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.abort_provider(lowercase_handle) == ERUI_OK);
+
+    const std::string oversized_id(256, 'a');
+    provider.provider_id.data = oversized_id.data();
+    provider.provider_id.length = static_cast<std::uint32_t>(
+        oversized_id.size());
+    provider.provider_id.reserved = 0;
+    ERUI_ProviderHandle oversized_handle{};
+    ERUI_PageHandle oversized_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_1,
+        &provider,
+        &oversized_handle,
+        &oversized_root) == ERUI_INVALID_ARGUMENT);
+
+    provider.api_version = ERUI_API_VERSION_1_0;
+    provider.provider_id = ascii("legacy provider/id");
+    ERUI_ProviderHandle legacy_handle{};
+    ERUI_PageHandle legacy_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_0,
+        &provider,
+        &legacy_handle,
+        &legacy_root) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.abort_provider(legacy_handle) == ERUI_OK);
+}
+
 } // namespace
 
 int main() {
     erui::host::set_api_state(erui::host::ApiState::accepting);
+    verify_provider_identifier_contract();
+
+    ERUI_Api early_v1{};
+    early_v1.size = ERUI_API_V1_0_SIZE;
+    ERUI_TEST_CHECK(ERUI_GetApi(
+        ERUI_API_VERSION_1_0, &early_v1) == ERUI_OK);
+    ERUI_Api pending_v1_1{};
+    pending_v1_1.size = ERUI_API_V1_1_SIZE;
+    ERUI_TEST_CHECK(ERUI_GetApi(
+        ERUI_API_VERSION_1_1, &pending_v1_1) == ERUI_HOST_NOT_READY);
+
+    erui::host::SteamLanguageProbe language{};
+    language.available = true;
+    language.current = "english";
+    ERUI_TEST_CHECK(erui::host::settle_cached_steam_language(
+        std::move(language)) == ERUI_OK);
 
     verify_text_input_length_contract();
+    verify_programmatic_value_writes_are_silent();
 
     ERUI_Api short_table{};
     short_table.size = ERUI_API_V1_0_SIZE - 1u;
@@ -276,6 +643,12 @@ int main() {
     ERUI_TEST_CHECK(negotiated.table.add_text_input != nullptr);
     ERUI_TEST_CHECK(negotiated.table.set_text_input_value != nullptr);
     ERUI_TEST_CHECK(negotiated.table.get_text_input_value != nullptr);
+    ERUI_TEST_CHECK((negotiated.table.capabilities &
+        ERUI_CAP_INPUT_BINDINGS) != 0);
+    ERUI_TEST_CHECK(negotiated.table.add_input_section != nullptr);
+    ERUI_TEST_CHECK(negotiated.table.add_input_action != nullptr);
+    ERUI_TEST_CHECK(negotiated.table.set_action_inputs != nullptr);
+    ERUI_TEST_CHECK(negotiated.table.storage_get_info != nullptr);
     ERUI_TEST_CHECK(negotiated.canary == UINT64_C(0xA55AA55AF00DF00D));
 
     // An exact 1.0 request writes only the frozen 128-byte prefix. The newer
@@ -302,7 +675,7 @@ int main() {
     v1_provider.size = sizeof(v1_provider);
     v1_provider.api_version = ERUI_API_VERSION_1_0;
     v1_provider.owner_module = GetModuleHandleW(nullptr);
-    v1_provider.provider_id = ascii("com.example.v1-mixed-table");
+    v1_provider.provider_id = ascii("v1-mixed-table");
     v1_provider.display_name = utf16(L"Frozen v1 Provider");
     ERUI_ProviderHandle v1_provider_handle{};
     ERUI_PageHandle v1_root{};
@@ -320,6 +693,25 @@ int main() {
         v1_provider_handle, UINT64_C(123), nullptr, 0, &untouched_length) ==
         ERUI_NOT_SUPPORTED);
     ERUI_TEST_CHECK(untouched_length == 0xA5A5A5A5u);
+    ERUI_PageHandle v1_builtin_page{UINT64_C(0xA55AA55AA55AA55A)};
+    ERUI_TEST_CHECK(erui::host::registry().get_builtin_page(
+        v1_provider_handle,
+        ERUI_BUILTIN_PAGE_CAMERA_OPTIONS,
+        &v1_builtin_page) == ERUI_NOT_SUPPORTED);
+    ERUI_TEST_CHECK(v1_builtin_page == UINT64_C(0xA55AA55AA55AA55A));
+    ERUI_InputSectionHandle untouched_section{
+        UINT64_C(0xA55AA55AA55AA55A)};
+    ERUI_TEST_CHECK(negotiated.table.add_input_section(
+        v1_provider_handle, nullptr, &untouched_section) ==
+        ERUI_NOT_SUPPORTED);
+    ERUI_TEST_CHECK(untouched_section == UINT64_C(0xA55AA55AA55AA55A));
+    ERUI_InputActionHandle untouched_binding{UINT64_C(0x5AA55AA55AA55AA5)};
+    ERUI_TEST_CHECK(negotiated.table.add_input_action(
+        v1_provider_handle,
+        ERUI_INVALID_INPUT_SECTION,
+        nullptr,
+        &untouched_binding) == ERUI_NOT_SUPPORTED);
+    ERUI_TEST_CHECK(untouched_binding == UINT64_C(0x5AA55AA55AA55AA5));
     ERUI_TEST_CHECK(v1_table->abort_provider(v1_provider_handle) == ERUI_OK);
 
     erui::host::Registry registry{};
@@ -329,7 +721,7 @@ int main() {
     provider.size = sizeof(provider);
     provider.api_version = ERUI_API_VERSION_CURRENT;
     provider.owner_module = GetModuleHandleW(nullptr);
-    provider.provider_id = ascii("com.example.registry-test");
+    provider.provider_id = ascii("registry-test");
     provider.display_name = utf16(L"Registry Test");
     provider.root_priority = 10;
 
@@ -348,6 +740,45 @@ int main() {
     ERUI_TEST_CHECK(registry.register_provider(
         ERUI_API_VERSION_CURRENT, &provider, &handle, &root) == ERUI_OK);
     ERUI_TEST_CHECK(handle != root);
+
+    ERUI_PageHandle invalid_builtin_output{UINT64_C(0x123456789ABCDEF0)};
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle, ERUI_BUILTIN_PAGE_COUNT, &invalid_builtin_output) ==
+        ERUI_INVALID_ARGUMENT);
+    ERUI_TEST_CHECK(invalid_builtin_output == ERUI_INVALID_PAGE);
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle, UINT32_MAX, &invalid_builtin_output) ==
+        ERUI_INVALID_ARGUMENT);
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        ERUI_INVALID_PROVIDER,
+        ERUI_BUILTIN_PAGE_CAMERA_OPTIONS,
+        &invalid_builtin_output) == ERUI_INVALID_HANDLE);
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle, ERUI_BUILTIN_PAGE_CAMERA_OPTIONS, nullptr) ==
+        ERUI_INVALID_ARGUMENT);
+
+    ERUI_PageHandle game_options_page{};
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle,
+        ERUI_BUILTIN_PAGE_GAME_OPTIONS,
+        &game_options_page) == ERUI_OK);
+    ERUI_TEST_CHECK(game_options_page == root);
+    ERUI_PageHandle camera_page{};
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle,
+        ERUI_BUILTIN_PAGE_CAMERA_OPTIONS,
+        &camera_page) == ERUI_OK);
+    ERUI_TEST_CHECK(camera_page != ERUI_INVALID_PAGE && camera_page != root);
+    ERUI_PageHandle repeated_camera_page{};
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle,
+        ERUI_BUILTIN_PAGE_CAMERA_OPTIONS,
+        &repeated_camera_page) == ERUI_OK);
+    ERUI_TEST_CHECK(repeated_camera_page == camera_page);
+    ERUI_PageHandle sound_page{};
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle, ERUI_BUILTIN_PAGE_SOUND, &sound_page) == ERUI_OK);
+    ERUI_TEST_CHECK(sound_page != camera_page && sound_page != root);
 
     ERUI_ProviderHandle duplicate{};
     ERUI_PageHandle duplicate_root{};
@@ -433,6 +864,87 @@ int main() {
     ERUI_TEST_CHECK(registry.add_text_input(
         handle, root, &invalid_text_input, nullptr) == ERUI_INVALID_ARGUMENT);
 
+    ColorObservation color_observation{};
+    ERUI_ColorPickerDesc color_picker{};
+    color_picker.size = sizeof(color_picker);
+    color_picker.label = utf16(L"Accent Color");
+    color_picker.help = utf16(L"ColorPicker help");
+    color_picker.changed_callback = &color_changed;
+    color_picker.user_data = &color_observation;
+    color_picker.initial_value = ERUI_Color{171u, 125u, 99u, 0u};
+    color_picker.enabled = 1u;
+    ERUI_RowHandle color_picker_row{};
+    ERUI_TEST_CHECK(registry.add_color_picker(
+        handle, root, &color_picker, &color_picker_row) == ERUI_OK);
+    ERUI_TEST_CHECK(color_picker_row != ERUI_INVALID_ROW);
+
+    ERUI_ColorPickerDesc invalid_color_picker = color_picker;
+    ERUI_RowHandle rejected_color_row{UINT64_C(0x0FEDCBA987654321)};
+    invalid_color_picker.initial_value.reserved = 1u;
+    ERUI_TEST_CHECK(registry.add_color_picker(
+        handle, root, &invalid_color_picker, &rejected_color_row) ==
+        ERUI_INVALID_ARGUMENT);
+    ERUI_TEST_CHECK(rejected_color_row == ERUI_INVALID_ROW);
+    invalid_color_picker = color_picker;
+    invalid_color_picker.enabled = 2u;
+    ERUI_TEST_CHECK(registry.add_color_picker(
+        handle, root, &invalid_color_picker, nullptr) ==
+        ERUI_INVALID_ARGUMENT);
+
+    BindingObservation binding_observation{};
+    ERUI_InputSectionDesc binding_section{};
+    binding_section.size = sizeof(binding_section);
+    binding_section.label = utf16(L"Registry Bindings");
+    ERUI_InputSectionHandle binding_section_handle{};
+    ERUI_TEST_CHECK(registry.add_input_section(
+        handle, &binding_section, &binding_section_handle) == ERUI_OK);
+    ERUI_TEST_CHECK(binding_section_handle != ERUI_INVALID_INPUT_SECTION);
+
+    ERUI_InputActionDesc binding{};
+    binding.size = sizeof(binding);
+    binding.action_id = ascii("show-dialog");
+    binding.label = utf16(L"Show Native Dialog");
+    binding.default_inputs = default_action_inputs();
+    binding.activated_callback = &binding_activated;
+    binding.user_data = &binding_observation;
+    ERUI_InputActionHandle binding_handle{};
+    ERUI_TEST_CHECK(registry.add_input_action(
+        handle,
+        binding_section_handle,
+        &binding,
+        &binding_handle) == ERUI_OK);
+    ERUI_TEST_CHECK(binding_handle != ERUI_INVALID_INPUT_ACTION);
+
+    ERUI_InputSectionDesc second_binding_section = binding_section;
+    second_binding_section.label = utf16(L"Other Bindings");
+    ERUI_InputSectionHandle second_binding_section_handle{};
+    ERUI_TEST_CHECK(registry.add_input_section(
+        handle,
+        &second_binding_section,
+        &second_binding_section_handle) == ERUI_OK);
+    ERUI_InputActionHandle duplicate_binding{UINT64_C(0x123456789ABCDEF0)};
+    ERUI_TEST_CHECK(registry.add_input_action(
+        handle,
+        second_binding_section_handle,
+        &binding,
+        &duplicate_binding) == ERUI_DUPLICATE_ACTION_ID);
+    ERUI_TEST_CHECK(duplicate_binding == ERUI_INVALID_INPUT_ACTION);
+
+    ERUI_InputActionDesc second_binding = binding;
+    second_binding.action_id = ascii("toggle-feature");
+    second_binding.label = utf16(L"Toggle Feature");
+    ERUI_InputActionHandle second_binding_handle{};
+    ERUI_TEST_CHECK(registry.add_input_action(
+        handle,
+        second_binding_section_handle,
+        &second_binding,
+        &second_binding_handle) == ERUI_OK);
+    invalid_color_picker = color_picker;
+    invalid_color_picker.changed_callback = nullptr;
+    ERUI_TEST_CHECK(registry.add_color_picker(
+        handle, root, &invalid_color_picker, nullptr) ==
+        ERUI_INVALID_ARGUMENT);
+
     ERUI_RowHandle wrong_kind_output{99};
     ERUI_TEST_CHECK(registry.add_toggle(
         handle, toggle_row, &toggle, &wrong_kind_output) == ERUI_INVALID_HANDLE);
@@ -462,6 +974,14 @@ int main() {
     ERUI_TEST_CHECK(registry.add_button(
         handle, root, &short_button, nullptr) == ERUI_INVALID_ARGUMENT);
     ERUI_TEST_CHECK(registry.add_button(handle, root, &button, nullptr) == ERUI_OK);
+    ERUI_ButtonDesc camera_button = button;
+    camera_button.label = utf16(L"Registry Camera");
+    ERUI_TEST_CHECK(registry.add_button(
+        handle, camera_page, &camera_button, nullptr) == ERUI_OK);
+    ERUI_ButtonDesc sound_button = button;
+    sound_button.label = utf16(L"Registry Sound");
+    ERUI_TEST_CHECK(registry.add_button(
+        handle, sound_page, &sound_button, nullptr) == ERUI_OK);
 
     ERUI_SubmenuDesc submenu{};
     submenu.size = sizeof(submenu);
@@ -480,6 +1000,16 @@ int main() {
     ERUI_TEST_CHECK(registry.add_submenu(
         handle, root, &submenu, &child, nullptr) == ERUI_OK);
     ERUI_TEST_CHECK(registry.add_button(handle, child, &button, nullptr) == ERUI_OK);
+    ERUI_SubmenuDesc camera_submenu = submenu;
+    camera_submenu.label = utf16(L"Camera Advanced");
+    camera_submenu.page_title = utf16(L"Camera Child");
+    ERUI_PageHandle camera_child{};
+    ERUI_TEST_CHECK(registry.add_submenu(
+        handle,
+        camera_page,
+        &camera_submenu,
+        &camera_child,
+        nullptr) == ERUI_OK);
 
     FormatterObservation formatter_observation{};
     ERUI_PagePresentationDesc presentation{};
@@ -490,6 +1020,13 @@ int main() {
     presentation.user_data = &formatter_observation;
     ERUI_TEST_CHECK(registry.set_page_presentation(
         handle, root, &presentation) == ERUI_INVALID_ARGUMENT);
+    ERUI_TEST_CHECK(registry.set_page_presentation(
+        handle, camera_page, &presentation) == ERUI_INVALID_ARGUMENT);
+    ERUI_PagePresentationDesc camera_child_presentation{};
+    camera_child_presentation.size = sizeof(camera_child_presentation);
+    camera_child_presentation.page_title = utf16(L"Camera Child Override");
+    ERUI_TEST_CHECK(registry.set_page_presentation(
+        handle, camera_child, &camera_child_presentation) == ERUI_OK);
     ERUI_PagePresentationDesc invalid_presentation{};
     invalid_presentation.size = sizeof(invalid_presentation);
     invalid_presentation.user_data = &formatter_observation;
@@ -512,8 +1049,14 @@ int main() {
         nullptr) == ERUI_OK);
 
     ERUI_TEST_CHECK(registry.commit_provider(handle) == ERUI_OK);
+    ERUI_PageHandle committed_builtin{UINT64_C(0xA55AA55AA55AA55A)};
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        handle,
+        ERUI_BUILTIN_PAGE_CAMERA_OPTIONS,
+        &committed_builtin) == ERUI_ALREADY_COMMITTED);
+    ERUI_TEST_CHECK(committed_builtin == ERUI_INVALID_PAGE);
     ERUI_TEST_CHECK(registry.committed_provider_count() == 1);
-    ERUI_TEST_CHECK(registry.committed_root_row_count() == 7);
+    ERUI_TEST_CHECK(registry.committed_root_row_count() == 8);
 
     std::uint32_t text_length{};
     ERUI_TEST_CHECK(registry.get_text_input_value(
@@ -541,6 +1084,30 @@ int main() {
     const ERUI_Utf16View too_long_text = utf16(L"12345678901234567");
     ERUI_TEST_CHECK(registry.set_text_input_value(
         handle, text_input_row, &too_long_text) == ERUI_INVALID_ARGUMENT);
+
+    ERUI_Color current_color{};
+    ERUI_TEST_CHECK(registry.get_color_picker_value(
+        handle, color_picker_row, &current_color) == ERUI_OK);
+    ERUI_TEST_CHECK(current_color.red == 171u);
+    ERUI_TEST_CHECK(current_color.green == 125u);
+    ERUI_TEST_CHECK(current_color.blue == 99u);
+    ERUI_TEST_CHECK(current_color.reserved == 0u);
+    const ERUI_Color programmed_color{7u, 8u, 9u, 0u};
+    ERUI_TEST_CHECK(registry.set_color_picker_value(
+        handle, color_picker_row, &programmed_color) == ERUI_OK);
+    ERUI_TEST_CHECK(color_observation.calls == 0);
+    ERUI_TEST_CHECK(registry.get_color_picker_value(
+        handle, color_picker_row, &current_color) == ERUI_OK);
+    ERUI_TEST_CHECK(current_color.red == 7u && current_color.green == 8u &&
+        current_color.blue == 9u && current_color.reserved == 0u);
+    ERUI_Color invalid_programmed_color{1u, 2u, 3u, 1u};
+    ERUI_TEST_CHECK(registry.set_color_picker_value(
+        handle, color_picker_row, &invalid_programmed_color) ==
+        ERUI_INVALID_ARGUMENT);
+    ERUI_TEST_CHECK(registry.set_color_picker_value(
+        handle, toggle_row, &programmed_color) == ERUI_INVALID_ARGUMENT);
+    ERUI_TEST_CHECK(registry.get_color_picker_value(
+        handle, toggle_row, &current_color) == ERUI_INVALID_ARGUMENT);
 
     ERUI_AlertDesc alert{};
     alert.size = sizeof(alert);
@@ -578,7 +1145,7 @@ int main() {
 
     // Providers are merged globally by priority and their rows remain in
     // provider-local insertion order. Together they deliberately overflow the
-    // Controller root so the ordinary pagination compiler is exercised.
+    // Game Options root so the ordinary pagination compiler is exercised.
     const auto add_provider = [&](const char* id, const wchar_t* name,
                                   std::int32_t priority, unsigned rows) {
         ERUI_ProviderDesc desc{};
@@ -599,13 +1166,23 @@ int main() {
             ERUI_TEST_CHECK(registry.add_button(
                 provider_handle, provider_root, &row, nullptr) == ERUI_OK);
         }
+        ERUI_PageHandle provider_camera{};
+        ERUI_TEST_CHECK(registry.get_builtin_page(
+            provider_handle,
+            ERUI_BUILTIN_PAGE_CAMERA_OPTIONS,
+            &provider_camera) == ERUI_OK);
+        ERUI_ButtonDesc camera_row = button;
+        camera_row.label = utf16(name);
+        ERUI_TEST_CHECK(registry.add_button(
+            provider_handle, provider_camera, &camera_row, nullptr) ==
+            ERUI_OK);
         ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
     };
-    add_provider("com.example.late-priority", L"Last Provider", 20, 5);
-    add_provider("com.example.first-priority", L"First Provider", 5, 1);
+    add_provider("late-priority", L"Last Provider", 20, 5);
+    add_provider("first-priority", L"First Provider", 5, 1);
 
     ERUI_ProviderDesc active_draft = provider;
-    active_draft.provider_id = ascii("com.example.active-draft");
+    active_draft.provider_id = ascii("active-draft");
     active_draft.display_name = utf16(L"Active Draft");
     ERUI_ProviderHandle active_handle{};
     ERUI_PageHandle active_root{};
@@ -617,11 +1194,58 @@ int main() {
 
     auto menu = registry.freeze_and_build();
     ERUI_TEST_CHECK(menu);
-    ERUI_TEST_CHECK(menu->root().row_count() == 13);
+    ERUI_TEST_CHECK(menu->root().row_count() == 14);
     auto compiled = erui::detail::MenuCompiler::compile(*menu);
-    ERUI_TEST_CHECK(compiled->root_page().rows.size() == 13);
+    ERUI_TEST_CHECK(compiled->root_page().rows.size() == 14);
     ERUI_TEST_CHECK(compiled->modeled_popup_choice_count == 1);
     ERUI_TEST_CHECK(compiled->modeled_text_input_count == 1);
+    ERUI_TEST_CHECK(compiled->modeled_color_picker_count == 1);
+    ERUI_TEST_CHECK(compiled->modeled_input_binding_count == 2);
+    ERUI_TEST_CHECK(compiled->input_binding_sections.size() == 2);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled->input_binding_sections[0].label_id)) ==
+        L"Registry Bindings");
+    ERUI_TEST_CHECK(compiled->input_binding_sections[0].bindings.size() == 1);
+    ERUI_TEST_CHECK(compiled->input_binding_sections[0].bindings[0].binding_id ==
+        "show-dialog");
+    compiled->input_binding_sections[0].bindings[0].action.invoke(
+        ERUI_INPUT_DEVICE_CONTROLLER | ERUI_INPUT_DEVICE_MOUSE);
+    ERUI_TEST_CHECK(binding_observation.calls == 1);
+    ERUI_TEST_CHECK(binding_observation.provider == handle);
+    ERUI_TEST_CHECK(binding_observation.action == binding_handle);
+    ERUI_TEST_CHECK(binding_observation.devices ==
+        (ERUI_INPUT_DEVICE_CONTROLLER | ERUI_INPUT_DEVICE_MOUSE));
+    ERUI_TEST_CHECK(compiled->builtin_page_index(0u) ==
+        compiled->root_page_index);
+    const erui::detail::CompiledPage* compiled_camera =
+        compiled->builtin_page(1u);
+    ERUI_TEST_CHECK(compiled_camera != nullptr);
+    ERUI_TEST_CHECK(compiled_camera->rows.size() == 4);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_camera->rows[0].label_id)) == L"First Provider");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_camera->rows[1].label_id)) == L"Registry Camera");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_camera->rows[2].label_id)) == L"Camera Advanced");
+    ERUI_TEST_CHECK(compiled_camera->rows[2].kind == erui::RowKind::submenu);
+    ERUI_TEST_CHECK(compiled->page_reachable(
+        compiled_camera->rows[2].target_page_index));
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled->pages[compiled_camera->rows[2].target_page_index].title_id)) ==
+        L"Camera Child Override");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_camera->rows[3].label_id)) == L"Last Provider");
+    ERUI_TEST_CHECK(compiled->page_reachable(
+        compiled->builtin_page_index(1u)));
+    ERUI_TEST_CHECK(compiled->page_plans[
+        compiled->builtin_page_index(1u)].slices.empty());
+    const erui::detail::CompiledPage* compiled_sound =
+        compiled->builtin_page(3u);
+    ERUI_TEST_CHECK(compiled_sound != nullptr);
+    ERUI_TEST_CHECK(compiled_sound->rows.size() == 1);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_sound->rows[0].label_id)) == L"Registry Sound");
+    ERUI_TEST_CHECK(compiled->builtin_page(4u) == nullptr);
     ERUI_TEST_CHECK(compiled->pagination_required);
     const auto& first_row = compiled->root_page().rows.front();
     ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(first_row.label_id)) ==
@@ -658,6 +1282,36 @@ int main() {
         L"Ranni"));
     ERUI_TEST_CHECK(!compiled_text_input->text_input_state->pop_committed_change(
         committed_text));
+    const auto compiled_color_picker = std::find_if(
+        compiled->root_page().rows.begin(),
+        compiled->root_page().rows.end(),
+        [](const erui::detail::CompiledRow& row) {
+            return row.kind == erui::RowKind::color_picker;
+        });
+    ERUI_TEST_CHECK(compiled_color_picker != compiled->root_page().rows.end());
+    ERUI_TEST_CHECK(compiled_color_picker->color_picker_state != nullptr);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_color_picker->label_id)) == L"Accent Color");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_color_picker->help_id)) == L"ColorPicker help");
+    ERUI_TEST_CHECK(compiled_color_picker->color_picker_state->value() ==
+        (erui::detail::RgbColor{7u, 8u, 9u}));
+    erui::detail::RgbColor confirmed_color{};
+    ERUI_TEST_CHECK(compiled_color_picker->color_picker_state->accept_native(
+        erui::detail::pack_native_color({40u, 50u, 60u}),
+        confirmed_color));
+    compiled_color_picker->color_action.invoke(confirmed_color);
+    ERUI_TEST_CHECK(color_observation.calls == 1);
+    ERUI_TEST_CHECK(color_observation.provider == handle);
+    ERUI_TEST_CHECK(color_observation.row == color_picker_row);
+    ERUI_TEST_CHECK(color_observation.value.red == 40u);
+    ERUI_TEST_CHECK(color_observation.value.green == 50u);
+    ERUI_TEST_CHECK(color_observation.value.blue == 60u);
+    ERUI_TEST_CHECK(color_observation.value.reserved == 0u);
+    ERUI_TEST_CHECK(!compiled_color_picker->color_picker_state->accept_native(
+        erui::detail::pack_native_color({40u, 50u, 60u}),
+        confirmed_color));
+    ERUI_TEST_CHECK(color_observation.calls == 1);
     const auto submenu_row = std::find_if(
         compiled->root_page().rows.begin(),
         compiled->root_page().rows.end(),
@@ -704,13 +1358,13 @@ int main() {
     const auto root_main_presentation = compiled->resolve_presentation(
         erui::detail::PageRoute::root_main(
             compiled->root_page_index,
-            erui::detail::controller_vanilla_capacity));
+            erui::detail::game_options_vanilla_capacity));
     ERUI_TEST_CHECK(root_main_presentation.outer_title_id == 0);
     ERUI_TEST_CHECK(root_main_presentation.page_title_id == 0);
     const auto root_continuation_presentation = compiled->resolve_presentation(
         erui::detail::PageRoute::root_continuation(
             compiled->root_page_index,
-            erui::detail::controller_vanilla_capacity,
+            erui::detail::game_options_vanilla_capacity,
             1));
     ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
         root_continuation_presentation.outer_title_id)) == L"ERNativeUI");

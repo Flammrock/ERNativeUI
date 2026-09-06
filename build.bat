@@ -21,9 +21,15 @@ cmake --build --preset windows-release --clean-first || exit /b 1
 echo [ERNativeUI] Running tests...
 ctest --preset windows-release || exit /b 1
 
+echo [ERNativeUI] Installing the SDK and runtime tree...
+cmake --install build\preset-release --config Release --prefix "%CD%\dist\ERNativeUI" || exit /b 1
+
 echo.
-echo Build and tests completed successfully.
+echo Build, tests, and installation completed successfully.
 echo Runtime staging: %CD%\build\preset-release\deploy\Release
+echo Installed SDK:   %CD%\dist\ERNativeUI
 echo Host DLL:       %CD%\build\preset-release\Release\ERNativeUI.dll
 echo GFX patcher:    %CD%\build\preset-release\Release\ERNativeUIGfxPatcher.exe
+echo Screenshot DLL: %CD%\dist\ERNativeUI\bin\examples\ShowcaseScreenshotHelper.dll
+echo Screenshot INI: %CD%\dist\ERNativeUI\bin\examples\ShowcaseScreenshotHelper.ini
 exit /b 0

@@ -27,10 +27,14 @@ namespace {
 struct Arguments {
     std::filesystem::path input{};
     std::filesystem::path output{};
-    std::uint16_t controller_rows{7};
+    std::uint16_t game_options_rows{7};
+    std::uint16_t camera_options_rows{7};
     erui::gfx::TextInputPresentation text_input_presentation{
         erui::gfx::TextInputPresentation::native};
-    bool controller_rows_explicit{};
+    erui::gfx::ColorPickerPresentation color_picker_presentation{
+        erui::gfx::ColorPickerPresentation::native};
+    bool game_options_rows_explicit{};
+    bool camera_options_rows_explicit{};
     bool inspect_only{};
     bool overwrite{};
 };
@@ -39,17 +43,22 @@ void print_usage() {
     std::wcout
         << L"Inspect:\n"
         << L"  ERNativeUIGfxPatcher.exe --inspect --input <supported.gfx>\n\n"
-        << L"Patch Controller Settings:\n"
+        << L"Patch Game Options:\n"
         << L"  ERNativeUIGfxPatcher.exe --input <source.gfx> --output <patched.gfx> "
-           L"--controller-rows 13 [--text-input-presentation character-name] "
+           L"--game-options-rows 13 --camera-options-rows 13 "
+           L"[--text-input-presentation character-name] "
+           L"[--color-picker-presentation character-creation] "
            L"[--overwrite]\n\n"
-        << L"Patch Advanced Settings TextInput presentation:\n"
+        << L"Patch Advanced Settings widget presentations:\n"
         << L"  ERNativeUIGfxPatcher.exe --input <02_042_pc_graphicsetting.gfx> "
-           L"--output <patched.gfx> --text-input-presentation character-name "
+           L"--output <patched.gfx> [--text-input-presentation character-name] "
+           L"[--color-picker-presentation character-creation] "
            L"[--overwrite]\n\n"
-        << L"The input file is never modified. The target row count may be 6..13.\n"
+        << L"The input file is never modified. Game Options supports 6..13 rows; "
+           L"Camera Options supports 7..13.\n"
         << L"The host movie and TextInput sprite are detected structurally.\n"
-        << L"TextInput presentation values: native (default), character-name.\n";
+        << L"TextInput presentation values: native (default), character-name.\n"
+        << L"ColorPicker presentation values: native (default), character-creation.\n";
 }
 
 [[nodiscard]] std::optional<std::uint16_t> parse_u16(std::wstring_view text) {
@@ -90,8 +99,11 @@ void print_usage() {
             continue;
         }
         if (token == L"--input" || token == L"--output" ||
+            token == L"--game-options-rows" ||
             token == L"--controller-rows" ||
-            token == L"--text-input-presentation") {
+            token == L"--camera-options-rows" ||
+            token == L"--text-input-presentation" ||
+            token == L"--color-picker-presentation") {
             if (index + 1 >= arguments.size()) {
                 error = L"missing value after " + std::wstring(token);
                 return false;
@@ -112,14 +124,30 @@ void print_usage() {
                     error = L"--text-input-presentation requires native or character-name";
                     return false;
                 }
+            } else if (token == L"--color-picker-presentation") {
+                if (value == L"native") {
+                    parsed.color_picker_presentation =
+                        erui::gfx::ColorPickerPresentation::native;
+                } else if (value == L"character-creation") {
+                    parsed.color_picker_presentation =
+                        erui::gfx::ColorPickerPresentation::character_creation;
+                } else {
+                    error = L"--color-picker-presentation requires native or character-creation";
+                    return false;
+                }
             } else {
                 const std::optional<std::uint16_t> rows = parse_u16(value);
                 if (!rows) {
-                    error = L"--controller-rows requires an integer";
+                    error = std::wstring(token) + L" requires an integer";
                     return false;
                 }
-                parsed.controller_rows = *rows;
-                parsed.controller_rows_explicit = true;
+                if (token == L"--camera-options-rows") {
+                    parsed.camera_options_rows = *rows;
+                    parsed.camera_options_rows_explicit = true;
+                } else {
+                    parsed.game_options_rows = *rows;
+                    parsed.game_options_rows_explicit = true;
+                }
             }
             continue;
         }
@@ -240,16 +268,23 @@ void print_inspection(const erui::gfx::Inspection& inspection) {
         << L"Detected host:                "
         << widen_ascii(erui::gfx::host_name(inspection.host)) << L'\n'
         << L"TextInput sprite ID:          " << inspection.text_input_sprite << L'\n';
-    if (inspection.host == erui::gfx::GfxHost::controller_settings) {
+    if (inspection.host == erui::gfx::GfxHost::game_options) {
         std::wcout
             << L"WindowList sprite ID:         " << inspection.window_list_sprite << L'\n'
-            << L"ControllSetting sprite ID:    " << inspection.controller_sprite << L'\n'
-            << L"Generic item character ID:    " << inspection.controller_item_character << L'\n'
-            << L"Controller visual row slots:  " << inspection.controller_rows << L'\n';
+            << L"ControllSetting sprite ID:    " << inspection.game_options_sprite << L'\n'
+            << L"Generic item character ID:    " << inspection.game_options_item_character << L'\n'
+            << L"Game Options visual row slots: " << inspection.game_options_rows << L'\n'
+            << L"CameraSetting sprite ID:      " << inspection.camera_options_sprite << L'\n'
+            << L"Camera item character ID:     " << inspection.camera_options_item_character << L'\n'
+            << L"Camera Options visual slots:  " << inspection.camera_options_rows << L'\n';
     }
     std::wcout
         << L"Character-name TextInput:     "
-        << (inspection.character_name_text_input ? L"present" : L"not present") << L'\n';
+        << (inspection.character_name_text_input ? L"present" : L"not present") << L'\n'
+        << L"Standalone ColorPicker:       "
+        << (inspection.character_creation_color_picker ? L"present" : L"not present") << L'\n'
+        << L"ColorPicker widget hosts:      "
+        << inspection.color_picker_host_count << L'\n';
 }
 
 int run(const std::vector<std::wstring>& command_line) {
@@ -283,8 +318,8 @@ int run(const std::vector<std::wstring>& command_line) {
     }
 
     erui::gfx::Inspection inspection = text_input_inspection;
-    if (text_input_inspection.host == erui::gfx::GfxHost::controller_settings) {
-        inspection = erui::gfx::inspect_controller_panel(input);
+    if (text_input_inspection.host == erui::gfx::GfxHost::game_options) {
+        inspection = erui::gfx::inspect_game_options_panel(input);
         if (!inspection.success()) {
             std::wcerr << L"ERROR ["
                        << widen_ascii(erui::gfx::error_name(inspection.error))
@@ -293,11 +328,12 @@ int run(const std::vector<std::wstring>& command_line) {
         }
     } else if (text_input_inspection.host ==
             erui::gfx::GfxHost::advanced_settings &&
-        arguments.controller_rows_explicit) {
+        (arguments.game_options_rows_explicit ||
+            arguments.camera_options_rows_explicit)) {
         std::wcerr
-            << L"ERROR: --controller-rows is only valid for "
+            << L"ERROR: settings row options are only valid for "
                L"02_040_optionsetting.gfx; the detected Advanced Settings "
-               L"movie has no ControllSetting panel.\n";
+               L"movie has no WindowList settings panels.\n";
         return 2;
     }
 
@@ -309,10 +345,12 @@ int run(const std::vector<std::wstring>& command_line) {
 
     if (inspection.host == erui::gfx::GfxHost::advanced_settings &&
         arguments.text_input_presentation !=
-            erui::gfx::TextInputPresentation::character_name) {
+            erui::gfx::TextInputPresentation::character_name &&
+        arguments.color_picker_presentation !=
+            erui::gfx::ColorPickerPresentation::character_creation) {
         std::wcerr
-            << L"ERROR: Advanced Settings has no controller rows to patch; "
-               L"pass --text-input-presentation character-name.\n";
+            << L"ERROR: Advanced Settings has no Game Options rows to patch; "
+               L"request a TextInput or ColorPicker presentation.\n";
         return 2;
     }
 
@@ -322,16 +360,24 @@ int run(const std::vector<std::wstring>& command_line) {
     }
 
     erui::gfx::PatchResult patch{};
-    if (inspection.host == erui::gfx::GfxHost::controller_settings) {
-        patch = erui::gfx::patch_controller_panel(
+    if (inspection.host == erui::gfx::GfxHost::game_options) {
+        patch = erui::gfx::patch_game_options_panel(
             input,
             {
-                .controller_rows = arguments.controller_rows,
+                .game_options_rows = arguments.game_options_rows_explicit
+                    ? arguments.game_options_rows
+                    : inspection.game_options_rows,
+                .camera_options_rows = arguments.camera_options_rows_explicit
+                    ? arguments.camera_options_rows
+                    : inspection.camera_options_rows,
                 .text_input_presentation = arguments.text_input_presentation,
+                .color_picker_presentation = arguments.color_picker_presentation,
             });
     } else {
-        patch = erui::gfx::patch_text_input_presentation(
-            input, arguments.text_input_presentation);
+        patch = erui::gfx::patch_widget_presentations(
+            input,
+            arguments.text_input_presentation,
+            arguments.color_picker_presentation);
     }
     if (!patch.success()) {
         std::wcerr << L"ERROR [" << widen_ascii(erui::gfx::error_name(patch.error))
@@ -348,10 +394,12 @@ int run(const std::vector<std::wstring>& command_line) {
         return 6;
     }
 
-    if (inspection.host == erui::gfx::GfxHost::controller_settings) {
+    if (inspection.host == erui::gfx::GfxHost::game_options) {
         std::wcout
-            << L"Controller rows:             " << patch.report.before.controller_rows
-            << L" -> " << patch.report.after.controller_rows << L'\n';
+            << L"Game Options rows:           " << patch.report.before.game_options_rows
+            << L" -> " << patch.report.after.game_options_rows << L'\n'
+            << L"Camera Options rows:         " << patch.report.before.camera_options_rows
+            << L" -> " << patch.report.after.camera_options_rows << L'\n';
     }
     std::wcout
         << L"TextInput sprite ID:          " << patch.report.after.text_input_sprite << L'\n'
@@ -360,7 +408,7 @@ int run(const std::vector<std::wstring>& command_line) {
         << (patch.report.already_satisfied ? L"already satisfied" : L"patched and verified")
         << L'\n';
     const wchar_t* install_name = inspection.host ==
-            erui::gfx::GfxHost::controller_settings
+            erui::gfx::GfxHost::game_options
         ? L"02_040_optionsetting.gfx"
         : L"02_042_pc_graphicsetting.gfx";
     std::wcout

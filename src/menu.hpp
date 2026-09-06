@@ -1,13 +1,18 @@
 #pragma once
 
+#include <ernativeui/erui.h>
+
+#include "builtin_page.hpp"
+#include "color_picker_state.hpp"
+#include "text_input_state.hpp"
+
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "text_input_state.hpp"
 
 namespace erui {
 
@@ -19,6 +24,7 @@ enum class RowKind : std::uint8_t {
     inline_choice,
     popup_choice,
     text_input,
+    color_picker,
     button,
     submenu,
 };
@@ -65,6 +71,15 @@ using ValueChangedCallback = void (*)(std::uint8_t value, void* user_data) noexc
 using TextChangedCallback = void (*)(
     std::wstring_view value,
     void* user_data) noexcept;
+using InputBindingActivatedCallback = void (*)(
+    std::uint32_t devices,
+    void* user_data) noexcept;
+using InputAssignmentsChangedCallback = void (*)(
+    const ERUI_ActionInputs& previous,
+    const ERUI_ActionInputs& current,
+    ERUI_AssignmentChangeReason reason,
+    ERUI_InputDevices changed_devices,
+    void* user_data) noexcept;
 
 struct Action {
     ActionCallback callback{};
@@ -102,11 +117,47 @@ struct TextAction {
     }
 };
 
+struct InputBindingAction {
+    InputBindingActivatedCallback callback{};
+    void* user_data{};
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return callback != nullptr;
+    }
+    void invoke(std::uint32_t devices) const noexcept {
+        if (callback) callback(devices, user_data);
+    }
+};
+
+struct InputAssignmentsAction {
+    InputAssignmentsChangedCallback callback{};
+    void* user_data{};
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return callback != nullptr;
+    }
+    void invoke(
+        const ERUI_ActionInputs& previous,
+        const ERUI_ActionInputs& current,
+        ERUI_AssignmentChangeReason reason,
+        ERUI_InputDevices changed_devices) const noexcept {
+        if (callback) {
+            callback(
+                previous,
+                current,
+                reason,
+                changed_devices,
+                user_data);
+        }
+    }
+};
+
 namespace detail {
 class MenuCompiler;
 }
 
 class Menu;
+class InputBindingSection;
 
 // Declarative native Elden Ring page. Toggle, slider, action-button, and
 // submenu rows are constructed by the Game Options runtime. Tab nodes retain
@@ -156,6 +207,13 @@ public:
         detail::TextInputState& state,
         TextAction on_changed = {});
 
+    Page& add_color_picker(
+        std::wstring label,
+        std::wstring help,
+        detail::ColorPickerState& state,
+        bool enabled = true,
+        detail::ColorAction on_changed = {});
+
     Page& add_button(
         std::wstring label,
         std::wstring help,
@@ -192,9 +250,11 @@ private:
         SliderSpec slider{};
         std::vector<std::wstring> choices{};
         detail::TextInputState* text_input_state{};
+        detail::ColorPickerState* color_picker_state{};
         Action action{};
         ValueAction value_action{};
         TextAction text_action{};
+        detail::ColorAction color_action{};
         Page* target_page{};
         bool enabled{true};
     };
@@ -210,6 +270,58 @@ private:
     std::vector<RowDefinition> rows_{};
 };
 
+// Declarative catalog rendered by Elden Ring's native Button Settings and
+// Keyboard/Mouse Settings screens. It is intentionally separate from Page:
+// those screens own a different scrolling model and one logical action shares
+// its controller, keyboard, and mouse assignments.
+class InputBindingSection {
+public:
+    InputBindingSection(const InputBindingSection&) = delete;
+    InputBindingSection& operator=(const InputBindingSection&) = delete;
+    InputBindingSection(InputBindingSection&&) = delete;
+    InputBindingSection& operator=(InputBindingSection&&) = delete;
+    ~InputBindingSection() = default;
+
+    InputBindingSection& add_binding(
+        ERUI_InputActionHandle handle,
+        std::string binding_id,
+        std::wstring label,
+        const ERUI_ActionInputs& default_inputs,
+        const ERUI_ActionInputs& current_inputs,
+        InputBindingAction action,
+        InputAssignmentsAction assignments_changed);
+
+    [[nodiscard]] std::wstring_view label() const noexcept { return label_; }
+    [[nodiscard]] std::size_t binding_count() const noexcept {
+        return bindings_.size();
+    }
+
+private:
+    friend class Menu;
+    friend class detail::MenuCompiler;
+
+    struct Definition {
+        ERUI_InputActionHandle handle{};
+        std::string binding_id{};
+        std::wstring label{};
+        ERUI_ActionInputs default_inputs{};
+        ERUI_ActionInputs current_inputs{};
+        InputBindingAction action{};
+        InputAssignmentsAction assignments_changed{};
+    };
+
+    InputBindingSection(
+        Menu& owner,
+        std::string provider_id,
+        std::wstring label);
+    void ensure_mutable() const;
+
+    Menu* owner_{};
+    std::string provider_id_{};
+    std::wstring label_{};
+    std::vector<Definition> bindings_{};
+};
+
 class Menu {
 public:
     explicit Menu(std::wstring title, std::wstring help = {},
@@ -223,13 +335,28 @@ public:
     [[nodiscard]] Page& root() noexcept { return *root_page_; }
     [[nodiscard]] const Page& root() const noexcept { return *root_page_; }
 
+    // Returns the logical destination merged into an Elden Ring built-in
+    // Configuration page. Game Options is the legacy root page. Other
+    // destinations are created lazily so API 1.0 menus keep their historical
+    // model shape and page numbering.
+    Page& builtin_page(detail::BuiltinPage page);
+    [[nodiscard]] const Page* find_builtin_page(
+        detail::BuiltinPage page) const noexcept;
+
     Page& add_tab(std::wstring title, std::wstring help = {});
+
+    InputBindingSection& add_input_binding_section(
+        std::string provider_id,
+        std::wstring label);
 
     [[nodiscard]] std::wstring_view title() const noexcept { return title_; }
     [[nodiscard]] std::wstring_view help() const noexcept { return help_; }
     [[nodiscard]] bool frozen() const noexcept { return frozen_; }
     [[nodiscard]] std::size_t page_count() const noexcept { return pages_.size(); }
     [[nodiscard]] std::size_t tab_count() const noexcept { return tab_pages_.size(); }
+    [[nodiscard]] std::size_t input_binding_section_count() const noexcept {
+        return input_binding_sections_.size();
+    }
 
 private:
     friend class Page;
@@ -243,6 +370,9 @@ private:
     MenuLocalization localization_{};
     std::vector<std::unique_ptr<Page>> pages_{};
     std::vector<Page*> tab_pages_{};
+    std::vector<std::unique_ptr<InputBindingSection>>
+        input_binding_sections_{};
+    std::array<Page*, detail::builtin_page_count> builtin_pages_{};
     Page* root_page_{};
     bool frozen_{false};
 };

@@ -41,7 +41,7 @@ $exportDirectory = Join-Path $resolvedResearch 'exports'
 $logDirectory = Join-Path $resolvedResearch 'logs'
 $scriptDirectory = Join-Path $PSScriptRoot 'ghidra'
 $knownSymbols = Join-Path $PSScriptRoot `
-    '..\..\docs\analysis\address-map\eldenring_2.7.0.0_known_symbols.csv'
+    '..\..\docs\research\address-map\eldenring_2.7.0.0_known_symbols.csv'
 New-Item -ItemType Directory -Force -Path $projectDirectory,$exportDirectory,$logDirectory | Out-Null
 
 $arguments = @(

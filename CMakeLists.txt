@@ -120,11 +120,16 @@ if(_ernativeui_need_native_core)
     # Private native implementation. Client mods never link this target.
     add_library(ERNativeUICore STATIC
         src/addresses.cpp
+        src/color_picker.cpp
+        src/color_picker_state.cpp
         src/hooks.cpp
+        src/host_storage.cpp
+        src/input_binding_model.cpp
         src/menu.cpp
         src/menu_compiler.cpp
         src/module.cpp
         src/native_dialog.cpp
+        src/native_input_bindings.cpp
         src/native_menu.cpp
         src/native_popup_choice.cpp
         src/native_text_input.cpp
@@ -133,6 +138,7 @@ if(_ernativeui_need_native_core)
         src/runtime.cpp
         src/runtime_log.cpp
         src/runtime_state.cpp
+        src/storage_document.cpp
         src/submenu_navigation.cpp
         src/text_input_state.cpp
         src/text_registry.cpp)
@@ -189,7 +195,8 @@ endif()
 if(TARGET ERNativeUIHost)
     set(_ernativeui_stage_dependencies ERNativeUIHost)
     foreach(_ernativeui_example_target IN ITEMS
-            TarnishedUIShowcase LocalizedGreeting MyERNativeUIMod)
+            TarnishedUIShowcase LocalizedGreeting
+            ShowcaseScreenshotHelperStage MyERNativeUIMod)
         if(TARGET ${_ernativeui_example_target})
             list(APPEND _ernativeui_stage_dependencies
                 ${_ernativeui_example_target})
@@ -223,6 +230,9 @@ if(TARGET ERNativeUIHost)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/README.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG.md"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/CHANGELOG.md"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/VALIDATION.md"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/VALIDATION.md"
@@ -289,6 +299,38 @@ if(_ernativeui_enable_tests)
             target_link_options(ERNativeUIAbiHostCurrent PRIVATE
                 /INCREMENTAL:NO)
         endif()
+
+        # Lifecycle fixture built from the same production API, registry, and
+        # Steam-language sources. Its tiny DllMain deliberately holds the host
+        # in the real "registration open, language pending" startup interval.
+        add_library(ERNativeUIAbiHostV1_0Pending SHARED
+            tests/abi/support/pending_v1_0_host_dllmain.cpp
+            src/host_api.cpp
+            src/host_registry.cpp
+            src/steam_language.cpp)
+        target_include_directories(ERNativeUIAbiHostV1_0Pending PRIVATE
+            src include tests/abi/support)
+        target_link_libraries(ERNativeUIAbiHostV1_0Pending PRIVATE
+            ERNativeUI::Core)
+        target_compile_features(ERNativeUIAbiHostV1_0Pending PRIVATE
+            cxx_std_20)
+        target_compile_definitions(ERNativeUIAbiHostV1_0Pending PRIVATE
+            ERUI_HOST_EXPORTS WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUIAbiHostV1_0Pending PROPERTIES
+            OUTPUT_NAME ERNativeUI
+            PREFIX ""
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/abi/runtime/v1_0_pending"
+            ARCHIVE_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/abi/runtime/v1_0_pending"
+            LIBRARY_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/abi/runtime/v1_0_pending")
+        if(_ernativeui_msvc_abi)
+            target_compile_options(ERNativeUIAbiHostV1_0Pending PRIVATE
+                /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus /wd4100 /wd4324)
+            target_link_options(ERNativeUIAbiHostV1_0Pending PRIVATE
+                /INCREMENTAL:NO)
+        endif()
     endif()
 
     add_subdirectory(tests/abi)
@@ -296,7 +338,7 @@ if(_ernativeui_enable_tests)
     add_executable(ERNativeUIGfxPatcherTests tests/gfx_patcher_test.cpp)
     target_link_libraries(ERNativeUIGfxPatcherTests PRIVATE ERNativeUI::GfxPatch)
     target_compile_definitions(ERNativeUIGfxPatcherTests PRIVATE
-        ERNATIVEUI_TEST_CONTROLLER_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
+        ERNATIVEUI_TEST_GAME_OPTIONS_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
         ERNATIVEUI_TEST_ADVANCED_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx")
     target_compile_features(ERNativeUIGfxPatcherTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.GfxPatcher COMMAND ERNativeUIGfxPatcherTests)
@@ -314,7 +356,7 @@ if(_ernativeui_enable_tests)
     add_test(NAME ERNativeUI.MenuModel COMMAND ERNativeUIModelTests)
 
     add_executable(ERNativeUIRuntimeOptionsTests tests/runtime_options_test.cpp)
-    target_include_directories(ERNativeUIRuntimeOptionsTests PRIVATE src)
+    target_include_directories(ERNativeUIRuntimeOptionsTests PRIVATE src include)
     target_compile_features(ERNativeUIRuntimeOptionsTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.RuntimeOptions COMMAND ERNativeUIRuntimeOptionsTests)
 
@@ -324,6 +366,23 @@ if(_ernativeui_enable_tests)
     target_compile_features(ERNativeUIDialogModalStateTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.DialogModalState
         COMMAND ERNativeUIDialogModalStateTests)
+
+    add_executable(ERNativeUIBindingRuntimeStateTests
+        tests/binding_runtime_state_test.cpp)
+    target_include_directories(ERNativeUIBindingRuntimeStateTests PRIVATE src)
+    target_compile_features(ERNativeUIBindingRuntimeStateTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.BindingRuntimeState
+        COMMAND ERNativeUIBindingRuntimeStateTests)
+
+    add_executable(ERNativeUIInputBindingModelTests
+        tests/input_binding_model_test.cpp
+        src/input_binding_model.cpp)
+    target_include_directories(ERNativeUIInputBindingModelTests PRIVATE
+        src include)
+    target_compile_features(ERNativeUIInputBindingModelTests PRIVATE
+        cxx_std_17)
+    add_test(NAME ERNativeUI.InputBindingModel
+        COMMAND ERNativeUIInputBindingModelTests)
 
     add_executable(ERNativeUIDialogPresentationTests
         tests/native_dialog_presentation_test.cpp)
@@ -340,6 +399,14 @@ if(_ernativeui_enable_tests)
     target_compile_features(ERNativeUIPopupChoiceStateTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.PopupChoiceState
         COMMAND ERNativeUIPopupChoiceStateTests)
+
+    add_executable(ERNativeUIColorPickerStateTests
+        tests/color_picker_state_test.cpp
+        src/color_picker_state.cpp)
+    target_include_directories(ERNativeUIColorPickerStateTests PRIVATE src)
+    target_compile_features(ERNativeUIColorPickerStateTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.ColorPickerState
+        COMMAND ERNativeUIColorPickerStateTests)
 
     add_executable(ERNativeUIAbiCCompileTests tests/abi_c_compile_test.c)
     target_link_libraries(ERNativeUIAbiCCompileTests PRIVATE ERNativeUI::CABI)
@@ -407,9 +474,21 @@ if(_ernativeui_enable_tests)
         add_test(NAME ERNativeUI.SteamLanguage
             COMMAND ERNativeUISteamLanguageTests)
 
+        add_executable(ERNativeUISteamLanguageUnavailableTests
+            tests/steam_language_unavailable_test.cpp src/steam_language.cpp)
+        target_include_directories(
+            ERNativeUISteamLanguageUnavailableTests PRIVATE src include)
+        target_compile_features(
+            ERNativeUISteamLanguageUnavailableTests PRIVATE cxx_std_20)
+        target_compile_definitions(
+            ERNativeUISteamLanguageUnavailableTests PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX)
+        add_test(NAME ERNativeUI.SteamLanguageUnavailable
+            COMMAND ERNativeUISteamLanguageUnavailableTests)
+
         add_executable(ERNativeUIHostLocaleTests
             tests/host_locale_test.cpp src/host_locale.cpp)
-        target_include_directories(ERNativeUIHostLocaleTests PRIVATE src)
+        target_include_directories(ERNativeUIHostLocaleTests PRIVATE src include)
         target_compile_features(ERNativeUIHostLocaleTests PRIVATE cxx_std_20)
         target_compile_definitions(ERNativeUIHostLocaleTests PRIVATE
             WIN32_LEAN_AND_MEAN NOMINMAX
@@ -418,6 +497,29 @@ if(_ernativeui_enable_tests)
             target_compile_options(ERNativeUIHostLocaleTests PRIVATE /utf-8)
         endif()
         add_test(NAME ERNativeUI.HostLocale COMMAND ERNativeUIHostLocaleTests)
+
+        add_executable(ERNativeUIStorageDocumentTests
+            tests/storage_document_test.cpp src/storage_document.cpp)
+        target_include_directories(ERNativeUIStorageDocumentTests PRIVATE
+            src include)
+        target_compile_features(ERNativeUIStorageDocumentTests PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUIStorageDocumentTests PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        add_test(NAME ERNativeUI.StorageDocument
+            COMMAND ERNativeUIStorageDocumentTests)
+
+        add_executable(ERNativeUIHostStorageTests
+            tests/host_storage_test.cpp
+            src/host_storage.cpp
+            src/input_binding_model.cpp
+            src/storage_document.cpp)
+        target_include_directories(ERNativeUIHostStorageTests PRIVATE
+            src include)
+        target_compile_features(ERNativeUIHostStorageTests PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUIHostStorageTests PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        add_test(NAME ERNativeUI.HostStorage
+            COMMAND ERNativeUIHostStorageTests)
 
         add_executable(ERNativeUIPagePresentationCppTests
             tests/page_presentation_cpp_test.cpp)
@@ -463,15 +565,20 @@ if(TARGET ERNativeUIGfxPatcher)
         DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI/tools/gfx_patcher)
 endif()
 if(TARGET TarnishedUIShowcase)
-    install(TARGETS TarnishedUIShowcase LocalizedGreeting MyERNativeUIMod
+    install(TARGETS TarnishedUIShowcase LocalizedGreeting
+        ShowcaseScreenshotHelper MyERNativeUIMod
         LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/examples
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/examples)
+    install(FILES
+        examples/showcase_screenshot_helper/ShowcaseScreenshotHelper.ini
+        DESTINATION ${CMAKE_INSTALL_BINDIR}/examples)
 endif()
 install(DIRECTORY examples/ DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI/examples
     FILES_MATCHING PATTERN "*.cpp" PATTERN "*.hpp" PATTERN "*.md"
-    PATTERN "CMakeLists.txt")
-install(DIRECTORY docs/ DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI/docs)
-install(FILES README.md VALIDATION.md LICENSE.txt THIRD_PARTY_NOTICES.txt
+    PATTERN "*.ini" PATTERN "*.cmake" PATTERN "CMakeLists.txt")
+install(DIRECTORY docs/ DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI/docs
+    PATTERN "old" EXCLUDE)
+install(FILES README.md CHANGELOG.md VALIDATION.md LICENSE.txt THIRD_PARTY_NOTICES.txt
     DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI)
 if(TARGET ERNativeUIHost)
     install(FILES "${safetyhook_SOURCE_DIR}/LICENSE"

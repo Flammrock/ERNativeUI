@@ -9,13 +9,19 @@
 
 namespace erui::native {
 
-using HubHandlerFn = void(__fastcall*)(
+using GameOptionsHandlerFn = void(__fastcall*)(
     void* page,
     std::uintptr_t argument2,
     std::uintptr_t argument3,
     std::uintptr_t argument4,
     std::uintptr_t argument5,
     std::uintptr_t argument6);
+// Built-in category row materializer. This callback
+// runs before the generic panel wrapper finalizes its Scaleform row bindings,
+// which is the required mutation window.
+using BuiltinPanelMaterializerFn = void(__fastcall*)(
+    void* page,
+    void* menu_option_data);
 using SubHandlerFn = void(__fastcall*)(
     void* page,
     std::uintptr_t argument2,
@@ -138,7 +144,13 @@ using TextInputEditorFactoryBuilderFn = void*(__fastcall*)(
 struct GameAddresses {
     std::uint8_t* game_image_base{};
     std::size_t game_image_size{};
-    HubHandlerFn hub_handler{};
+    GameOptionsHandlerFn game_options_handler{};
+    BuiltinPanelMaterializerFn camera_panel_materializer{};
+    BuiltinPanelMaterializerFn display_panel_materializer{};
+    BuiltinPanelMaterializerFn sound_panel_materializer{};
+    BuiltinPanelMaterializerFn network_panel_materializer{};
+    BuiltinPanelMaterializerFn keyboard_mouse_panel_materializer{};
+    BuiltinPanelMaterializerFn graphics_panel_materializer{};
     SubHandlerFn sub_handler{};
     OpenSubPageFn open_sub_page{};
     NativeBackFn native_back{};
@@ -147,7 +159,7 @@ struct GameAddresses {
     BufferConstructorFn menu_context{};
     TextReferenceFn text_ref_help{};
     TextReferenceFn text_ref_label{};
-    // Constructs the richer label/help pair required by Controller-page
+    // Constructs the richer label/help pair required by Game Options
     // action rows (the same object used by vanilla Advanced Settings).
     BufferConstructorFn root_button_text_references{};
     TextReferenceFn root_button_display_text{};

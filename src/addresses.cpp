@@ -9,7 +9,13 @@
 namespace erui::native {
 namespace {
 
-constexpr std::uintptr_t kHubHandlerRva = 0x958C50;
+constexpr std::uintptr_t kGameOptionsHandlerRva = 0x958C50;
+constexpr std::uintptr_t kCameraPanelMaterializerRva = 0x959320;
+constexpr std::uintptr_t kDisplayPanelMaterializerRva = 0x95D540;
+constexpr std::uintptr_t kSoundPanelMaterializerRva = 0x959090;
+constexpr std::uintptr_t kNetworkPanelMaterializerRva = 0x95AD00;
+constexpr std::uintptr_t kKeyboardMousePanelMaterializerRva = 0x95CB30;
+constexpr std::uintptr_t kGraphicsPanelMaterializerRva = 0x95C050;
 constexpr std::uintptr_t kSubHandlerRva = 0x95A5D0;
 constexpr std::uintptr_t kOpenSubPageRva = 0x94FA20;
 constexpr std::uintptr_t kOnOffListRva = 0x955550;
@@ -30,8 +36,36 @@ constexpr std::uintptr_t kScaleformPathResolverRva = 0x74B140;
 constexpr std::uintptr_t kScaleformTextSetterRva = 0x74AE50;
 constexpr std::uintptr_t kScaleformResultDestructorRva = 0xD81590;
 
-constexpr std::string_view kHubHandlerPattern =
+constexpr std::string_view kGameOptionsHandlerPattern =
     "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 E0 F2 FF FF";
+// Category 1's CameraSetting row materializer. The wrapper at 0x93CB70
+// stores this target in the same two-argument callback slot used by the other
+// ordinary OptionSetting panels.
+constexpr std::string_view kCameraPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 FD FF FF "
+    "48 81 EC 50 03 00 00 48 C7 45 00 FE FF FF FF "
+    "48 89 9C 24 A0 03 00 00";
+constexpr std::string_view kDisplayPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 A0 F2 FF FF "
+    "48 81 EC 60 0E 00 00 48 C7 45 18 FE FF FF FF "
+    "48 89 9C 24 B0 0E 00 00";
+constexpr std::string_view kSoundPanelMaterializerPattern =
+    "40 55 56 57 48 8D AC 24 50 FE FF FF 48 81 EC B0 02 00 00 "
+    "48 C7 44 24 70 FE FF FF FF 48 89 9C 24 E0 02 00 00 "
+    "48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 A0 01 00 00 "
+    "48 8B FA 48 8B D9 48 8D 4D F0 E8 ?? ?? ?? ?? 90 48 8D 4D 80";
+constexpr std::string_view kNetworkPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 D0 F2 FF FF "
+    "48 81 EC 30 0E 00 00 48 C7 44 24 58 FE FF FF FF "
+    "48 89 9C 24 80 0E 00 00";
+constexpr std::string_view kKeyboardMousePanelMaterializerPattern =
+    "48 8B C4 55 41 54 41 55 41 56 41 57 48 8D A8 68 FE FF FF "
+    "48 81 EC 70 02 00 00 48 C7 45 20 FE FF FF FF "
+    "48 89 58 10 48 89 70 18 48 89 78 20";
+constexpr std::string_view kGraphicsPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 F5 FF FF "
+    "48 81 EC B0 0B 00 00 48 C7 45 80 FE FF FF FF "
+    "48 89 9C 24 00 0C 00 00";
 constexpr std::string_view kSubHandlerPattern =
     "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 F7 FF FF "
     "48 81 EC E0 09 00 00 48 C7 44 24 40 FE FF FF FF";
@@ -475,7 +509,7 @@ bool GameAddresses::complete(
     bool require_text_inputs,
     bool require_custom_text) const noexcept {
     const bool rows_ready = !require_rows || (
-        hub_handler && on_off_list && menu_context && text_ref_help &&
+        game_options_handler && on_off_list && menu_context && text_ref_help &&
         text_ref_label && add_toggle && add_slider && add_inline_choice &&
         choice_context_constructor && choice_list_builder &&
         destroy_text_references);
@@ -518,12 +552,59 @@ bool resolve_game_addresses(
     }
 
     if (require_rows) {
-        output.hub_handler = reinterpret_cast<HubHandlerFn>(resolve_direct(
+        output.game_options_handler =
+            reinterpret_cast<GameOptionsHandlerFn>(resolve_direct(
             game,
-            "hub handler",
-            kHubHandlerPattern,
-            kHubHandlerRva,
-            kHubHandlerPattern));
+            "Game Options handler",
+            kGameOptionsHandlerPattern,
+            kGameOptionsHandlerRva,
+            kGameOptionsHandlerPattern));
+        // Each built-in destination is optional and independently hooked.
+        // A signature failure disables only that panel; Game Options and the
+        // other resolved destinations remain available.
+        output.camera_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Camera panel rows",
+                kCameraPanelMaterializerPattern,
+                kCameraPanelMaterializerRva,
+                kCameraPanelMaterializerPattern));
+        output.display_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Display panel rows",
+                kDisplayPanelMaterializerPattern,
+                kDisplayPanelMaterializerRva,
+                kDisplayPanelMaterializerPattern));
+        output.sound_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Sound panel rows",
+                kSoundPanelMaterializerPattern,
+                kSoundPanelMaterializerRva,
+                kSoundPanelMaterializerPattern));
+        output.network_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Network panel rows",
+                kNetworkPanelMaterializerPattern,
+                kNetworkPanelMaterializerRva,
+                kNetworkPanelMaterializerPattern));
+        output.keyboard_mouse_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(
+                resolve_optional_direct(
+                    game,
+                    "Keyboard panel rows",
+                    kKeyboardMousePanelMaterializerPattern,
+                    kKeyboardMousePanelMaterializerRva,
+                    kKeyboardMousePanelMaterializerPattern));
+        output.graphics_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Graphics panel rows",
+                kGraphicsPanelMaterializerPattern,
+                kGraphicsPanelMaterializerRva,
+                kGraphicsPanelMaterializerPattern));
         if (require_submenus) {
             output.sub_handler = reinterpret_cast<SubHandlerFn>(resolve_direct(
                 game,

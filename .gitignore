@@ -3,9 +3,11 @@
 /dist/
 /.release-please-manifest.json.bak
 /.vs/
+.obsidian/
 *.user
 *.suo
 *.log
+ERNativeUI.bindings.ini
 /gfx_patch_output/
 /gfx_fingerprint_output/
 /research-work/

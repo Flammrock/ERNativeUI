@@ -3,8 +3,10 @@
 These scripts create a local static-analysis database and compact indexes for
 ERNativeUI research. They do not modify or launch Elden Ring.
 
-Requirements and the artifact policy are documented in
-`docs/analysis/EXECUTABLE_ANALYSIS.md`.
+Requirements, artifact policy, and the recorded baseline are documented in
+[`docs/research/tools/ghidra-workflow.md`](../../docs/research/tools/ghidra-workflow.md).
+Use the [research methodology](../../docs/research/methodology.md) when
+classifying or promoting a result.
 
 ## Whole-program import
 
@@ -32,14 +34,18 @@ bulk decompiler dump:
 These raw indexes remain local until a curated subset is suitable for the
 public address map.
 
-Before exporting, the initial import applies the exact-build curated symbols
-from `docs/analysis/address-map/`. The seed script verifies the imported PE's
-SHA-256 and skips documentary entries that are inferred or rejected.
+Before exporting, the initial import applies the exact-build historical seed
+symbols from `docs/research/address-map/`. This snapshot is useful for
+navigation but is not an exhaustive current production inventory. The seed
+script verifies the imported PE's SHA-256 and skips documentary entries that
+are inferred or rejected.
 
 `ghidra/ApplyKnownSymbols.java` applies the reviewed build-specific map under
-`docs/analysis/address-map/` after verifying the imported executable SHA-256.
+`docs/research/address-map/` after verifying the imported executable SHA-256.
 It deliberately ignores documentary rows whose interpretation is incomplete
-or rejected.
+or rejected. See the
+[map status and schema](../../docs/research/address-map/README.md) before using
+its `production_role` field.
 
 ## Focused queries
 
@@ -66,7 +72,7 @@ addresses rebased at the PE image base.
 The examples below assume:
 
 ```powershell
-$ghidra = 'C:\Users\flamm\Tools\ERNativeUI-research\ghidra_12.1.3_PUBLIC'
+$ghidra = 'C:\Tools\ghidra_12.1.3_PUBLIC'
 ```
 
 ### Find string, symbol, RTTI, and vftable anchors
@@ -287,7 +293,9 @@ A productive investigation normally follows this loop:
 5. Use `RttiClasses` to inventory a tightly filtered native class family,
    `RttiHierarchy` to find recovered descendants of a known base, and
    `Callsites` to separate direct helpers from possible virtual dispatch.
-6. Record confirmed observations and rejected hypotheses in `docs/analysis/`.
+6. Record confirmed observations, inferences, hypotheses, and rejected paths
+   under `docs/research/` using the evidence and experiment template in the
+   [methodology](../../docs/research/methodology.md).
 
 Keep generated CSV, Markdown decompilation, logs, and Ghidra project files in
 the ignored `research-work/` tree. Only curated facts, original explanations,

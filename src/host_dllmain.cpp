@@ -5,6 +5,7 @@
 #include "logger.hpp"
 #include "module.hpp"
 #include "native_dialog.hpp"
+#include "color_picker.hpp"
 #include "runtime_log.hpp"
 #include "steam_language.hpp"
 
@@ -21,7 +22,9 @@
 #include <filesystem>
 #include <memory>
 #include <cstring>
+#include <string>
 #include <system_error>
+#include <utility>
 
 namespace erui::host {
 namespace {
@@ -29,6 +32,19 @@ namespace {
 HMODULE g_module{};
 std::atomic_bool g_stop{};
 std::unique_ptr<erui::Menu> g_menu{};
+
+constexpr DWORD kSteamReadinessPollMs = 25;
+constexpr std::uint64_t kSteamReadinessLogMs = 2000;
+
+void fail_pending_startup_for_stop() noexcept {
+    set_api_state(ApiState::failed);
+    if (steam_language_readiness() == SteamLanguageReadiness::pending) {
+        SteamLanguageProbe unavailable{};
+        unavailable.failure_code = SteamLanguageFailure::exception;
+        unavailable.failure = "host stopped before Steam language settled";
+        (void)settle_cached_steam_language(std::move(unavailable));
+    }
+}
 
 std::filesystem::path module_directory(HMODULE module) {
     wchar_t buffer[32768]{};
@@ -167,22 +183,77 @@ DWORD run_host() noexcept {
         const auto max_wait_ms = static_cast<std::uint64_t>(std::clamp(
             read_ini(ini, L"Runtime", L"RegistrationMaxWaitMs", 5000),
             static_cast<int>(quiet_ms), 15000));
+        const auto steam_language_wait_ms = static_cast<std::uint64_t>(
+            std::clamp(read_ini(
+                ini, L"Runtime", L"SteamLanguageWaitMs", 5000),
+                0, 30000));
         const auto cooldown = static_cast<std::uint32_t>(std::clamp(
             read_ini(ini, L"Runtime", L"InjectionCooldownMs", 250), 0, 5000));
         const bool diagnostics = read_ini(
             ini, L"Diagnostics", L"EnableDiagnostics", 0) != 0;
 
-        ERUI_GameLanguageInfo startup_language{};
-        startup_language.size = sizeof(startup_language);
-        const ERUI_Result startup_language_result =
-            get_cached_steam_language(&startup_language);
-        std::string_view startup_identifier{};
-        if (startup_language_result == ERUI_OK &&
-            startup_language.identifier.data) {
-            startup_identifier = std::string_view(
-                startup_language.identifier.data,
-                startup_language.identifier.length);
+        // Preserve the released API 1.0 lifecycle: its table and provider
+        // registration become available before Steam finishes initializing.
+        // API 1.1 negotiation remains gated by steam_language_readiness().
+        registry().open_registration();
+        set_api_state(ApiState::accepting);
+        log::write(
+            "Provider registration open for API 1.0; waiting for Steam language before releasing API 1.1");
+
+        const std::uint64_t language_wait_started = GetTickCount64();
+        std::uint64_t language_last_log = 0;
+        SteamLanguageFailure language_last_failure =
+            SteamLanguageFailure::none;
+        SteamLanguageProbe startup_language{};
+        for (;;) {
+            if (g_stop.load(std::memory_order_acquire)) {
+                fail_pending_startup_for_stop();
+                return 0;
+            }
+            startup_language = probe_steam_language();
+            const std::uint64_t now = GetTickCount64();
+            const std::uint64_t elapsed = now - language_wait_started;
+            const SteamLanguageProbeDecision decision =
+                decide_steam_language_probe(
+                    startup_language, elapsed, steam_language_wait_ms);
+            if (decision == SteamLanguageProbeDecision::settle) {
+                break;
+            }
+
+            if (startup_language.failure_code != language_last_failure ||
+                now - language_last_log >= kSteamReadinessLogMs) {
+                log::write(
+                    "Steam language pending: failure=%u (%s) elapsed=%llu ms limit=%llu ms",
+                    static_cast<unsigned>(startup_language.failure_code),
+                    startup_language.failure
+                        ? startup_language.failure
+                        : "unknown transient failure",
+                    static_cast<unsigned long long>(elapsed),
+                    static_cast<unsigned long long>(steam_language_wait_ms));
+                language_last_failure = startup_language.failure_code;
+                language_last_log = now;
+            }
+            if (decision == SteamLanguageProbeDecision::timeout) {
+                startup_language = {};
+                startup_language.failure_code =
+                    SteamLanguageFailure::readiness_timeout;
+                startup_language.failure =
+                    "Steam language readiness deadline expired";
+                break;
+            }
+            Sleep(kSteamReadinessPollMs);
         }
+        const std::uint64_t language_wait_elapsed =
+            GetTickCount64() - language_wait_started;
+        const std::string startup_identifier = startup_language.available
+            ? startup_language.current
+            : std::string{};
+        const SteamLanguageFailure startup_failure =
+            startup_language.failure_code;
+        const char* const startup_failure_text = startup_language.failure
+            ? startup_language.failure
+            : "unknown Steam language failure";
+
         HostLocale host_locale = load_host_locale(directory, startup_identifier);
         registry().set_host_locale(std::move(host_locale.pagination));
         log::write(
@@ -191,11 +262,33 @@ DWORD run_host() noexcept {
             startup_identifier.data() ? startup_identifier.data() : "",
             host_locale.loaded ? 1 : 0);
 
-        registry().open_registration();
-        set_api_state(ApiState::accepting);
+        // Start the registration clock at the exact readiness release. The
+        // registry also requires a full quiet interval since this point, so
+        // an API 1.0 provider committed during Steam startup cannot cause an
+        // immediate freeze before newly released API 1.1 clients register.
         const std::uint64_t opened_at = GetTickCount64();
+        const ERUI_Result startup_language_result =
+            settle_cached_steam_language(std::move(startup_language));
+        if (startup_language_result == ERUI_OK) {
+            log::write(
+                "Startup language ready: current='%.*s' known=%u wait=%llu ms",
+                static_cast<int>(startup_identifier.size()),
+                startup_identifier.data(),
+                static_cast<unsigned>(
+                    classify_steam_language(startup_identifier)),
+                static_cast<unsigned long long>(language_wait_elapsed));
+        } else if (startup_language_result == ERUI_NOT_SUPPORTED) {
+            log::write(
+                "WARN: Steam language is terminally unavailable after %llu ms (failure=%u: %s); connections remain available and language queries will report unsupported",
+                static_cast<unsigned long long>(language_wait_elapsed),
+                static_cast<unsigned>(startup_failure),
+                startup_failure_text);
+        } else {
+            throw std::logic_error(
+                "Steam language settlement did not reach a stable state");
+        }
         log::write(
-            "Provider registration open: quiet=%llu ms maxWait=%llu ms",
+            "Provider registration readiness settled: quiet=%llu ms maxWait=%llu ms",
             static_cast<unsigned long long>(quiet_ms),
             static_cast<unsigned long long>(max_wait_ms));
 
@@ -207,7 +300,10 @@ DWORD run_host() noexcept {
             }
             Sleep(25);
         }
-        if (g_stop.load(std::memory_order_acquire)) return 0;
+        if (g_stop.load(std::memory_order_acquire)) {
+            fail_pending_startup_for_stop();
+            return 0;
+        }
         if (!g_menu) throw std::logic_error("registry did not publish a menu");
         log::write(
             "Registry frozen: generation=%llu providers=%zu rootRows=%zu",
@@ -223,7 +319,8 @@ DWORD run_host() noexcept {
             constexpr DWORD kStableWindowMs = 500;
             std::array<std::array<unsigned char, 16>, 3> pristine{};
             const std::array<const unsigned char*, 3> targets{
-                reinterpret_cast<const unsigned char*>(early_addresses.hub_handler),
+                reinterpret_cast<const unsigned char*>(
+                    early_addresses.game_options_handler),
                 reinterpret_cast<const unsigned char*>(early_addresses.sub_handler),
                 reinterpret_cast<const unsigned char*>(early_addresses.text_resolver)};
             for (std::size_t index = 0; index < targets.size(); ++index) {
@@ -254,7 +351,10 @@ DWORD run_host() noexcept {
                 }
                 Sleep(50);
             }
-            if (g_stop.load(std::memory_order_acquire)) return 0;
+            if (g_stop.load(std::memory_order_acquire)) {
+                fail_pending_startup_for_stop();
+                return 0;
+            }
             std::size_t changed_count = 0;
             for (std::size_t index = 0; index < targets.size(); ++index) {
                 if (std::memcmp(
@@ -309,10 +409,10 @@ DWORD run_host() noexcept {
         options.enable_row_injection = true;
         options.enable_custom_text = true;
         options.enable_diagnostics = diagnostics;
-        // Planning occurs before Controller Settings exists. Use the
+        // Planning occurs before Game Options exists. Use the
         // conservative vanilla fallback; injection reads and validates the
         // live page object's validated capacity.
-        options.controller_visual_capacity = 6;
+        options.game_options_visual_capacity = 6;
         options.injection_cooldown_ms = cooldown;
         options.log_sink = &runtime_log_sink;
         const erui::InstallResult installed = solid_uncapper_loaded
@@ -346,6 +446,7 @@ DWORD run_host() noexcept {
             registry().apply_pending_values();
             erui::poll_changes();
             erui::native::dispatch_native_dialog_callbacks();
+            erui::native::dispatch_color_picker_callbacks();
             Sleep(50);
         }
         return 0;
@@ -355,6 +456,12 @@ DWORD run_host() noexcept {
         log::write("ERROR: host bootstrap unknown exception");
     }
     set_api_state(ApiState::failed);
+    if (steam_language_readiness() == SteamLanguageReadiness::pending) {
+        SteamLanguageProbe unavailable{};
+        unavailable.failure_code = SteamLanguageFailure::exception;
+        unavailable.failure = "host initialization failed before Steam language settled";
+        (void)settle_cached_steam_language(std::move(unavailable));
+    }
     return 1;
 }
 

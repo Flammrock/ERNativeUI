@@ -110,6 +110,45 @@ int main() {
         ERUI_TEST_CHECK(rejected);
     }
 
+    // Built-in pages expose their remaining capacity only after Elden Ring
+    // has materialized the vanilla rows, so production uses the allocation-
+    // free resolver rather than a compile-time PagePlan.
+    {
+        PageSlice slice{};
+        ERUI_TEST_CHECK(!resolve_paginated_slice(9, 1, 0, 15, 0, slice));
+    }
+
+    {
+        PageSlice slice{};
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 3, 3, 15, 0, slice));
+        assert_slice(slice, 0, 3, false, false, 0, 1);
+        ERUI_TEST_CHECK(!resolve_paginated_slice(9, 3, 3, 15, 1, slice));
+    }
+
+    {
+        PageSlice first{};
+        PageSlice continuation{};
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 3, 1, 15, 0, first));
+        ERUI_TEST_CHECK(resolve_paginated_slice(
+            9, 3, 1, 15, 1, continuation));
+        // With one free native slot the first page contains only Next. No
+        // client row is dropped; all content moves to the continuation.
+        assert_slice(first, 0, 0, false, true, 0, 2);
+        assert_slice(continuation, 0, 3, true, false, 1, 2);
+    }
+
+    {
+        PageSlice first{};
+        PageSlice middle{};
+        PageSlice last{};
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 29, 3, 15, 0, first));
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 29, 3, 15, 1, middle));
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 29, 3, 15, 2, last));
+        assert_slice(first, 0, 2, false, true, 0, 3);
+        assert_slice(middle, 2, 13, true, true, 1, 3);
+        assert_slice(last, 15, 14, true, false, 2, 3);
+    }
+
     // Exercise a broad matrix to catch gaps, overlaps, empty overflow slices,
     // and navigation rows exceeding the native capacity.
     for (std::size_t capacity = 3; capacity <= 32; ++capacity) {
@@ -129,9 +168,21 @@ int main() {
     constexpr PageRoute b = PageRoute::submenu(4, 2);
     constexpr PageRoute c = PageRoute::root_continuation(0, 7, 1);
     constexpr PageRoute d = PageRoute::root_continuation(0, 6, 1);
+    constexpr PageRoute camera_a =
+        PageRoute::builtin_continuation(8, 1, 3, 1);
+    constexpr PageRoute camera_b =
+        PageRoute::builtin_continuation(8, 1, 3, 2);
+    constexpr PageRoute sound =
+        PageRoute::builtin_continuation(8, 3, 3, 1);
+    constexpr PageRoute camera_other_capacity =
+        PageRoute::builtin_continuation(8, 1, 4, 1);
     static_assert(same_native_page_domain(a, b));
     static_assert(!same_native_page_domain(a, c));
     static_assert(!same_native_page_domain(c, d));
+    static_assert(same_native_page_domain(camera_a, camera_b));
+    static_assert(!same_native_page_domain(camera_a, sound));
+    static_assert(!same_native_page_domain(
+        camera_a, camera_other_capacity));
     static_assert(is_previous_route_target(
         PageRoute::submenu(4, 2), PageRoute::submenu(4, 1)));
     static_assert(!is_previous_route_target(
@@ -142,6 +193,12 @@ int main() {
     static_assert(!is_previous_route_target(
         PageRoute::root_continuation(0, 7, 1),
         PageRoute::root_main(0, 6)));
+    static_assert(is_previous_route_target(
+        PageRoute::builtin_continuation(8, 1, 3, 1),
+        PageRoute::builtin_main(8, 1, 3)));
+    static_assert(!is_previous_route_target(
+        PageRoute::builtin_continuation(8, 1, 3, 1),
+        PageRoute::builtin_main(8, 3, 3)));
 
     return 0;
 }

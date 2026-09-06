@@ -3,6 +3,7 @@
 #include "menu.hpp"
 
 #include "test_assertions.hpp"
+#include <array>
 #include <cstdint>
 #include <cwchar>
 #include <stdexcept>
@@ -12,6 +13,25 @@ namespace {
 void changed(std::uint8_t, void*) noexcept {}
 int button_press_count{};
 void pressed(void*) noexcept { ++button_press_count; }
+std::uint32_t observed_binding_devices{};
+void binding_activated(std::uint32_t devices, void*) noexcept {
+    observed_binding_devices = devices;
+}
+void binding_assignments_changed(
+    const ERUI_ActionInputs&,
+    const ERUI_ActionInputs&,
+    ERUI_AssignmentChangeReason,
+    ERUI_InputDevices,
+    void*) noexcept {}
+
+ERUI_ActionInputs all_unbound_inputs() noexcept {
+    ERUI_ActionInputs result{};
+    result.size = sizeof(result);
+    result.controller.state = ERUI_INPUT_SLOT_UNBOUND;
+    result.keyboard.state = ERUI_INPUT_SLOT_UNBOUND;
+    result.mouse.state = ERUI_INPUT_SLOT_UNBOUND;
+    return result;
+}
 
 } // namespace
 
@@ -70,6 +90,27 @@ int main() {
         level,
         {.minimum = 0, .maximum = 100, .step = 5});
 
+    erui::InputBindingSection& bindings = menu.add_input_binding_section(
+        "menu-model", L"Example Controls");
+    const ERUI_ActionInputs unbound = all_unbound_inputs();
+    bindings
+        .add_binding(
+            101,
+            "open-dialog",
+            L"Open Dialog",
+            unbound,
+            unbound,
+            {.callback = &binding_activated},
+            {.callback = &binding_assignments_changed})
+        .add_binding(
+            102,
+            "toggle-feature",
+            L"Toggle Feature",
+            unbound,
+            unbound,
+            {.callback = &binding_activated},
+            {.callback = &binding_assignments_changed});
+
     auto compiled = erui::detail::MenuCompiler::compile(menu);
     ERUI_TEST_CHECK(compiled);
     ERUI_TEST_CHECK(menu.frozen());
@@ -84,6 +125,29 @@ int main() {
     ERUI_TEST_CHECK(compiled->modeled_button_count == 2);
     ERUI_TEST_CHECK(compiled->modeled_submenu_count == 1);
     ERUI_TEST_CHECK(compiled->modeled_popup_choice_count == 1);
+    ERUI_TEST_CHECK(compiled->modeled_input_binding_count == 2);
+    ERUI_TEST_CHECK(compiled->input_binding_sections.size() == 1);
+    const auto& compiled_binding_section =
+        compiled->input_binding_sections.front();
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_binding_section.label_id)) == L"Example Controls");
+    ERUI_TEST_CHECK(compiled_binding_section.bindings.size() == 2);
+    const auto& compiled_binding = compiled_binding_section.bindings.front();
+    ERUI_TEST_CHECK(compiled_binding.provider_id ==
+        "menu-model");
+    ERUI_TEST_CHECK(compiled_binding.binding_id == "open-dialog");
+    ERUI_TEST_CHECK(compiled_binding.handle == 101);
+    ERUI_TEST_CHECK(compiled_binding.current_inputs.controller.state ==
+        ERUI_INPUT_SLOT_UNBOUND);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_binding.label_id)) == L"Open Dialog");
+    const auto* binding_text = compiled->text_binding(
+        compiled_binding.label_id);
+    ERUI_TEST_CHECK(binding_text != nullptr);
+    ERUI_TEST_CHECK(binding_text->role ==
+        erui::detail::TextRole::input_binding_label);
+    compiled_binding.action.invoke(5u);
+    ERUI_TEST_CHECK(observed_binding_devices == 5u);
     const auto& popup = compiled->root_page().rows[3];
     ERUI_TEST_CHECK(popup.kind == erui::RowKind::popup_choice);
     ERUI_TEST_CHECK(popup.choice_ids.size() == 3);
@@ -165,6 +229,20 @@ int main() {
         frozen_rejected = true;
     }
     ERUI_TEST_CHECK(frozen_rejected);
+    bool frozen_binding_rejected = false;
+    try {
+        bindings.add_binding(
+            103,
+            "late-binding",
+            L"Late Binding",
+            unbound,
+            unbound,
+            {.callback = &binding_activated},
+            {.callback = &binding_assignments_changed});
+    } catch (const std::logic_error&) {
+        frozen_binding_rejected = true;
+    }
+    ERUI_TEST_CHECK(frozen_binding_rejected);
 
     volatile std::uint8_t first = 1;
     volatile std::uint8_t second = 1;
@@ -186,8 +264,196 @@ int main() {
     ERUI_TEST_CHECK(capacity_compiled->modeled_button_count == 0);
     ERUI_TEST_CHECK(!capacity_compiled->page_reachable(1));
     ERUI_TEST_CHECK(capacity_compiled->pagination_required_for_capacity(
-        erui::detail::controller_vanilla_capacity));
+        erui::detail::game_options_vanilla_capacity));
     ERUI_TEST_CHECK(!capacity_compiled->pagination_required_for_capacity(
-        erui::detail::controller_max_visual_capacity));
+        erui::detail::game_options_max_visual_capacity));
+
+    // Every native Configuration destination is a separate logical root.
+    // Game Options remains exactly the legacy root object, while all other
+    // roots are lazy and compile to Elden Ring's sparse category IDs.
+    erui::Menu destinations(L"Built-in Test", L"Built-in help");
+    ERUI_TEST_CHECK(&destinations.builtin_page(
+        erui::detail::BuiltinPage::game_options) == &destinations.root());
+    ERUI_TEST_CHECK(destinations.find_builtin_page(
+        erui::detail::BuiltinPage::camera_options) == nullptr);
+
+    constexpr std::array builtin_destinations{
+        erui::detail::BuiltinPage::game_options,
+        erui::detail::BuiltinPage::camera_options,
+        erui::detail::BuiltinPage::display,
+        erui::detail::BuiltinPage::sound,
+        erui::detail::BuiltinPage::network,
+        erui::detail::BuiltinPage::keyboard_mouse,
+        erui::detail::BuiltinPage::graphics,
+    };
+    constexpr std::array<std::uint8_t, builtin_destinations.size()>
+        native_categories{0u, 1u, 2u, 3u, 5u, 7u, 8u};
+    for (std::size_t index = 0; index < builtin_destinations.size(); ++index) {
+        erui::Page& destination = destinations.builtin_page(
+            builtin_destinations[index]);
+        ERUI_TEST_CHECK(&destination == destinations.find_builtin_page(
+            builtin_destinations[index]));
+        destination.add_button(
+            L"Destination row " + std::to_wstring(index),
+            L"Destination help",
+            {.callback = &pressed});
+    }
+    erui::Page& camera_child = destinations.builtin_page(
+        erui::detail::BuiltinPage::camera_options).add_submenu(
+            L"Camera child", L"Camera child help");
+    camera_child.add_button(
+        L"Nested action", L"Nested help", {.callback = &pressed});
+    ERUI_TEST_CHECK(destinations.page_count() == 8);
+    bool invalid_destination_rejected = false;
+    try {
+        (void)destinations.builtin_page(erui::detail::BuiltinPage::count);
+    } catch (const std::invalid_argument&) {
+        invalid_destination_rejected = true;
+    }
+    ERUI_TEST_CHECK(invalid_destination_rejected);
+
+    auto destination_compiled =
+        erui::detail::MenuCompiler::compile(destinations);
+    ERUI_TEST_CHECK(destination_compiled->root_page_index == 0);
+    ERUI_TEST_CHECK(destination_compiled->has_builtin_pages());
+    for (std::size_t index = 0; index < builtin_destinations.size(); ++index) {
+        const std::uint8_t native_category = native_categories[index];
+        const std::size_t page_index =
+            destination_compiled->builtin_page_index(native_category);
+        ERUI_TEST_CHECK(page_index != erui::detail::invalid_compiled_index);
+        ERUI_TEST_CHECK(destination_compiled->builtin_page(native_category) ==
+            &destination_compiled->pages[page_index]);
+        ERUI_TEST_CHECK(destination_compiled->pages[page_index].builtin_page ==
+            builtin_destinations[index]);
+        ERUI_TEST_CHECK(destination_compiled->page_reachable(page_index));
+        ERUI_TEST_CHECK(destination_compiled->page_plans[page_index]
+            .slices.empty());
+        ERUI_TEST_CHECK(destination_compiled->pages[page_index]
+            .physical_title_ids.empty());
+    }
+    ERUI_TEST_CHECK(destination_compiled->builtin_page_index(4u) ==
+        erui::detail::invalid_compiled_index);
+    ERUI_TEST_CHECK(destination_compiled->builtin_page_index(6u) ==
+        erui::detail::invalid_compiled_index);
+    ERUI_TEST_CHECK(destination_compiled->builtin_page_index(9u) ==
+        erui::detail::invalid_compiled_index);
+    ERUI_TEST_CHECK(destination_compiled->builtin_page_index(10u) ==
+        erui::detail::invalid_compiled_index);
+    ERUI_TEST_CHECK(destination_compiled->builtin_page(4u) == nullptr);
+    ERUI_TEST_CHECK(destination_compiled->modeled_button_count == 8);
+    ERUI_TEST_CHECK(destination_compiled->modeled_submenu_count == 1);
+    const std::size_t camera_index =
+        destination_compiled->builtin_page_index(1u);
+    const auto camera_main = erui::detail::PageRoute::builtin_main(
+        camera_index, 1u, 4u);
+    ERUI_TEST_CHECK(destination_compiled->resolve_slice(camera_main) ==
+        nullptr);
+    const auto camera_main_presentation =
+        destination_compiled->resolve_presentation(camera_main);
+    ERUI_TEST_CHECK(camera_main_presentation.outer_title_id == 0);
+    ERUI_TEST_CHECK(camera_main_presentation.page_title_id == 0);
+    const auto camera_continuation =
+        erui::detail::PageRoute::builtin_continuation(
+            camera_index, 1u, 1u, 1u);
+    ERUI_TEST_CHECK(destination_compiled->resolve_slice(
+        camera_continuation) == nullptr);
+    const auto camera_continuation_presentation =
+        destination_compiled->resolve_presentation(camera_continuation);
+    ERUI_TEST_CHECK(std::wstring(destination_compiled->texts.lookup(
+        camera_continuation_presentation.outer_title_id)) ==
+        L"Built-in Test");
+    ERUI_TEST_CHECK(std::wstring(destination_compiled->texts.lookup(
+        camera_continuation_presentation.page_title_id)) ==
+        L"Built-in Test (2/2)");
+    // Both Camera rows fit exactly when the live panel exposes two slots, so
+    // a continuation route for that capacity is impossible and fails closed.
+    const auto exact_fit_presentation =
+        destination_compiled->resolve_presentation(
+            erui::detail::PageRoute::builtin_continuation(
+                camera_index, 1u, 2u, 1u));
+    ERUI_TEST_CHECK(exact_fit_presentation.outer_title_id == 0);
+    ERUI_TEST_CHECK(exact_fit_presentation.page_title_id == 0);
+    const auto wrong_builtin_presentation =
+        destination_compiled->resolve_presentation(
+            erui::detail::PageRoute::builtin_continuation(
+                camera_index, 2u, 1u, 1u));
+    ERUI_TEST_CHECK(wrong_builtin_presentation.outer_title_id == 0);
+    ERUI_TEST_CHECK(wrong_builtin_presentation.page_title_id == 0);
+    const auto& camera_submenu =
+        destination_compiled->pages[camera_index].rows.back();
+    ERUI_TEST_CHECK(camera_submenu.kind == erui::RowKind::submenu);
+    ERUI_TEST_CHECK(destination_compiled->page_reachable(
+        camera_submenu.target_page_index));
+    ERUI_TEST_CHECK(destination_compiled->page_plans[
+        camera_submenu.target_page_index].slices.size() == 1);
+
+    // Built-in title variants are keyed by the runtime first-page capacity,
+    // deduplicated by resulting slice count, and retain the normal n/t title
+    // policy without allocating from a UI callback.
+    erui::Menu builtin_pagination(L"ERNativeUI");
+    erui::Page& graphics = builtin_pagination.builtin_page(
+        erui::detail::BuiltinPage::graphics);
+    for (int index = 0; index < 29; ++index) {
+        graphics.add_button(
+            L"Graphics row " + std::to_wstring(index),
+            L"Graphics help",
+            {.callback = &pressed});
+    }
+    auto builtin_pagination_compiled =
+        erui::detail::MenuCompiler::compile(builtin_pagination);
+    const std::size_t graphics_index =
+        builtin_pagination_compiled->builtin_page_index(8u);
+    ERUI_TEST_CHECK(graphics_index != erui::detail::invalid_compiled_index);
+    const erui::detail::CompiledPage& compiled_graphics =
+        builtin_pagination_compiled->pages[graphics_index];
+    ERUI_TEST_CHECK(compiled_graphics.builtin_physical_title_plan != nullptr);
+    const auto& title_plan =
+        *compiled_graphics.builtin_physical_title_plan;
+    ERUI_TEST_CHECK(title_plan.variant_by_capacity[1] ==
+        title_plan.variant_by_capacity[2]);
+    ERUI_TEST_CHECK(title_plan.variant_by_capacity[1] !=
+        title_plan.variant_by_capacity[3]);
+
+    const auto graphics_second =
+        builtin_pagination_compiled->resolve_presentation(
+            erui::detail::PageRoute::builtin_continuation(
+                graphics_index, 8u, 3u, 1u));
+    const auto graphics_third =
+        builtin_pagination_compiled->resolve_presentation(
+            erui::detail::PageRoute::builtin_continuation(
+                graphics_index, 8u, 3u, 2u));
+    ERUI_TEST_CHECK(std::wstring(builtin_pagination_compiled->texts.lookup(
+        graphics_second.page_title_id)) == L"ERNativeUI (2/3)");
+    ERUI_TEST_CHECK(std::wstring(builtin_pagination_compiled->texts.lookup(
+        graphics_third.page_title_id)) == L"ERNativeUI (3/3)");
+
+    const auto presentation_fails_closed = [&](erui::detail::PageRoute route) {
+        const auto presentation =
+            builtin_pagination_compiled->resolve_presentation(route);
+        ERUI_TEST_CHECK(presentation.outer_title_id == 0);
+        ERUI_TEST_CHECK(presentation.page_title_id == 0);
+    };
+    presentation_fails_closed(
+        erui::detail::PageRoute::builtin_main(
+            graphics_index, 8u, 3u));
+    presentation_fails_closed(
+        erui::detail::PageRoute::builtin_continuation(
+            graphics_index, 7u, 3u, 1u));
+    presentation_fails_closed(
+        erui::detail::PageRoute::builtin_continuation(
+            graphics_index, 8u, 0u, 1u));
+    presentation_fails_closed(
+        erui::detail::PageRoute::builtin_continuation(
+            graphics_index,
+            8u,
+            static_cast<std::uint8_t>(
+                erui::detail::builtin_page_max_first_capacity + 1u),
+            1u));
+    presentation_fails_closed(
+        erui::detail::PageRoute::builtin_continuation(
+            graphics_index, 8u, 3u, 3u));
+    presentation_fails_closed(
+        erui::detail::PageRoute::builtin_continuation(
+            builtin_pagination_compiled->root_page_index, 0u, 1u, 1u));
     return 0;
 }
