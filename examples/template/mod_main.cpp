@@ -1,7 +1,7 @@
 // ERNativeUI client-mod template
 //
 // Rename the target/folder and, most importantly, replace the provider ID
-// below with a stable reverse-DNS identifier belonging to your mod.
+// below with a stable ID belonging to your mod.
 //
 // This DLL does not link to ERNativeUI.dll. The header discovers the host with
 // GetModuleHandle/GetProcAddress, so your actual mod can continue working when
@@ -14,6 +14,8 @@
 #include <atomic>
 #include <cstdint>
 #include <iterator>
+#include <mutex>
+#include <string>
 
 namespace {
 
@@ -24,6 +26,7 @@ struct LocalizedText {
     const wchar_t* display_name;
     const wchar_t* feature_enabled;
     const wchar_t* feature_help;
+    const wchar_t* show_native_message;
 };
 
 LocalizedText text_for(const erui::LanguageInfo& language) noexcept {
@@ -32,11 +35,13 @@ LocalizedText text_for(const erui::LanguageInfo& language) noexcept {
     // language.identifier even when language.known is unknown.
     if (language.known == erui::GameLanguage::french) {
         return {L"Mon Mod", L"Fonction activée",
-            L"Active ou désactive la fonction de ce mod."};
+            L"Active ou désactive la fonction de ce mod.",
+            L"Afficher le message natif"};
     }
     // English is the recommended fallback for UNKNOWN and unavailable.
     return {L"My Mod", L"Feature Enabled",
-        L"Enable or disable this mod's feature."};
+        L"Enable or disable this mod's feature.",
+        L"Show Native Message"};
 }
 
 LocalizedText g_text = text_for({});
@@ -47,6 +52,18 @@ std::atomic_bool g_feature_enabled{true};
 std::atomic<std::uint8_t> g_strength{50};
 std::atomic<std::uint8_t> g_mode{1};
 std::atomic<std::uint8_t> g_popup_mode{1};
+std::mutex g_alias_mutex{};
+std::wstring g_alias{L"Tarnished"};
+erui::RowHandle g_alias_row{};
+
+// Stateful binding callbacks retain client-owned data. Keep that data at a
+// process-lifetime address, just like every other callback user_data value.
+struct MessageActionState {
+    std::atomic_uint32_t activation_count{};
+    std::atomic_uint32_t last_devices{ERUI_INPUT_DEVICE_NONE};
+};
+
+MessageActionState g_message_action_state{};
 
 void log(const wchar_t* text) noexcept {
     OutputDebugStringW(L"[MyERNativeUIMod] ");
@@ -73,10 +90,47 @@ void ERUI_CALL popup_mode_changed(void*, std::uint8_t index) noexcept {
     g_popup_mode.store(index, std::memory_order_release);
 }
 
+// TextInputChange::value is borrowed and expires when this callback returns.
+// Copy it while inside the callback if your configuration must retain it.
+// The callback runs only after the player confirms a different value; Cancel,
+// an unchanged confirmation, and Registration::set_text do not invoke it.
+void alias_changed(const erui::TextInputChange& change) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(g_alias_mutex);
+        g_alias.assign(change.value);
+        // Persist g_alias to your own INI/configuration here if desired.
+    } catch (...) {
+        // No exception may cross a callback boundary.
+    }
+}
+
 // Button callbacks run synchronously on Elden Ring's UI thread. Keep them
 // short; hand expensive work to your own worker when necessary.
 void apply_settings() noexcept {
     log(L"Apply Settings was selected.");
+}
+
+void set_alias_from_code() noexcept {
+    // Programmatic writes are copied by the host and intentionally do not
+    // synthesize a player-change callback. get_text performs the bounded
+    // query/copy/retry protocol and changes its std::wstring only on success.
+    if (g_registration.set_text(g_alias_row, L"Set by client") != ERUI_OK) {
+        log(L"Could not update the TextInput value.");
+        return;
+    }
+
+    std::wstring current;
+    if (g_registration.get_text(g_alias_row, current) != ERUI_OK) {
+        log(L"Could not read the TextInput value.");
+        return;
+    }
+
+    try {
+        std::lock_guard<std::mutex> lock(g_alias_mutex);
+        g_alias.swap(current);
+    } catch (...) {
+        log(L"Could not retain the updated TextInput value.");
+    }
 }
 
 // Alert completions are dispatched asynchronously on ERNativeUI's worker,
@@ -109,19 +163,63 @@ void show_native_message() noexcept {
     }
 }
 
+void show_native_message_from_action(
+    MessageActionState& state,
+    const erui::ActionActivation& activation) noexcept {
+    state.activation_count.fetch_add(1, std::memory_order_relaxed);
+    state.last_devices.store(activation.devices, std::memory_order_release);
+
+    // Multiple alternatives can participate in one sampled frame, so these
+    // checks are independent rather than an either/or device classification.
+    if (activation.includes(erui::InputDevice::controller)) {
+        log(L"The controller alternative activated Show Native Message.");
+    }
+    if (activation.includes(erui::InputDevice::keyboard)) {
+        log(L"The keyboard alternative activated Show Native Message.");
+    }
+    if (activation.includes(erui::InputDevice::mouse)) {
+        log(L"The mouse alternative activated Show Native Message.");
+    }
+
+    show_native_message();
+}
+
+// ERNativeUI storage is an in-memory document with explicit disk I/O. Player
+// assignment events do not save unless the client opts in, as this template
+// does. apply() updates the in-memory [bindings] section; save() performs the
+// disk write. Programmatic action.bind()/unbind()/reset_to_defaults() calls
+// are intentionally silent and cannot loop back into this callback.
+void persist_binding_changes(
+    erui::StorageSection& store,
+    const erui::AssignmentsChangedEvent& event) noexcept {
+    if (store.apply(event) == ERUI_OK) {
+        (void)store.config().save();
+    }
+}
+
 DWORD WINAPI initialize_mod(void*) noexcept {
     // Do discovery and registration here, after DllMain has returned. Calling
     // other DLLs while Windows holds the loader lock is unsafe.
-    const erui::LanguageInfo language = erui::query_game_language();
+    const auto connection = erui::connect();
+    if (!connection) {
+        log(connection.error().message().c_str());
+        return 1;
+    }
+
+    // Language discovery is an explicit operation on the established
+    // connection. UNKNOWN and unavailable languages fall back to English.
+    const erui::LanguageInfo language =
+        connection.value().game_language();
     g_text = text_for(language);
 
     erui::ProviderOptions options{};
-    options.provider_id = "com.example.my-elden-ring-mod"; // CHANGE THIS.
+    options.provider_id = "my-elden-ring-mod"; // CHANGE THIS.
     options.display_name = g_text.display_name;
     options.owner_module = g_this_module;
     options.root_priority = 100; // Lower-priority numbers appear first.
 
-    const auto registration = erui::register_menu(options, [](erui::Menu& menu) {
+    const auto registration = connection.value().register_menu(
+        options, [](erui::Menu& menu) {
         auto root = menu.root();
 
         root.add_toggle(
@@ -172,6 +270,60 @@ DWORD WINAPI initialize_mod(void*) noexcept {
             L"Show Native Message",
             L"Display a centered native YES/NO message and observe its response.");
 
+        // Built-in settings destinations use the same Page builder as root
+        // and submenus. This places one ordinary row in Elden Ring's Sound
+        // tab while menu.root() continues to target Game Options. Reuse of
+        // the callback is intentional; no tab-specific native pointer or hook
+        // is exposed to the client mod.
+        if (menu.supports(erui::Capability::builtin_pages)) {
+            auto sound = menu.page(erui::BuiltinPage::sound);
+            sound.add_button<&show_native_message>(
+                L"Show My Mod Message",
+                L"Display this mod's native message from the Sound tab.");
+        }
+
+        // Bindings are an optional API 1.1 feature. Device support comes from
+        // the action's ActionInputs: this action appears in Button Settings
+        // and Keyboard/Mouse Settings because all three slots are present.
+        // The UTF-8 machine ID remains stable and is never localized.
+        if (menu.supports(erui::Capability::input_bindings)) {
+            auto bindings = menu.input_bindings();
+            auto section = bindings.add_section(g_text.display_name);
+            auto action = section.add_action<&show_native_message_from_action>(
+                "show-native-message",
+                g_text.show_native_message,
+                erui::inputs::all(
+                    erui::KeyboardKey::key_q,
+                    erui::MouseButton::button4,
+                    erui::ControllerButton::right_trigger),
+                g_message_action_state);
+
+            if (menu.supports(erui::Capability::storage)) {
+                auto config = menu.storage();
+                if (config.load() != ERUI_OK) {
+                    log(L"Could not load the optional ERNativeUI configuration.");
+                } else {
+                    auto saved_bindings = config.section("bindings");
+
+                    // A stored ActionInputs is sparse: absent slots inherit
+                    // the defaults declared above, while explicit unbound
+                    // slots stay unbound. bind() updates the live native rows
+                    // and dispatcher.
+                    const auto saved = saved_bindings.get<erui::ActionInputs>(
+                        "show-native-message");
+                    if (saved.found()) {
+                        (void)action.bind(saved.value());
+                    }
+
+                    // Persistence remains a client choice. Omitting this
+                    // callback is valid and means player changes last only
+                    // for this process.
+                    (void)bindings.on_assignments_changed<
+                        &persist_binding_changes>(saved_bindings);
+                }
+            }
+        }
+
         // Submenus are logical pages. Add as many rows as you need; the host
         // inserts Previous/Next rows and manages the native page stack.
         auto advanced = root.add_submenu(
@@ -189,14 +341,34 @@ DWORD WINAPI initialize_mod(void*) noexcept {
         advanced.set_presentation(
             L"My Mod - Advanced", L"Advanced Settings");
 
+        // The current wrapper negotiates API 1.1 explicitly. Capability checks
+        // still make each optional row's dependency clear at its call site.
+        if (menu.supports(erui::Capability::text_input)) {
+            erui::TextInputOptions alias{};
+            alias.initial_value = g_alias;
+            alias.placeholder = L"Enter an alias";
+            // The default is 16. API 1.1 accepts 1..35, counted in UTF-16 code
+            // units (std::wstring_view::size() on Windows), not bytes or
+            // user-perceived characters. The limit is fixed for this row.
+            alias.maximum_length = 16;
+
+            g_alias_row = advanced.add_text_input<&alias_changed>(
+                L"Player Alias",
+                L"Choose the name used by this mod.",
+                alias);
+            advanced.add_button<&set_alias_from_code>(
+                L"Set Alias From Client Code",
+                L"Demonstrate Registration::set_text and get_text.");
+        }
+
         advanced.add_button<&apply_settings>(
             L"Apply Advanced Settings",
             L"Apply the advanced configuration.");
     });
 
     if (!registration) {
-        // Missing host, incompatible API, duplicate IDs and closed startup
-        // registration are all reported here without crashing your mod.
+        // Duplicate IDs, invalid menu descriptions, and closed startup
+        // registration are reported here without crashing your mod.
         log(registration.error().message().c_str());
         return 1;
     }

@@ -5,6 +5,8 @@
 #include "runtime_state.hpp"
 #include "root_button_text_override.hpp"
 #include "submenu_runtime.hpp"
+#include "native_text_input.hpp"
+#include "color_picker.hpp"
 
 #include <Windows.h>
 
@@ -39,7 +41,6 @@ constexpr std::size_t kChoiceListElementsOffset = 0x08;
 constexpr std::size_t kChoiceListCountOffset = 0x910;
 constexpr std::size_t kChoiceElementSize = 0x48;
 [[maybe_unused]] constexpr std::uint32_t kButtonFaultLogLimit = 32;
-
 
 struct SliderRange {
     std::int32_t minimum{};
@@ -679,6 +680,57 @@ bool add_action_button(
         faulted);
 }
 
+struct ColorPickerButtonThunk {
+    void* page{};
+    erui::detail::ColorPickerState* state{};
+    erui::detail::ColorAction changed_action{};
+
+    void operator()() const noexcept {
+        if (!page || !state || native_dialog_owns_menu_input()) return;
+        const ERUI_Result result = request_color_picker(
+            page, *state, changed_action);
+        if (result != ERUI_OK) {
+            erui::detail::logf(
+                result == ERUI_QUEUE_FULL
+                    ? erui::LogLevel::trace
+                    : erui::LogLevel::warning,
+                "Color Picker activation rejected: state=%p result=%u",
+                state,
+                static_cast<unsigned>(result));
+        }
+    }
+};
+
+bool add_color_picker(
+    void* page,
+    const GameAddresses& addresses,
+    const erui::detail::CompiledRow& row,
+    bool root_text_style,
+    ColorPickerWidgetHost widget_host,
+    bool& faulted) noexcept {
+    if (!row.color_picker_state) {
+        faulted = false;
+        return false;
+    }
+    ColorPickerRowPresentationScope presentation{
+        page,
+        row.color_picker_state,
+        widget_host,
+    };
+    return add_button_with_callback(
+        page,
+        addresses,
+        row,
+        ColorPickerButtonThunk{
+            page,
+            row.color_picker_state,
+            row.color_action,
+        },
+        "color-picker",
+        root_text_style,
+        faulted);
+}
+
 bool add_submenu_button(
     void* page,
     const GameAddresses& addresses,
@@ -745,7 +797,7 @@ bool add_pagination_button(
 }
 
 struct RootCapacityDetection {
-    std::uint8_t accepted_capacity{erui::detail::controller_vanilla_capacity};
+    std::uint8_t accepted_capacity{erui::detail::game_options_vanilla_capacity};
     std::uint64_t native_count{};
     bool capacity_read{};
     bool count_read{};
@@ -754,12 +806,12 @@ struct RootCapacityDetection {
 RootCapacityDetection detect_root_capacity(void* page) noexcept {
     RootCapacityDetection result{};
     const std::uint8_t configured =
-        erui::detail::runtime_state().options.controller_visual_capacity;
+        erui::detail::runtime_state().options.game_options_visual_capacity;
     result.accepted_capacity =
-        configured >= erui::detail::controller_vanilla_capacity &&
-                configured <= erui::detail::controller_max_visual_capacity
+        configured >= erui::detail::game_options_vanilla_capacity &&
+                configured <= erui::detail::game_options_max_visual_capacity
             ? configured
-            : erui::detail::controller_vanilla_capacity;
+            : erui::detail::game_options_vanilla_capacity;
 
     if (!page) {
         return result;
@@ -771,8 +823,8 @@ RootCapacityDetection detect_root_capacity(void* page) noexcept {
         const std::uint32_t runtime_capacity =
             *reinterpret_cast<const std::uint32_t*>(
                 bytes + kRootVisualCapacityOffset);
-        if (runtime_capacity >= erui::detail::controller_vanilla_capacity &&
-            runtime_capacity <= erui::detail::controller_max_visual_capacity) {
+        if (runtime_capacity >= erui::detail::game_options_vanilla_capacity &&
+            runtime_capacity <= erui::detail::game_options_max_visual_capacity) {
             result.accepted_capacity =
                 static_cast<std::uint8_t>(runtime_capacity);
             result.capacity_read = true;
@@ -801,6 +853,7 @@ bool inject_logical_row(
     const GameAddresses& addresses,
     const erui::detail::CompiledRow& row,
     bool root_text_style,
+    ColorPickerWidgetHost widget_host,
     RowInjectionOutcome& outcome) noexcept {
     bool faulted = false;
     bool constructor_succeeded = false;
@@ -822,6 +875,20 @@ bool inject_logical_row(
     case erui::RowKind::popup_choice:
         constructor_succeeded = row.byte_value &&
             add_popup_choice(page, addresses, row, faulted);
+        break;
+    case erui::RowKind::text_input:
+        constructor_succeeded = row.text_input_state &&
+            add_text_input(page, addresses, row, faulted);
+        break;
+    case erui::RowKind::color_picker:
+        constructor_succeeded = row.color_picker_state &&
+            add_color_picker(
+                page,
+                addresses,
+                row,
+                root_text_style,
+                widget_host,
+                faulted);
         break;
     case erui::RowKind::button:
         if (!row.enabled || !row.action) {
@@ -852,6 +919,74 @@ bool inject_logical_row(
 }
 
 } // namespace
+
+namespace {
+
+bool is_builtin_route(erui::detail::PageRouteKind kind) noexcept {
+    return kind == erui::detail::PageRouteKind::builtin_main ||
+        kind == erui::detail::PageRouteKind::builtin_continuation;
+}
+
+ColorPickerWidgetHost widget_host_for_route(
+    const erui::detail::PageRoute& route) noexcept {
+    if (route.kind == erui::detail::PageRouteKind::root_main) {
+        return ColorPickerWidgetHost::game_options;
+    }
+    if (route.kind != erui::detail::PageRouteKind::builtin_main) {
+        return ColorPickerWidgetHost::subpage;
+    }
+    switch (route.builtin_category) {
+    case 1:
+        return ColorPickerWidgetHost::camera_options;
+    case 2:
+        return ColorPickerWidgetHost::display;
+    case 3:
+        return ColorPickerWidgetHost::sound;
+    case 5:
+        return ColorPickerWidgetHost::network;
+    case 7:
+        return ColorPickerWidgetHost::keyboard_mouse;
+    case 8:
+        return ColorPickerWidgetHost::graphics;
+    default:
+        return ColorPickerWidgetHost::subpage;
+    }
+}
+
+bool route_uses_game_options_text_style(
+    const erui::detail::PageRoute& route) noexcept {
+    return route.kind == erui::detail::PageRouteKind::root_main ||
+        (route.kind == erui::detail::PageRouteKind::builtin_main &&
+            route.builtin_category == 1);
+}
+
+} // namespace
+
+bool resolve_page_route_slice(
+    const erui::detail::CompiledMenu& menu,
+    erui::detail::PageRoute route,
+    erui::detail::PageSlice& output) noexcept {
+    output = {};
+    if (!route.valid() || route.logical_page_index >= menu.pages.size() ||
+        !menu.page_reachable(route.logical_page_index)) {
+        return false;
+    }
+    if (is_builtin_route(route.kind)) {
+        return route.builtin_category !=
+                erui::detail::invalid_builtin_category &&
+            erui::detail::resolve_paginated_slice(
+                route.logical_page_index,
+                menu.pages[route.logical_page_index].rows.size(),
+                route.root_capacity,
+                erui::detail::native_subpage_capacity,
+                route.slice_index,
+                output);
+    }
+    const erui::detail::PageSlice* const resolved = menu.resolve_slice(route);
+    if (!resolved) return false;
+    output = *resolved;
+    return true;
+}
 
 const erui::detail::CompiledRow* find_popup_choice_row_by_native_state(
     const void* state) noexcept {
@@ -891,7 +1026,7 @@ RowInjectionOutcome inject_registered_rows(
             page,
             static_cast<unsigned>(capacity.accepted_capacity),
             capacity.capacity_read ? 1 : 0,
-            static_cast<unsigned>(runtime.options.controller_visual_capacity),
+            static_cast<unsigned>(runtime.options.game_options_visual_capacity),
             static_cast<unsigned long long>(capacity.native_count),
             capacity.count_read ? 1 : 0,
             plan.vanilla_row_count,
@@ -921,8 +1056,8 @@ RowInjectionOutcome inject_page_route(
         return outcome;
     }
 
-    const erui::detail::PageSlice* slice = runtime.menu->resolve_slice(route);
-    if (!slice) {
+    erui::detail::PageSlice resolved_slice{};
+    if (!resolve_page_route_slice(*runtime.menu, route, resolved_slice)) {
         erui::detail::logf(
             erui::LogLevel::error,
             "physical page route could not be resolved kind=%u logicalPage=%zu slice=%zu capacity=%u",
@@ -932,6 +1067,11 @@ RowInjectionOutcome inject_page_route(
             static_cast<unsigned>(route.root_capacity));
         return outcome;
     }
+    const erui::detail::PageSlice* const slice = &resolved_slice;
+
+    reset_color_picker_page_widgets(
+        page,
+        widget_host_for_route(route));
 
     outcome.slice_index = slice->slice_index;
     outcome.slice_count = slice->slice_count;
@@ -940,8 +1080,8 @@ RowInjectionOutcome inject_page_route(
 
     const erui::detail::CompiledPage& compiled_page =
         runtime.menu->pages[route.logical_page_index];
-    const bool root_text_style =
-        route.kind == erui::detail::PageRouteKind::root_main;
+    const bool root_text_style = route_uses_game_options_text_style(route);
+    const ColorPickerWidgetHost widget_host = widget_host_for_route(route);
 
     if (slice->has_previous) {
         erui::detail::PageRoute target{};
@@ -949,6 +1089,13 @@ RowInjectionOutcome inject_page_route(
             slice->slice_index == 1) {
             target = erui::detail::PageRoute::root_main(
                 route.logical_page_index,
+                route.root_capacity);
+        } else if (route.kind ==
+                erui::detail::PageRouteKind::builtin_continuation &&
+            slice->slice_index == 1) {
+            target = erui::detail::PageRoute::builtin_main(
+                route.logical_page_index,
+                route.builtin_category,
                 route.root_capacity);
         } else {
             target = route_with_slice(route, slice->slice_index - 1);
@@ -979,6 +1126,7 @@ RowInjectionOutcome inject_page_route(
             addresses,
             compiled_page.rows[row_index],
             root_text_style,
+            widget_host,
             outcome);
     }
 
@@ -987,6 +1135,13 @@ RowInjectionOutcome inject_page_route(
         if (route.kind == erui::detail::PageRouteKind::root_main) {
             target = erui::detail::PageRoute::root_continuation(
                 route.logical_page_index,
+                route.root_capacity,
+                slice->slice_index + 1);
+        } else if (route.kind ==
+                erui::detail::PageRouteKind::builtin_main) {
+            target = erui::detail::PageRoute::builtin_continuation(
+                route.logical_page_index,
+                route.builtin_category,
                 route.root_capacity,
                 slice->slice_index + 1);
         } else {

@@ -1,0 +1,164 @@
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/headers/10767_1788124839.jpg[/img]
+
+[size=5][b]NATIVE ELDEN RING UI FOR YOUR MOD[/b][/size]
+
+One shared menu host. Multiple client mods. No overlay.
+
+[url=https://github.com/Flammrock/ERNativeUI][b]GITHUB: SOURCE, SDK, DOCUMENTATION AND EXAMPLES[/b][/url]
+[url=https://github.com/Flammrock/ERNativeUI/releases/latest]COMPLETE WINDOWS SDK AND RUNTIME RELEASE[/url][/center]
+
+[quote][b]ERNativeUI is primarily an SDK for mod authors.[/b]
+
+It lets a client mod add native menus, settings, dialogs, text input, color pickers and configurable input bindings without owning another competing set of Elden Ring UI hooks.
+
+[b]Players install one canonical ERNativeUI.dll host.[/b] If a mod lists ERNativeUI as a requirement, download the host from this page's Files tab, install it once, and let every compatible client mod connect to that same copy.[/quote]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711693-1080782593.png[/img][/center]
+[center][size=5][b]ONE NATIVE HOST, MULTIPLE CLIENT MODS[/b][/size][/center]
+
+ERNativeUI owns the process-wide native hooks and safely merges UI registered by independent client DLLs. Players get one consistent native experience; mod authors get a reusable public API instead of rediscovering and maintaining the same game internals in every project.
+
+[list]
+[*][b]Looks native[/b] - uses Elden Ring's own GFX controls, focus, help text, transitions, dialogs and Back navigation.
+[*][b]Works together[/b] - several client mods can contribute menus through one shared host DLL.
+[*][b]Built for mod authors[/b] - stable C11 binary ABI plus a friendly header-only C++17 wrapper.
+[*][b]Compiler friendly[/b] - no client import library and no STL, exception or allocator ownership shared across DLL boundaries.
+[*][b]Versioned for compatibility[/b] - compatible 1.x hosts retain the earlier published 1.x API contracts used by existing clients.
+[*][b]Game-update conscious[/b] - signatures and object boundaries are validated before native hooks are installed.
+[*][b]Open and reproducible[/b] - source, tests, examples, GFX tooling and reverse-engineering notes are public.
+[/list]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711381-1678734545.png[/img]
+[i]Settings from multiple client mods, merged into Elden Ring's native Game Options page.[/i][/center]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]FEATURES[/b][/size][/center]
+
+[b]Native controls[/b]
+[list]
+[*]Button and nested Submenu
+[*]Toggle and bounded Slider
+[*]Inline Choice and native Popup Choice list
+[*]TextInput with placeholder, confirmed-value callbacks and configurable length
+[*]ColorPicker with native palette and custom RGB editor
+[/list]
+
+[b]Menus and pages[/b]
+[list]
+[*]Add rows to supported built-in Configuration pages: Game Options, Camera Options, Display, Sound, Network, Keyboard/Mouse and Graphics
+[*]Create client-owned submenus
+[*]Automatic capacity detection and pagination
+[*]Native Next, Previous and Back behavior
+[*]Automatic page numbering and customizable provider-submenu titles
+[/list]
+
+[b]Dialogs, localization and configuration[/b]
+[list]
+[*]Native modal alerts with dismiss-only, one-button or two-button layouts
+[*]Bottom or centered dialog placement
+[*]Runtime detection of Elden Ring's selected Steam language
+[*]Localized ERNativeUI navigation labels with an English fallback
+[*]Provider-owned INI storage and a public input-assignment codec
+[/list]
+
+[b]Player-configurable input bindings[/b]
+[list]
+[*]Register controller, keyboard and mouse actions
+[*]Show those actions in Elden Ring's native Button Settings and Key Bindings screens
+[*]Receive callbacks when the player activates an action
+[*]Observe assignment and Clear changes so client mods can persist them
+[/list]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]NATIVE CONTROLS IN ACTION[/b][/size]
+
+[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711464-1865244305.png[/img]
+[i]Native text entry, including placeholders and confirmed client-owned values.[/i]
+
+[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711504-820309910.png[/img]
+[i]Elden Ring's native color palette opened from a client-mod setting.[/i]
+
+[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711562-900853344.png[/img]
+[i]A native modal dialog with configurable buttons and placement.[/i][/center]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]NATIVE INPUT BINDINGS[/b][/size][/center]
+
+Client mods can define named actions instead of hard-coding keys. ERNativeUI listens through Elden Ring's input flow, displays assignments in the correct native settings screen, and reports remapping changes back to the client.
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711613-1854610592.png[/img]
+[i]Client-defined actions integrated into Button Settings.[/i]
+
+[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711651-997659594.png[/img]
+[i]The same system supports native keyboard and mouse assignment.[/i][/center]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711693-1080782593.png[/img][/center]
+[center][size=5][b]FOR PLAYERS: INSTALL THE SHARED HOST ONCE[/b][/size][/center]
+
+[b]Requirements[/b]
+[list]
+[*]Elden Ring for Windows x64
+[*]The Steam release of Elden Ring
+[*]Mod Engine 2 or another compatible DLL loader
+[*]Offline play with Easy Anti-Cheat disabled
+[*]An ERNativeUI release that explicitly supports the installed Elden Ring executable
+[/list]
+
+[b]1. Download the current file from this page's Files tab.[/b]
+
+[b]2. Extract it as this directory inside your Mod Engine 2 setup:[/b]
+[code]mod\ERNativeUI[/code]
+
+[b]3. Add the host before ordinary ERNativeUI client mods in your existing external_dlls list:[/b]
+[code][modengine]
+external_dlls = [
+    "mod\\ERNativeUI\\ERNativeUI.dll",
+    "mod\\SomeClientMod\\SomeClientMod.dll"
+][/code]
+
+[b]4. Start Elden Ring through Mod Engine 2.[/b]
+
+Only one copy of ERNativeUI.dll should be loaded. The example DLLs included with ERNativeUI are optional demonstrations and are not dependencies for normal client mods.
+
+The package also contains optional GFX files for expanded page capacity and matching TextInput/ColorPicker presentation. The editors have functional native fallbacks, but already-full pages such as Camera Options need the expanded GFX capacity before provider content can be shown. Another mod that replaces the same GFX paths can conflict with these optional files.
+
+[url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/player-installation.md][b]READ THE COMPLETE PLAYER INSTALLATION GUIDE[/b][/url]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]FOR MOD AUTHORS: BUILD NATIVE UI, NOT ANOTHER OVERLAY[/b][/size][/center]
+
+The complete GitHub Windows package contains the host, public headers, CMake package, buildable examples, tools and documentation.
+
+[list]
+[*][b]C projects:[/b] include erui.h for the strict C11-compatible ABI.
+[*][b]C++ projects:[/b] include ERNativeUI.hpp for the header-only C++17 wrapper. Keep erui.h beside it when copying the headers because the wrapper includes it internally.
+[*][b]No import library:[/b] client mods negotiate the versioned API table from the host at runtime.
+[*][b]One dependency for players:[/b] declare ERNativeUI as a requirement instead of bundling a private or renamed host copy.
+[/list]
+
+[center][url=https://github.com/Flammrock/ERNativeUI][size=4][b]OPEN ERNATIVEUI ON GITHUB[/b][/size][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/first-mod.md]BUILD "HELLO, TARNISHED!"[/url] | [url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/README.md]READ THE DOCUMENTATION[/url] | [url=https://github.com/Flammrock/ERNativeUI/tree/main/examples]BROWSE EXAMPLES[/url][/center]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]COMPATIBILITY AND SUPPORT[/b][/size][/center]
+
+[list]
+[*]Use a release that names support for your installed Elden Ring executable after every game update.
+[*]Mod Engine 2 is the primary supported loader.
+[*]Solid Uncapper 2.3 coexistence is verified for the exact Elden Ring 2.7.0.0 matrix and scope documented on GitHub; do not infer compatibility after either mod or the game updates.
+[*]Seamless Co-op 2.0.1 was live-tested with the Elden Ring 2.7.0.0 reference executable; no incompatibility was observed for that exact combination.
+[*]Shadow of the Erdtree remains unverified until a separate live compatibility matrix is completed.
+[*]Logging is disabled by default and can be enabled in ERNativeUI.ini while troubleshooting.
+[/list]
+
+[url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/compatibility.md]CHECK THE CURRENT COMPATIBILITY MATRIX[/url]
+[url=https://github.com/Flammrock/ERNativeUI/issues]REPORT A BUG ON GITHUB[/url]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]OPEN SOURCE[/b][/size][/center]
+
+ERNativeUI is my first Elden Ring mod and is released under the MIT License. Contributions, forks, compatibility improvements, documentation and carefully validated native-interface research are welcome while respecting the included licenses and copyright notices.
+
+ERNativeUI was developed with AI assistance, including assistance with promotional media and documentation. The implementation has been repeatedly validated in game throughout development.
+
+[center][url=https://github.com/Flammrock/ERNativeUI][b]SOURCE AND SDK[/b][/url] | [url=https://github.com/Flammrock/ERNativeUI/releases/latest][b]GITHUB RELEASES[/b][/url] | [url=https://www.nexusmods.com/eldenring/mods/10767?tab=files][b]NEXUS FILES[/b][/url][/center]

@@ -35,9 +35,10 @@ if ($IncludeNexus) {
     New-Item -ItemType Directory -Path $nexusRoot | Out-Null
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\ERNativeUI.dll') -Destination $nexusRoot
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\ERNativeUI.ini') -Destination $nexusRoot
+    Copy-Item -LiteralPath (Join-Path $installRoot 'bin\locales') -Destination $nexusRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\menu') -Destination $nexusRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\examples') -Destination $nexusRoot -Recurse
-    Copy-Item -LiteralPath (Join-Path $installRoot 'share\ERNativeUI\README.md') -Destination $nexusRoot
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\NEXUS_README.md') -Destination (Join-Path $nexusRoot 'README.md')
     Copy-Item -LiteralPath (Join-Path $installRoot 'share\ERNativeUI\LICENSE.txt') -Destination $nexusRoot
     Copy-Item -LiteralPath (Join-Path $installRoot 'share\ERNativeUI\THIRD_PARTY_NOTICES.txt') -Destination $nexusRoot
     Copy-Item -LiteralPath (Join-Path $installRoot 'share\ERNativeUI\licenses') -Destination $nexusRoot -Recurse

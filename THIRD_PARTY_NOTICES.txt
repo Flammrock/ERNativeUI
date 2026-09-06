@@ -52,11 +52,13 @@ https://github.com/soulsmods/ModEngine2
 Modified Elden Ring UI asset
 ----------------------------
 
-The end-user package includes an optional, modified
-`menu/win/02_040_optionsetting.gfx`. It expands the Controller Settings layout
-to 13 visual rows and corrects the presentation of injected button labels.
-ERNativeUI.dll also supports the game's unmodified six-row layout, so this
-asset is optional.
+The end-user package includes optional, modified
+`menu/win/02_040_optionsetting.gfx` and
+`menu/win/02_042_pc_graphicsetting.gfx` files. The first expands Controller
+Settings to 13 visual rows and corrects injected button-label presentation.
+Both files add the narrowly scoped character-name presentation used by
+TextInput rows. ERNativeUI.dll still supports the game's unmodified layouts;
+these assets are visual conveniences rather than runtime requirements.
 
 ELDEN RING and its original game assets are the property of their respective
 owners. The modified GFX asset is provided only for use with a lawfully owned

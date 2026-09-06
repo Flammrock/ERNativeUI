@@ -7,7 +7,9 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -21,6 +23,36 @@ std::atomic<std::uint8_t> g_popup_extended{3};
 std::array<std::uint32_t, 32> g_action_numbers{};
 erui::Registration g_registration{};
 erui::RowHandle g_enabled_row{};
+
+struct ShowcaseActionState {
+    explicit ShowcaseActionState(const wchar_t* name) noexcept
+        : debug_name(name) {}
+
+    const wchar_t* debug_name{};
+    std::atomic_uint32_t activation_count{};
+};
+
+// Binding callback state is client-owned and must retain a stable address for
+// the process lifetime. Static storage makes that contract explicit here.
+ShowcaseActionState g_native_dialog_action{L"show-native-ok-dialog"};
+ShowcaseActionState g_toggle_enabled_action{L"toggle-showcase-enabled"};
+ShowcaseActionState g_controller_dialog_action{L"controller-native-dialog"};
+
+struct ColorPickerState {
+    std::mutex mutex{};
+    erui::Color value{};
+};
+
+ColorPickerState g_root_color{{}, {171u, 125u, 99u}};
+ColorPickerState g_subpage_color{{}, {90u, 174u, 63u}};
+
+struct TextInputState {
+    std::mutex mutex{};
+    std::wstring value{};
+};
+
+TextInputState g_player_note{};
+TextInputState g_extended_note{};
 
 struct PopupVariant {
     std::wstring label{};
@@ -40,6 +72,8 @@ constexpr erui::AlertOptions popup_options(
 
 std::array<PopupVariant, 14> g_popup_variants{};
 const showcase::Text* g_text{};
+const showcase::TextInputText* g_text_input{};
+const showcase::ColorPickerText* g_color_picker_text{};
 
 void initialize_popup_variants(const showcase::Text& text) {
     constexpr std::array<erui::AlertButtons, 7> buttons{
@@ -72,9 +106,51 @@ void debug(const wchar_t* message) noexcept {
     OutputDebugStringW(L"\n");
 }
 
+void record_binding_activation(
+    ShowcaseActionState& state,
+    const erui::ActionActivation& activation) noexcept {
+    const std::uint32_t count =
+        state.activation_count.fetch_add(
+            1, std::memory_order_relaxed) + 1;
+    wchar_t message[192]{};
+    _snwprintf_s(
+        message,
+        std::size(message),
+        _TRUNCATE,
+        L"Input binding %ls activated (%u).",
+        state.debug_name,
+        static_cast<unsigned>(count));
+    debug(message);
+
+    // The mask may contain more than one device when alternatives become
+    // active in the same sampled frame.
+    if (activation.includes(erui::InputDevice::controller)) {
+        debug(L"  device: controller");
+    }
+    if (activation.includes(erui::InputDevice::keyboard)) {
+        debug(L"  device: keyboard");
+    }
+    if (activation.includes(erui::InputDevice::mouse)) {
+        debug(L"  device: mouse");
+    }
+}
+
 void ERUI_CALL value_changed(void* context, std::uint8_t value) noexcept {
     static_cast<std::atomic<std::uint8_t>*>(context)->store(
         value, std::memory_order_release);
+}
+
+void text_input_changed(
+    TextInputState& state,
+    const erui::TextInputChange& change) noexcept {
+    // TextInputChange::value is borrowed for this callback only. A real mod
+    // should copy it into its own configuration before returning, as here.
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.value.assign(change.value);
+    } catch (...) {
+        debug(L"Could not copy a confirmed TextInput value.");
+    }
 }
 
 void ERUI_CALL action_pressed(void* context) noexcept {
@@ -112,6 +188,29 @@ const wchar_t* result_name(ERUI_Result result) noexcept {
     case ERUI_NOT_SUPPORTED: return L"not supported";
     default: return L"unknown result";
     }
+}
+
+void color_picker_changed(
+    ColorPickerState& state,
+    const erui::ColorPickerChange& change) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.value = change.value;
+    } catch (...) {
+        debug(L"Could not persist a confirmed ColorPicker value.");
+        return;
+    }
+
+    wchar_t message[128]{};
+    _snwprintf_s(
+        message,
+        std::size(message),
+        _TRUNCATE,
+        L"ColorPicker confirmed RGB(%u, %u, %u).",
+        static_cast<unsigned>(change.value.red),
+        static_cast<unsigned>(change.value.green),
+        static_cast<unsigned>(change.value.blue));
+    debug(message);
 }
 
 const wchar_t* selected_action_name(
@@ -198,6 +297,13 @@ void show_native_alert() noexcept {
     }
 }
 
+void show_native_alert_from_binding(
+    ShowcaseActionState& state,
+    const erui::ActionActivation& activation) noexcept {
+    record_binding_activation(state, activation);
+    show_native_alert();
+}
+
 void ERUI_CALL popup_variant_completed(
     void* context,
     ERUI_Result result,
@@ -234,19 +340,139 @@ void toggle_from_code() noexcept {
     }
 }
 
+void toggle_from_binding(
+    ShowcaseActionState& state,
+    const erui::ActionActivation& activation) noexcept {
+    record_binding_activation(state, activation);
+    toggle_from_code();
+}
+
+void persist_binding_changes(
+    erui::StorageSection& store,
+    const erui::AssignmentsChangedEvent& event) noexcept {
+    if (store.apply(event) == ERUI_OK) {
+        (void)store.config().save();
+    }
+}
+
+void restore_binding(
+    const erui::StorageSection& store,
+    std::string_view action_id,
+    const erui::InputAction& action) noexcept {
+    const auto saved = store.get<erui::ActionInputs>(action_id);
+    if (saved.found()) {
+        (void)action.bind(saved.value());
+    }
+}
+
 DWORD WINAPI initialize(void*) noexcept {
-    const erui::LanguageInfo language = erui::query_game_language();
+    const auto connection = erui::connect();
+    if (!connection) {
+        debug(connection.error().message().c_str());
+        return 1;
+    }
+
+    const erui::LanguageInfo language =
+        connection.value().game_language();
+
     g_text = &showcase::text(language.known);
+    g_text_input = &showcase::text_input_text(language.known);
+    g_color_picker_text = &showcase::color_picker_text(language.known);
     initialize_popup_variants(*g_text);
+    g_player_note.value = L"Tarnished";
 
     erui::ProviderOptions options{};
-    options.provider_id = "io.github.ernativeui.tarnished-showcase";
+    options.provider_id = "tarnished-showcase";
     options.display_name = g_text->name;
     options.owner_module = g_module;
     options.root_priority = 100;
 
-    auto result = erui::register_menu(options, [](erui::Menu& menu) {
+    auto result = connection.value().register_menu(
+        options, [](erui::Menu& menu) {
         auto root = menu.root();
+
+        // A built-in destination is still an ordinary provider-owned Page:
+        // only its native top-level heading belongs to Elden Ring. Register
+        // the same safe action on every supported settings tab so this one
+        // example exercises all seven production materializers through the
+        // public API (Game Options is the same destination as menu.root()).
+        if (menu.supports(erui::Capability::builtin_pages)) {
+            constexpr std::array destinations{
+                erui::BuiltinPage::game_options,
+                erui::BuiltinPage::camera_options,
+                erui::BuiltinPage::display,
+                erui::BuiltinPage::sound,
+                erui::BuiltinPage::network,
+                erui::BuiltinPage::keyboard_mouse,
+                erui::BuiltinPage::graphics,
+            };
+            for (const erui::BuiltinPage destination : destinations) {
+                menu.page(destination).add_button<&show_native_alert>(
+                    g_text->native_dialog,
+                    g_text->row_help);
+            }
+        }
+
+        // Device support is declared per action. A section appears in Button
+        // Settings, Keyboard/Mouse Settings, or both according to the union
+        // of devices supported by its actions. The three sections below make
+        // those placement rules visible without research-only probe rows.
+        if (menu.supports(erui::Capability::input_bindings)) {
+            auto bindings = menu.input_bindings();
+
+            auto all_devices = bindings.add_section(g_text->name);
+            auto dialog_action =
+                all_devices.add_action<&show_native_alert_from_binding>(
+                    "show-native-ok-dialog",
+                    g_text->native_dialog,
+                    erui::inputs::all(
+                        erui::KeyboardKey::key_q,
+                        erui::MouseButton::button4,
+                        erui::ControllerButton::right_trigger),
+                    g_native_dialog_action);
+
+            auto keyboard_mouse =
+                bindings.add_section(L"ERNativeUI - Keyboard / Mouse");
+            auto toggle_action =
+                keyboard_mouse.add_action<&toggle_from_binding>(
+                    "toggle-showcase-enabled",
+                    g_text->toggle_code,
+                    erui::inputs::keyboard_mouse(
+                        erui::KeyboardKey::key_t,
+                        erui::MouseButton::wheel_up),
+                    g_toggle_enabled_action);
+
+            auto controller =
+                bindings.add_section(L"ERNativeUI - Controller");
+            auto controller_action =
+                controller.add_action<&show_native_alert_from_binding>(
+                    "controller-native-dialog",
+                    g_text->native_dialog,
+                    erui::inputs::controller(
+                        erui::ControllerButton::dpad_left),
+                    g_controller_dialog_action);
+
+            // Storage is opt-in: load the in-memory document, overlay any
+            // saved assignments, then explicitly apply and save player events.
+            // Without this block, the actions remain valid but do not persist.
+            if (menu.supports(erui::Capability::storage)) {
+                auto config = menu.storage();
+                if (config.load() == ERUI_OK) {
+                    auto store = config.section("bindings");
+                    restore_binding(
+                        store, "show-native-ok-dialog", dialog_action);
+                    restore_binding(
+                        store, "toggle-showcase-enabled", toggle_action);
+                    restore_binding(
+                        store, "controller-native-dialog", controller_action);
+                    (void)bindings.on_assignments_changed<
+                        &persist_binding_changes>(store);
+                } else {
+                    debug(L"Could not load showcase binding storage.");
+                }
+            }
+        }
+
         g_enabled_row = root.add_toggle(
             g_text->enabled,
             g_text->row_help,
@@ -334,6 +560,67 @@ DWORD WINAPI initialize(void*) noexcept {
         root.add_button<&toggle_from_code>(
             g_text->toggle_code,
             g_text->row_help);
+
+        // The current wrapper negotiates API 1.1 explicitly. Keeping the
+        // capability check beside the row documents its native dependency.
+        if (menu.supports(erui::Capability::text_input)) {
+            auto text_inputs = root.add_submenu(
+                g_text_input->showcase,
+                g_text->row_help,
+                g_text_input->showcase,
+                g_text->row_help);
+
+            erui::TextInputOptions normal{};
+            normal.initial_value = g_player_note.value;
+            normal.placeholder = g_text_input->note_placeholder;
+            text_inputs.add_text_input<&text_input_changed>(
+                g_text_input->note,
+                g_text->row_help,
+                normal,
+                g_player_note);
+
+            erui::TextInputOptions extended{};
+            extended.initial_value = g_extended_note.value;
+            extended.placeholder = g_text_input->extended_placeholder;
+            extended.maximum_length = 35;
+            text_inputs.add_text_input<&text_input_changed>(
+                g_text_input->extended_note,
+                g_text->row_help,
+                extended,
+                g_extended_note);
+        }
+
+        // ColorPicker is also additive in API 1.1. These two rows deliberately
+        // own independent values so the showcase exercises both root-page and
+        // subpage presentation without sharing client state.
+        if (menu.supports(erui::Capability::color_picker)) {
+            erui::ColorPickerOptions root_color{};
+            {
+                std::lock_guard<std::mutex> lock(g_root_color.mutex);
+                root_color.initial_value = g_root_color.value;
+            }
+            root.add_color_picker<&color_picker_changed>(
+                g_color_picker_text->root_accent,
+                g_text->row_help,
+                root_color,
+                g_root_color);
+
+            auto color_picker = root.add_submenu(
+                g_color_picker_text->showcase,
+                g_text->row_help,
+                g_color_picker_text->showcase,
+                g_text->row_help);
+            erui::ColorPickerOptions subpage_color{};
+            {
+                std::lock_guard<std::mutex> lock(g_subpage_color.mutex);
+                subpage_color.initial_value = g_subpage_color.value;
+            }
+            color_picker.add_color_picker<&color_picker_changed>(
+                g_color_picker_text->subpage_accent,
+                g_text->row_help,
+                subpage_color,
+                g_subpage_color);
+        }
 
         auto large = root.add_submenu(
             g_text->large,

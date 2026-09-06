@@ -76,6 +76,25 @@ int main() {
     ERUI_TEST_CHECK(resolution.kind == SubmenuResolutionKind::expired_request);
     ERUI_TEST_CHECK(!resolution.route.valid());
 
+    // Built-in continuation pages participate in the same fixed native-page
+    // binding table, while their already-existing main pages are navigation-
+    // only targets and must never be bound as newly opened subpages.
+    const PageRoute builtin_continuation =
+        PageRoute::builtin_continuation(2, 1, 1, 1);
+    const PageRoute builtin_main = PageRoute::builtin_main(2, 1, 1);
+    auto* builtin_parent = reinterpret_cast<void*>(0x6000);
+    auto* builtin_child = reinterpret_cast<void*>(0x7000);
+    ERUI_TEST_CHECK(navigation.begin_request(
+        builtin_continuation, 5000, builtin_parent));
+    resolution = navigation.resolve(builtin_child, 5010, 2000);
+    ERUI_TEST_CHECK(resolution.kind == SubmenuResolutionKind::pending_request);
+    ERUI_TEST_CHECK(resolution.route == builtin_continuation);
+    ERUI_TEST_CHECK(
+        navigation.native_page(builtin_continuation) == builtin_child);
+    ERUI_TEST_CHECK(navigation.parent_page(builtin_child) == builtin_parent);
+    ERUI_TEST_CHECK(!navigation.begin_request(
+        builtin_main, 5100, builtin_child));
+
     navigation.reset();
     ERUI_TEST_CHECK(navigation.page_count() == 0);
     return 0;

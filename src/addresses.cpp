@@ -9,7 +9,13 @@
 namespace erui::native {
 namespace {
 
-constexpr std::uintptr_t kHubHandlerRva = 0x958C50;
+constexpr std::uintptr_t kGameOptionsHandlerRva = 0x958C50;
+constexpr std::uintptr_t kCameraPanelMaterializerRva = 0x959320;
+constexpr std::uintptr_t kDisplayPanelMaterializerRva = 0x95D540;
+constexpr std::uintptr_t kSoundPanelMaterializerRva = 0x959090;
+constexpr std::uintptr_t kNetworkPanelMaterializerRva = 0x95AD00;
+constexpr std::uintptr_t kKeyboardMousePanelMaterializerRva = 0x95CB30;
+constexpr std::uintptr_t kGraphicsPanelMaterializerRva = 0x95C050;
 constexpr std::uintptr_t kSubHandlerRva = 0x95A5D0;
 constexpr std::uintptr_t kOpenSubPageRva = 0x94FA20;
 constexpr std::uintptr_t kOnOffListRva = 0x955550;
@@ -30,8 +36,36 @@ constexpr std::uintptr_t kScaleformPathResolverRva = 0x74B140;
 constexpr std::uintptr_t kScaleformTextSetterRva = 0x74AE50;
 constexpr std::uintptr_t kScaleformResultDestructorRva = 0xD81590;
 
-constexpr std::string_view kHubHandlerPattern =
+constexpr std::string_view kGameOptionsHandlerPattern =
     "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 E0 F2 FF FF";
+// Category 1's CameraSetting row materializer. The wrapper at 0x93CB70
+// stores this target in the same two-argument callback slot used by the other
+// ordinary OptionSetting panels.
+constexpr std::string_view kCameraPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 FD FF FF "
+    "48 81 EC 50 03 00 00 48 C7 45 00 FE FF FF FF "
+    "48 89 9C 24 A0 03 00 00";
+constexpr std::string_view kDisplayPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 A0 F2 FF FF "
+    "48 81 EC 60 0E 00 00 48 C7 45 18 FE FF FF FF "
+    "48 89 9C 24 B0 0E 00 00";
+constexpr std::string_view kSoundPanelMaterializerPattern =
+    "40 55 56 57 48 8D AC 24 50 FE FF FF 48 81 EC B0 02 00 00 "
+    "48 C7 44 24 70 FE FF FF FF 48 89 9C 24 E0 02 00 00 "
+    "48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 A0 01 00 00 "
+    "48 8B FA 48 8B D9 48 8D 4D F0 E8 ?? ?? ?? ?? 90 48 8D 4D 80";
+constexpr std::string_view kNetworkPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 D0 F2 FF FF "
+    "48 81 EC 30 0E 00 00 48 C7 44 24 58 FE FF FF FF "
+    "48 89 9C 24 80 0E 00 00";
+constexpr std::string_view kKeyboardMousePanelMaterializerPattern =
+    "48 8B C4 55 41 54 41 55 41 56 41 57 48 8D A8 68 FE FF FF "
+    "48 81 EC 70 02 00 00 48 C7 45 20 FE FF FF FF "
+    "48 89 58 10 48 89 70 18 48 89 78 20";
+constexpr std::string_view kGraphicsPanelMaterializerPattern =
+    "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 F5 FF FF "
+    "48 81 EC B0 0B 00 00 48 C7 45 80 FE FF FF FF "
+    "48 89 9C 24 00 0C 00 00";
 constexpr std::string_view kSubHandlerPattern =
     "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 F7 FF FF "
     "48 81 EC E0 09 00 00 48 C7 44 24 40 FE FF FF FF";
@@ -144,7 +178,8 @@ constexpr std::string_view kPageFramePattern =
 // path. The resolver receives MenuTitle/Text_0 at the page constructor and
 // writes a persistent result to page+0x230. Native one-shot call sites use the
 // same resolver with a 0x60-byte stack result, call the UTF-16 setter with
-// result+0x08, and then invoke the nested-member destructor on result+0x28.
+// proxy self-link at result+0x08, and then destroy the embedded
+// CSScaleformValue wrapper at result+0x28.
 // Current-build research anchors are the resolver call at RVA 0x74293B and
 // temporary cleanup at RVA 0x74BEC5; neither anchor is executed directly.
 constexpr std::string_view kScaleformPathResolverPattern =
@@ -157,6 +192,46 @@ constexpr std::string_view kScaleformResultDestructorPattern =
     "48 89 4C 24 08 53 48 83 EC 30 48 C7 44 24 20 FE FF FF FF "
     "48 8D 05 ?? ?? ?? ?? 48 89 01 48 8D 59 08 8B 43 18 "
     "C1 E8 06 A8 01 74 1A";
+
+// Exact Elden Ring 2.7.0 TextInput anchors. The path is intentionally
+// unavailable on any other PE identity, even if a short pattern happens to
+// match, because the producer retains owner-relative state and callbacks.
+constexpr std::uint32_t kTextInputTimestamp = 0x69E9C9B9;
+constexpr std::size_t kTextInputImageSize = 0x5E09600;
+constexpr std::uintptr_t kTextInputRowProducerRva = 0x976EF0;
+constexpr std::uintptr_t kNativeMenuStringConstructorRva = 0x5EE0F0;
+constexpr std::uintptr_t kNativeMenuStringBorrowedConstructorRva = 0x6766F0;
+constexpr std::uintptr_t kNativeMenuStringDestructorRva = 0x1BCC60;
+constexpr std::uintptr_t kTextInputEditorFactoryBuilderRva = 0x915D70;
+// Character-creation editor profile. Unlike the 0x81D700 matchmaking route,
+// this selects 02_990_TextInput together with its native 16-character policy,
+// matching flag set, and field geometry as one coherent factory.
+constexpr std::uintptr_t kTextInputEditorFactoryRva = 0x81D610;
+
+constexpr std::string_view kTextInputRowProducerPattern =
+    "40 55 53 56 57 41 54 41 55 41 56 41 57 "
+    "48 8D AC 24 08 FD FF FF 48 81 EC F8 03 00 00 "
+    "48 C7 44 24 78 FE FF FF FF";
+constexpr std::string_view kNativeMenuStringConstructorPattern =
+    "48 89 4C 24 08 53 48 83 EC 30 "
+    "48 C7 44 24 28 FE FF FF FF 48 8B D9 "
+    "C7 44 24 20 00 00 00 00 E8 ?? ?? ?? ??";
+constexpr std::string_view kNativeMenuStringBorrowedConstructorPattern =
+    "48 89 4C 24 08 57 48 83 EC 30 "
+    "48 C7 44 24 28 FE FF FF FF "
+    "48 89 5C 24 50 48 89 74 24 58 48 8B F9 33 F6 "
+    "89 74 24 20 48 89 11 48 8D 59 08";
+constexpr std::string_view kNativeMenuStringDestructorPattern =
+    "48 89 4C 24 08 53 48 83 EC 30 "
+    "48 C7 44 24 20 FE FF FF FF 48 8D 59 08 "
+    "48 89 5C 24 40 48 83 7B 20 08";
+constexpr std::string_view kTextInputEditorFactoryBuilderPattern =
+    "48 89 4C 24 08 48 83 EC 18 "
+    "48 C7 04 24 FE FF FF FF 48 C7 41 38 00 00 00 00 "
+    "48 85 D2 74 ??";
+constexpr std::string_view kTextInputEditorFactoryPattern =
+    "4C 8B DC 4D 89 4B 20 49 89 4B 08 55 56 57 "
+    "48 81 EC 90 00 00 00 49 C7 43 90 FE FF FF FF";
 
 std::uint8_t* resolve_direct(
     const ModuleView& game,
@@ -431,9 +506,10 @@ bool GameAddresses::complete(
     bool require_buttons,
     bool require_submenus,
     bool require_popup_choices,
+    bool require_text_inputs,
     bool require_custom_text) const noexcept {
     const bool rows_ready = !require_rows || (
-        hub_handler && on_off_list && menu_context && text_ref_help &&
+        game_options_handler && on_off_list && menu_context && text_ref_help &&
         text_ref_label && add_toggle && add_slider && add_inline_choice &&
         choice_context_constructor && choice_list_builder &&
         destroy_text_references);
@@ -448,8 +524,10 @@ bool GameAddresses::complete(
             popup_choice_selection_vtable &&
             popup_choice_presentation_vtable);
     const bool text_ready = !require_custom_text || text_resolver;
+    const bool text_input_ready =
+        !require_text_inputs || text_input_complete();
     return rows_ready && buttons_ready && submenus_ready &&
-        popup_choices_ready && text_ready;
+        popup_choices_ready && text_input_ready && text_ready;
 }
 
 bool resolve_game_addresses(
@@ -460,6 +538,7 @@ bool resolve_game_addresses(
     bool require_submenus,
     bool require_native_back,
     bool require_popup_choices,
+    bool require_text_inputs,
     bool require_custom_text) noexcept {
     output = {};
     output.game_image_base = game.base();
@@ -473,12 +552,59 @@ bool resolve_game_addresses(
     }
 
     if (require_rows) {
-        output.hub_handler = reinterpret_cast<HubHandlerFn>(resolve_direct(
+        output.game_options_handler =
+            reinterpret_cast<GameOptionsHandlerFn>(resolve_direct(
             game,
-            "hub handler",
-            kHubHandlerPattern,
-            kHubHandlerRva,
-            kHubHandlerPattern));
+            "Game Options handler",
+            kGameOptionsHandlerPattern,
+            kGameOptionsHandlerRva,
+            kGameOptionsHandlerPattern));
+        // Each built-in destination is optional and independently hooked.
+        // A signature failure disables only that panel; Game Options and the
+        // other resolved destinations remain available.
+        output.camera_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Camera panel rows",
+                kCameraPanelMaterializerPattern,
+                kCameraPanelMaterializerRva,
+                kCameraPanelMaterializerPattern));
+        output.display_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Display panel rows",
+                kDisplayPanelMaterializerPattern,
+                kDisplayPanelMaterializerRva,
+                kDisplayPanelMaterializerPattern));
+        output.sound_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Sound panel rows",
+                kSoundPanelMaterializerPattern,
+                kSoundPanelMaterializerRva,
+                kSoundPanelMaterializerPattern));
+        output.network_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Network panel rows",
+                kNetworkPanelMaterializerPattern,
+                kNetworkPanelMaterializerRva,
+                kNetworkPanelMaterializerPattern));
+        output.keyboard_mouse_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(
+                resolve_optional_direct(
+                    game,
+                    "Keyboard panel rows",
+                    kKeyboardMousePanelMaterializerPattern,
+                    kKeyboardMousePanelMaterializerRva,
+                    kKeyboardMousePanelMaterializerPattern));
+        output.graphics_panel_materializer =
+            reinterpret_cast<BuiltinPanelMaterializerFn>(resolve_optional_direct(
+                game,
+                "Graphics panel rows",
+                kGraphicsPanelMaterializerPattern,
+                kGraphicsPanelMaterializerRva,
+                kGraphicsPanelMaterializerPattern));
         if (require_submenus) {
             output.sub_handler = reinterpret_cast<SubHandlerFn>(resolve_direct(
                 game,
@@ -690,6 +816,66 @@ bool resolve_game_addresses(
             "Address resolution: custom text hook disabled");
     }
 
+    if (game.timestamp() != kTextInputTimestamp ||
+        game.image_size() != kTextInputImageSize) {
+        if (require_text_inputs) {
+            erui::detail::logf(
+                erui::LogLevel::error,
+                "TextInput unavailable: unsupported game image timestamp=0x%08X size=0x%zX",
+                static_cast<unsigned>(game.timestamp()),
+                game.image_size());
+        } else {
+            erui::detail::logf(
+                erui::LogLevel::info,
+                "Address resolution: no compatible TextInput path for this game image");
+        }
+    } else {
+        output.text_input_row_producer =
+            reinterpret_cast<TextInputRowProducerFn>(resolve_optional_direct(
+                game, "text input producer", kTextInputRowProducerPattern,
+                kTextInputRowProducerRva, kTextInputRowProducerPattern));
+        output.native_menu_string_constructor =
+            reinterpret_cast<NativeMenuStringConstructorFn>(
+                resolve_optional_direct(
+                    game, "menu string ctor",
+                    kNativeMenuStringConstructorPattern,
+                    kNativeMenuStringConstructorRva,
+                    kNativeMenuStringConstructorPattern));
+        output.native_menu_string_borrowed_constructor =
+            reinterpret_cast<NativeMenuStringBorrowedConstructorFn>(
+                resolve_optional_direct(
+                    game, "menu string literal ctor",
+                    kNativeMenuStringBorrowedConstructorPattern,
+                    kNativeMenuStringBorrowedConstructorRva,
+                    kNativeMenuStringBorrowedConstructorPattern));
+        output.native_menu_string_destructor =
+            reinterpret_cast<NativeMenuStringDestructorFn>(
+                resolve_optional_direct(
+                    game, "menu string dtor",
+                    kNativeMenuStringDestructorPattern,
+                    kNativeMenuStringDestructorRva,
+                    kNativeMenuStringDestructorPattern));
+        output.text_input_editor_factory_builder =
+            reinterpret_cast<TextInputEditorFactoryBuilderFn>(
+                resolve_optional_direct(
+                    game, "text editor builder",
+                    kTextInputEditorFactoryBuilderPattern,
+                    kTextInputEditorFactoryBuilderRva,
+                    kTextInputEditorFactoryBuilderPattern));
+        output.text_input_editor_factory =
+            reinterpret_cast<TextInputEditorFactoryFn>(
+                resolve_optional_direct(
+                    game, "text editor factory",
+                    kTextInputEditorFactoryPattern,
+                    kTextInputEditorFactoryRva,
+                    kTextInputEditorFactoryPattern));
+        if (require_text_inputs && !output.text_input_complete()) {
+            erui::detail::logf(
+                erui::LogLevel::error,
+                "TextInput unavailable: one or more native interfaces were unresolved");
+        }
+    }
+
     if (require_native_back) {
         output.native_back = reinterpret_cast<NativeBackFn>(resolve_direct(
             game, "native Back", kNativeBackPattern,
@@ -706,7 +892,7 @@ bool resolve_game_addresses(
                 kNativeBackRva, kNativeBackPattern));
     }
 
-    if (require_custom_text) {
+    if (require_custom_text || require_text_inputs) {
         output.page_frame = reinterpret_cast<PageFrameFn>(
             resolve_optional_direct(
                 game, "page frame", kPageFramePattern,
@@ -718,6 +904,7 @@ bool resolve_game_addresses(
             require_buttons,
             require_submenus,
             require_popup_choices,
+            require_text_inputs,
             require_custom_text)) {
         erui::detail::logf(
             erui::LogLevel::error,

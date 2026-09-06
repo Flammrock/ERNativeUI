@@ -8,8 +8,10 @@ namespace erui::native {
 
 // Confirmed against the native Game Options page constructor. Its persistent
 // path result occupies page offsets [0x230, 0x290). Native temporary call sites
-// use the same layout, pass result+0x08 to the text setter, and destroy the
-// nested member at result+0x28 before releasing their stack storage.
+// use the same layout, pass the proxy's self-link handle at result+0x08 to the
+// text setter, and destroy the embedded CSScaleformValue wrapper at
+// result+0x28 (whose GFx::Value base begins at +0x30) before releasing their
+// stack storage.
 inline constexpr std::size_t scaleform_path_result_size = 0x60;
 inline constexpr std::size_t scaleform_text_value_offset = 0x08;
 inline constexpr std::size_t scaleform_destructor_member_offset = 0x28;
@@ -28,7 +30,9 @@ struct CapturedTitleTarget {
     void* persistent_result{};
 
     [[nodiscard]] bool valid() const noexcept {
-        return route.valid() && route.kind != erui::detail::PageRouteKind::root_main &&
+        return route.valid() &&
+            route.kind != erui::detail::PageRouteKind::root_main &&
+            route.kind != erui::detail::PageRouteKind::builtin_main &&
             movie_context && persistent_result;
     }
 
@@ -55,6 +59,7 @@ public:
         void* persistent_result) noexcept {
         if (!path || !pending_route.valid() ||
             pending_route.kind == erui::detail::PageRouteKind::root_main ||
+            pending_route.kind == erui::detail::PageRouteKind::builtin_main ||
             !movie_context || !persistent_result || !is_source_path(path)) {
             return nullptr;
         }

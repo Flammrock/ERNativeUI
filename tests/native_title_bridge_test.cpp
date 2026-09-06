@@ -29,7 +29,7 @@ int main() {
         "MenuTitle/Text_01", first, &movie_context, persistent) == nullptr);
     ERUI_TEST_CHECK(state.observe(
         native_menu_title_source_path,
-        detail::PageRoute::root_main(0, detail::controller_vanilla_capacity),
+        detail::PageRoute::root_main(0, detail::game_options_vanilla_capacity),
         &movie_context,
         persistent) == nullptr);
 
@@ -46,7 +46,7 @@ int main() {
     ERUI_TEST_CHECK(!state.consume(first).valid());
 
     const detail::PageRoute second = detail::PageRoute::root_continuation(
-        0, detail::controller_max_visual_capacity, 2);
+        0, detail::game_options_max_visual_capacity, 2);
     ERUI_TEST_CHECK(state.observe(
         native_menu_title_source_path, second, &movie_context, persistent));
     ERUI_TEST_CHECK(!state.consume(first).valid());

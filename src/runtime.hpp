@@ -28,10 +28,9 @@ struct RuntimeOptions {
     bool enable_diagnostics{false};
     std::uint8_t reserved0{};
 
-    // Conservative planning fallback used before the native Controller
-    // Settings page exists. Injection reads the actual 6..13 capacity from
-    // memory.
-    std::uint8_t controller_visual_capacity{6};
+    // Conservative planning fallback used before the native Game Options
+    // page exists. Injection reads the actual 6..13 capacity from memory.
+    std::uint8_t game_options_visual_capacity{6};
 
     std::uint8_t reserved1{};
     std::uint8_t reserved2{};
@@ -46,7 +45,7 @@ static_assert(sizeof(RuntimeOptions) == 24,
 static_assert(offsetof(RuntimeOptions, enable_row_injection) == 0);
 static_assert(offsetof(RuntimeOptions, enable_custom_text) == 1);
 static_assert(offsetof(RuntimeOptions, enable_diagnostics) == 2);
-static_assert(offsetof(RuntimeOptions, controller_visual_capacity) == 4);
+static_assert(offsetof(RuntimeOptions, game_options_visual_capacity) == 4);
 static_assert(offsetof(RuntimeOptions, injection_cooldown_ms) == 8);
 static_assert(offsetof(RuntimeOptions, log_sink) == 16,
     "Unexpected ERNativeUI RuntimeOptions::log_sink offset");
@@ -78,7 +77,7 @@ struct Capabilities {
     bool button_runtime{true};
     bool submenu_runtime{true};
     bool pagination_runtime{true};
-    bool controller_capacity_detection{true};
+    bool game_options_capacity_detection{true};
 };
 
 [[nodiscard]] InstallResult install(Menu& menu, RuntimeOptions options = {}) noexcept;

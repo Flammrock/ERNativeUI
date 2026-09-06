@@ -17,6 +17,7 @@ bool route_is_bindable(
     std::size_t logical_page_count) noexcept {
     return route.valid() &&
         route.kind != PageRouteKind::root_main &&
+        route.kind != PageRouteKind::builtin_main &&
         route.logical_page_index < logical_page_count;
 }
 

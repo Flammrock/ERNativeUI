@@ -4,6 +4,7 @@
 #include "native_dialog.hpp"
 #include "native_menu.hpp"
 #include "native_popup_choice.hpp"
+#include "native_text_input.hpp"
 #include "native_text_result.hpp"
 #include "native_title_bridge.hpp"
 #include "pagination.hpp"
@@ -12,6 +13,7 @@
 #include "root_button_text_override.hpp"
 #include "submenu_navigation.hpp"
 #include "submenu_runtime.hpp"
+#include "color_picker.hpp"
 
 #include <Windows.h>
 #include <MinHook.h>
@@ -22,6 +24,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <utility>
 
 namespace erui::native {
@@ -35,14 +38,28 @@ constexpr std::uint32_t kSubmenuFaultLogLimit = 32;
 constexpr std::uint32_t kTitleFaultLogLimit = 4;
 
 GameAddresses g_addresses{};
-SafetyHookInline g_hub_hook{};
+SafetyHookInline g_game_options_hook{};
+SafetyHookInline g_camera_panel_materializer_hook{};
+SafetyHookInline g_display_panel_materializer_hook{};
+SafetyHookInline g_sound_panel_materializer_hook{};
+SafetyHookInline g_network_panel_materializer_hook{};
+SafetyHookInline g_keyboard_mouse_panel_materializer_hook{};
+SafetyHookInline g_graphics_panel_materializer_hook{};
+std::atomic<BuiltinPanelMaterializerFn> g_original_camera_panel_materializer{};
+std::atomic<BuiltinPanelMaterializerFn> g_original_display_panel_materializer{};
+std::atomic<BuiltinPanelMaterializerFn> g_original_sound_panel_materializer{};
+std::atomic<BuiltinPanelMaterializerFn> g_original_network_panel_materializer{};
+std::atomic<BuiltinPanelMaterializerFn>
+    g_original_keyboard_mouse_panel_materializer{};
+std::atomic<BuiltinPanelMaterializerFn> g_original_graphics_panel_materializer{};
+std::atomic<std::uint16_t> g_builtin_panel_warning_mask{};
 SafetyHookInline g_sub_hook{};
 SafetyHookInline g_page_frame_gate_hook{};
 SafetyHookInline g_dialog_back_gate_hook{};
 std::atomic<PageFrameFn> g_original_page_frame{};
 std::atomic<NativeBackFn> g_original_dialog_back{};
 SafetyHookMid g_scaleform_path_resolver_hook{};
-std::atomic<HubHandlerFn> g_original_hub{nullptr};
+std::atomic<GameOptionsHandlerFn> g_original_game_options{nullptr};
 std::atomic<SubHandlerFn> g_original_sub{nullptr};
 std::atomic<TextResolverFn> g_original_text_resolver{nullptr};
 void* g_text_hook_target{};
@@ -55,8 +72,8 @@ std::atomic<void*> g_last_page{};
 // dialog's own confirmation work.
 std::atomic<void*> g_dialog_input_page{};
 std::atomic<std::uint64_t> g_last_injection_tick{};
-std::atomic<std::uint32_t> g_hub_entry_count{};
-std::atomic<std::uint32_t> g_hub_injection_count{};
+std::atomic<std::uint32_t> g_game_options_entry_count{};
+std::atomic<std::uint32_t> g_game_options_injection_count{};
 std::atomic<std::uint32_t> g_text_entry_count{};
 std::atomic<std::uint32_t> g_text_log_count{};
 std::atomic<std::uint32_t> g_text_fault_count{};
@@ -65,6 +82,186 @@ std::atomic<std::uint32_t> g_sub_injection_count{};
 std::atomic<std::uint32_t> g_title_fault_count{};
 erui::detail::SubmenuNavigation g_submenu_navigation{};
 TitleCaptureState g_title_capture{};
+
+constexpr std::size_t kPanelVisualCapacityOffset = 0xB14;
+constexpr std::size_t kPanelNativeCountOffset = 0x1AF0;
+constexpr std::uintptr_t kOptionSettingDialogVtableRva = 0x2B14888;
+
+struct BuiltinPanelSnapshot {
+    void* vtable{};
+    std::uint32_t visual_capacity{};
+    std::uint64_t native_count{};
+    bool valid{};
+};
+
+BuiltinPanelSnapshot inspect_builtin_panel(void* page) noexcept {
+    BuiltinPanelSnapshot result{};
+    if (!page) return result;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        const auto* bytes = static_cast<const std::byte*>(page);
+        result.vtable = *reinterpret_cast<void* const*>(bytes);
+        result.visual_capacity = *reinterpret_cast<const std::uint32_t*>(
+            bytes + kPanelVisualCapacityOffset);
+        result.native_count = *reinterpret_cast<const std::uint64_t*>(
+            bytes + kPanelNativeCountOffset);
+        const std::uintptr_t image =
+            reinterpret_cast<std::uintptr_t>(g_addresses.game_image_base);
+        const void* expected_vtable = reinterpret_cast<const void*>(
+            image + kOptionSettingDialogVtableRva);
+        result.valid = image &&
+            kOptionSettingDialogVtableRva < g_addresses.game_image_size &&
+            result.vtable == expected_vtable &&
+            result.visual_capacity >= 1 &&
+            result.visual_capacity <=
+                erui::detail::builtin_page_max_first_capacity &&
+            result.native_count <= result.visual_capacity;
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        result = {};
+    }
+#endif
+    return result;
+}
+
+void inject_builtin_panel_rows(
+    void* page,
+    const char* panel_name,
+    std::uint8_t native_category) noexcept {
+    erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
+    if (!runtime.options.enable_row_injection || !runtime.menu) return;
+    const std::size_t logical_page_index =
+        runtime.menu->builtin_page_index(native_category);
+    if (logical_page_index >= runtime.menu->pages.size() ||
+        runtime.menu->pages[logical_page_index].rows.empty()) {
+        return;
+    }
+
+    const BuiltinPanelSnapshot before = inspect_builtin_panel(page);
+    g_dialog_input_page.store(page, std::memory_order_release);
+    if (!before.valid || before.native_count >= before.visual_capacity) {
+        const std::uint16_t bit = static_cast<std::uint16_t>(
+            1u << native_category);
+        const bool first_warning =
+            (g_builtin_panel_warning_mask.fetch_or(
+                bit, std::memory_order_relaxed) & bit) == 0;
+        if (!first_warning) return;
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Built-in %s rows disabled safely: page=%p nativeRows=%llu visualRows=%u valid=%d (the GFX panel has no free row capacity or its layout is unsupported)",
+            panel_name,
+            page,
+            static_cast<unsigned long long>(before.native_count),
+            static_cast<unsigned>(before.visual_capacity),
+            before.valid ? 1 : 0);
+        return;
+    }
+
+    const std::uint8_t free_capacity = static_cast<std::uint8_t>(
+        before.visual_capacity - before.native_count);
+    const erui::detail::PageRoute route =
+        erui::detail::PageRoute::builtin_main(
+            logical_page_index,
+            native_category,
+            free_capacity);
+    const RowInjectionOutcome outcome = inject_page_route(
+        page,
+        route,
+        g_addresses);
+    const BuiltinPanelSnapshot after = inspect_builtin_panel(page);
+    const bool committed = after.valid && outcome.faulted == 0 &&
+        after.native_count == before.native_count + outcome.added;
+    if (!committed || runtime.options.enable_diagnostics) {
+        erui::detail::logf(
+            committed ? erui::LogLevel::trace : erui::LogLevel::error,
+            "built-in %s materializer: page=%p logicalPage=%zu before=%llu after=%llu visualRows=%u freeRows=%u slice=%zu/%zu attempted=%u added=%u faulted=%u committed=%d",
+            panel_name,
+            page,
+            logical_page_index,
+            static_cast<unsigned long long>(before.native_count),
+            static_cast<unsigned long long>(after.native_count),
+            static_cast<unsigned>(before.visual_capacity),
+            static_cast<unsigned>(free_capacity),
+            outcome.slice_index + 1,
+            outcome.slice_count,
+            static_cast<unsigned>(outcome.attempted),
+            static_cast<unsigned>(outcome.added),
+            static_cast<unsigned>(outcome.faulted),
+            committed ? 1 : 0);
+    }
+}
+
+template <typename Function>
+Function wait_for_panel_materializer(
+    const std::atomic<Function>& slot) noexcept {
+    Function original = slot.load(std::memory_order_acquire);
+    for (unsigned attempt = 0; !original && attempt < 64; ++attempt) {
+        Sleep(0);
+        original = slot.load(std::memory_order_acquire);
+    }
+    return original;
+}
+
+void __fastcall camera_panel_materializer_detour(
+    void* page,
+    void* menu_option_data) noexcept {
+    BuiltinPanelMaterializerFn original = wait_for_panel_materializer(
+        g_original_camera_panel_materializer);
+    if (!original) return;
+    original(page, menu_option_data);
+    inject_builtin_panel_rows(page, "Camera Options", 1);
+}
+
+void __fastcall display_panel_materializer_detour(
+    void* page,
+    void* menu_option_data) noexcept {
+    BuiltinPanelMaterializerFn original = wait_for_panel_materializer(
+        g_original_display_panel_materializer);
+    if (!original) return;
+    original(page, menu_option_data);
+    inject_builtin_panel_rows(page, "Display", 2);
+}
+
+void __fastcall sound_panel_materializer_detour(
+    void* page,
+    void* menu_option_data) noexcept {
+    BuiltinPanelMaterializerFn original = wait_for_panel_materializer(
+        g_original_sound_panel_materializer);
+    if (!original) return;
+    original(page, menu_option_data);
+    inject_builtin_panel_rows(page, "Sound", 3);
+}
+
+void __fastcall network_panel_materializer_detour(
+    void* page,
+    void* menu_option_data) noexcept {
+    BuiltinPanelMaterializerFn original = wait_for_panel_materializer(
+        g_original_network_panel_materializer);
+    if (!original) return;
+    original(page, menu_option_data);
+    inject_builtin_panel_rows(page, "Network", 5);
+}
+
+void __fastcall keyboard_mouse_panel_materializer_detour(
+    void* page,
+    void* menu_option_data) noexcept {
+    BuiltinPanelMaterializerFn original = wait_for_panel_materializer(
+        g_original_keyboard_mouse_panel_materializer);
+    if (!original) return;
+    original(page, menu_option_data);
+    inject_builtin_panel_rows(page, "Keyboard/Mouse", 7);
+}
+
+void __fastcall graphics_panel_materializer_detour(
+    void* page,
+    void* menu_option_data) noexcept {
+    BuiltinPanelMaterializerFn original = wait_for_panel_materializer(
+        g_original_graphics_panel_materializer);
+    if (!original) return;
+    original(page, menu_option_data);
+    inject_builtin_panel_rows(page, "Graphics", 8);
+}
 
 bool copy_native_title_source_path(
     const char* source,
@@ -94,6 +291,17 @@ void observe_scaleform_path(safetyhook::Context& context) noexcept {
     char observed_path[sizeof(native_menu_title_source_path)]{};
     if (!copy_native_title_source_path(
             reinterpret_cast<const char*>(context.r8), observed_path)) {
+        return;
+    }
+
+    // The native action producer hard-codes Widgets/Button. During one
+    // matched color-row construction, bind that same native controller to
+    // the standalone sibling instead. The TLS source check prevents another
+    // row, thread, or unrelated resolver call from being redirected.
+    if (const char* replacement = color_picker_widget_path_override(
+            observed_path,
+            reinterpret_cast<const void*>(context.rcx))) {
+        context.r8 = reinterpret_cast<std::uintptr_t>(replacement);
         return;
     }
 
@@ -253,6 +461,10 @@ const char* route_kind_name(erui::detail::PageRouteKind kind) noexcept {
         return "root-continuation";
     case erui::detail::PageRouteKind::root_main:
         return "root-main";
+    case erui::detail::PageRouteKind::builtin_continuation:
+        return "built-in-continuation";
+    case erui::detail::PageRouteKind::builtin_main:
+        return "built-in-main";
     }
     return "unknown";
 }
@@ -392,17 +604,18 @@ void* __fastcall text_resolver_detour(
     return result;
 }
 
-void __fastcall hub_handler_detour(
+void __fastcall game_options_handler_detour(
     void* page,
     std::uintptr_t argument2,
     std::uintptr_t argument3,
     std::uintptr_t argument4,
     std::uintptr_t argument5,
     std::uintptr_t argument6) noexcept {
-    HubHandlerFn original = g_original_hub.load(std::memory_order_acquire);
+    GameOptionsHandlerFn original =
+        g_original_game_options.load(std::memory_order_acquire);
     for (unsigned attempt = 0; !original && attempt < 64; ++attempt) {
         Sleep(0);
-        original = g_original_hub.load(std::memory_order_acquire);
+        original = g_original_game_options.load(std::memory_order_acquire);
     }
     if (!original) {
         return;
@@ -411,12 +624,12 @@ void __fastcall hub_handler_detour(
 
     erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
     const std::uint32_t entry =
-        g_hub_entry_count.fetch_add(1, std::memory_order_relaxed) + 1;
+        g_game_options_entry_count.fetch_add(1, std::memory_order_relaxed) + 1;
     const bool trace_this_call = erui::detail::trace_logging() && entry <= 64;
     if (trace_this_call) {
         erui::detail::logf(
             erui::LogLevel::trace,
-            "hub[%u] original returned page=%p a2=0x%llX a3=0x%llX a4=0x%llX a5=0x%llX a6=0x%llX",
+            "gameOptions[%u] original returned page=%p a2=0x%llX a3=0x%llX a4=0x%llX a5=0x%llX a6=0x%llX",
             static_cast<unsigned>(entry),
             page,
             static_cast<unsigned long long>(argument2),
@@ -445,7 +658,7 @@ void __fastcall hub_handler_detour(
         if (trace_this_call) {
             erui::detail::logf(
                 erui::LogLevel::trace,
-                "hub[%u] row injection skipped by cooldown",
+                "gameOptions[%u] row injection skipped by cooldown",
                 static_cast<unsigned>(entry));
         }
         return;
@@ -455,7 +668,9 @@ void __fastcall hub_handler_detour(
     g_last_injection_tick.store(now, std::memory_order_relaxed);
 
     const std::uint32_t injection =
-        g_hub_injection_count.fetch_add(1, std::memory_order_relaxed) + 1;
+        g_game_options_injection_count.fetch_add(
+            1,
+            std::memory_order_relaxed) + 1;
     const RowInjectionOutcome outcome = inject_registered_rows(page, g_addresses);
     const std::uint32_t log_limit = erui::detail::diagnostics_enabled() ? 128u : 4u;
     if (injection <= log_limit || outcome.faulted != 0) {
@@ -522,6 +737,8 @@ void __fastcall sub_handler_detour(
                 static_cast<unsigned>(entry),
                 page);
         }
+        reset_color_picker_page_widgets(
+            page, ColorPickerWidgetHost::subpage);
         original(page, argument2, argument3, argument4);
         return;
     }
@@ -531,11 +748,12 @@ void __fastcall sub_handler_detour(
         resolution.kind == erui::detail::SubmenuResolutionKind::pending_request
         ? g_title_capture.consume(route)
         : (g_title_capture.reset(), CapturedTitleTarget{});
-    const erui::detail::PageSlice* slice = runtime.menu
-        ? runtime.menu->resolve_slice(route)
-        : nullptr;
+    erui::detail::PageSlice resolved_slice{};
+    const bool slice_resolved = runtime.menu &&
+        resolve_page_route_slice(*runtime.menu, route, resolved_slice);
     if (resolution.kind == erui::detail::SubmenuResolutionKind::none ||
-        !runtime.options.enable_row_injection || !runtime.menu || !slice) {
+        !runtime.options.enable_row_injection || !runtime.menu ||
+        !slice_resolved) {
         if (runtime.options.enable_diagnostics && entry <= 32) {
             const erui::detail::PageRoute pending =
                 g_submenu_navigation.pending_route();
@@ -548,6 +766,8 @@ void __fastcall sub_handler_detour(
                 pending.logical_page_index,
                 pending.slice_index);
         }
+        reset_color_picker_page_widgets(
+            page, ColorPickerWidgetHost::subpage);
         original(page, argument2, argument3, argument4);
         return;
     }
@@ -560,7 +780,11 @@ void __fastcall sub_handler_detour(
         (route.kind == erui::detail::PageRouteKind::submenu &&
             compiled_page.kind == erui::PageKind::submenu) ||
         (route.kind == erui::detail::PageRouteKind::root_continuation &&
-            route.logical_page_index == runtime.menu->root_page_index);
+            route.logical_page_index == runtime.menu->root_page_index) ||
+        (route.kind ==
+                erui::detail::PageRouteKind::builtin_continuation &&
+            runtime.menu->builtin_page_index(route.builtin_category) ==
+                route.logical_page_index);
     if (!route_matches_page) {
         erui::detail::logf(
             erui::LogLevel::error,
@@ -568,6 +792,8 @@ void __fastcall sub_handler_detour(
             static_cast<unsigned>(entry),
             route_kind_name(route.kind),
             route.logical_page_index);
+        reset_color_picker_page_widgets(
+            page, ColorPickerWidgetHost::subpage);
         original(page, argument2, argument3, argument4);
         return;
     }
@@ -628,6 +854,12 @@ void __fastcall page_frame_gate_detour(
     void* page,
     float frame_value,
     std::uint8_t* input_enabled) noexcept {
+    // TextInput setters may run on the host/client thread. Publish their
+    // canonical values into the native MenuString shadow only from this UI
+    // frame boundary, including while a native alert owns page input.
+    synchronize_pending_text_inputs();
+    synchronize_color_picker_previews(page);
+
     PageFrameFn original = g_original_page_frame.load(std::memory_order_acquire);
     if (!original) return;
     if (native_dialog_owns_menu_input() &&
@@ -639,6 +871,9 @@ void __fastcall page_frame_gate_detour(
 
 bool install_page_frame_gate(const GameAddresses& addresses) noexcept {
     if (!addresses.page_frame) return false;
+    if (g_original_page_frame.load(std::memory_order_acquire)) {
+        return true;
+    }
     auto result = SafetyHookInline::create(
         reinterpret_cast<void*>(addresses.page_frame),
         reinterpret_cast<void*>(&page_frame_gate_detour),
@@ -661,7 +896,7 @@ bool install_page_frame_gate(const GameAddresses& addresses) noexcept {
         return false;
     }
     erui::detail::logf(erui::LogLevel::info,
-        "Dialog page-frame input gate installed");
+        "Page-frame UI pump/input gate installed");
     return true;
 }
 
@@ -719,53 +954,71 @@ bool install_dialog_back_gate(const GameAddresses& addresses) noexcept {
     return true;
 }
 
-void reset_dialog_input_gates() noexcept {
+void reset_dialog_back_gate() noexcept {
     g_dialog_back_gate_hook.reset();
-    g_page_frame_gate_hook.reset();
     g_original_dialog_back.store(nullptr, std::memory_order_release);
+}
+
+void reset_page_frame_gate() noexcept {
+    g_page_frame_gate_hook.reset();
     g_original_page_frame.store(nullptr, std::memory_order_release);
 }
 
-bool install_dialog_input_gates(const GameAddresses& addresses) noexcept {
-    reset_dialog_input_gates();
+void reset_dialog_input_gates(bool preserve_page_frame) noexcept {
+    reset_dialog_back_gate();
+    if (!preserve_page_frame) {
+        reset_page_frame_gate();
+    }
+}
+
+bool install_dialog_input_gates(
+    const GameAddresses& addresses,
+    bool preserve_page_frame) noexcept {
+    reset_dialog_back_gate();
     if (!addresses.page_frame || !addresses.native_back) {
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert input ownership unavailable: page-frame or Back interface unresolved");
+        if (!preserve_page_frame) {
+            reset_page_frame_gate();
+        }
         return false;
     }
     if (!install_page_frame_gate(addresses) ||
         !install_dialog_back_gate(addresses)) {
-        reset_dialog_input_gates();
+        reset_dialog_input_gates(preserve_page_frame);
         return false;
     }
     return true;
 }
 
-bool install_hub_hook(const GameAddresses& addresses) noexcept {
+bool install_game_options_hook(const GameAddresses& addresses) noexcept {
     if (erui::detail::diagnostics_enabled()) {
-        const auto* code = reinterpret_cast<const unsigned char*>(addresses.hub_handler);
+        const auto* code = reinterpret_cast<const unsigned char*>(
+            addresses.game_options_handler);
         erui::detail::logf(
             erui::LogLevel::trace,
-            "diagnostic: hub entry before hook=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+            "diagnostic: Game Options entry before hook=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
             code[0], code[1], code[2], code[3], code[4], code[5], code[6], code[7],
             code[8], code[9], code[10], code[11], code[12], code[13], code[14], code[15]);
     }
-    auto hub_result = SafetyHookInline::create(
-        reinterpret_cast<void*>(addresses.hub_handler),
-        reinterpret_cast<void*>(&hub_handler_detour),
+    auto game_options_result = SafetyHookInline::create(
+        reinterpret_cast<void*>(addresses.game_options_handler),
+        reinterpret_cast<void*>(&game_options_handler_detour),
         SafetyHookInline::StartDisabled);
-    if (!hub_result) {
+    if (!game_options_result) {
         erui::detail::logf(
             erui::LogLevel::error,
             "SafetyHook failed to prepare Game Options handler hook (error type %u)",
-            static_cast<unsigned>(hub_result.error().type));
+            static_cast<unsigned>(game_options_result.error().type));
         return false;
     }
 
-    g_hub_hook = std::move(*hub_result);
-    g_original_hub.store(g_hub_hook.original<HubHandlerFn>(), std::memory_order_release);
-    if (auto enable_result = g_hub_hook.enable(); !enable_result) {
+    g_game_options_hook = std::move(*game_options_result);
+    g_original_game_options.store(
+        g_game_options_hook.original<GameOptionsHandlerFn>(),
+        std::memory_order_release);
+    if (auto enable_result = g_game_options_hook.enable(); !enable_result) {
         erui::detail::logf(
             erui::LogLevel::error,
             "SafetyHook failed to enable Game Options handler hook (error type %u)",
@@ -779,12 +1032,119 @@ bool install_hub_hook(const GameAddresses& addresses) noexcept {
     if (erui::detail::diagnostics_enabled()) {
         erui::detail::logf(
             erui::LogLevel::trace,
-            "diagnostic: hub hook target=%p detour=%p trampoline=%p",
-            reinterpret_cast<void*>(addresses.hub_handler),
-            reinterpret_cast<void*>(&hub_handler_detour),
-            reinterpret_cast<void*>(g_original_hub.load(std::memory_order_acquire)));
+            "diagnostic: Game Options hook target=%p detour=%p trampoline=%p",
+            reinterpret_cast<void*>(addresses.game_options_handler),
+            reinterpret_cast<void*>(&game_options_handler_detour),
+            reinterpret_cast<void*>(
+                g_original_game_options.load(std::memory_order_acquire)));
     }
     return true;
+}
+
+template <typename Function>
+bool install_panel_materializer_hook(
+    const char* panel_name,
+    std::uint8_t native_category,
+    Function target,
+    void* detour,
+    SafetyHookInline& hook,
+    std::atomic<Function>& original) noexcept {
+    const erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
+    const erui::detail::CompiledPage* const page = runtime.menu
+        ? runtime.menu->builtin_page(native_category)
+        : nullptr;
+    if (!page || page->rows.empty()) return true;
+
+    if (!target) {
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Built-in %s rows disabled: native row materializer was not resolved",
+            panel_name);
+        return false;
+    }
+
+    auto result = SafetyHookInline::create(
+        reinterpret_cast<void*>(target),
+        detour,
+        SafetyHookInline::StartDisabled);
+    if (!result) {
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Built-in %s materializer hook creation failed (SafetyHook error type %u)",
+            panel_name,
+            static_cast<unsigned>(result.error().type));
+        return false;
+    }
+
+    hook = std::move(*result);
+    original.store(hook.original<Function>(), std::memory_order_release);
+    if (auto enabled = hook.enable(); !enabled) {
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Built-in %s materializer hook enable failed (SafetyHook error type %u)",
+            panel_name,
+            static_cast<unsigned>(enabled.error().type));
+        hook.reset();
+        original.store(nullptr, std::memory_order_release);
+        return false;
+    }
+
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Hook installed: built-in %s row materializer (native category %u, logical rows=%zu, handler=%p)",
+        panel_name,
+        static_cast<unsigned>(native_category),
+        page->rows.size(),
+        reinterpret_cast<void*>(target));
+    return true;
+}
+
+void install_builtin_panel_materializers(
+    const GameAddresses& addresses) noexcept {
+    // Every target is optional and isolated. One incompatible third-party
+    // detour or game-update signature disables only that native destination.
+    (void)install_panel_materializer_hook(
+        "Camera Options",
+        1,
+        addresses.camera_panel_materializer,
+        reinterpret_cast<void*>(&camera_panel_materializer_detour),
+        g_camera_panel_materializer_hook,
+        g_original_camera_panel_materializer);
+    (void)install_panel_materializer_hook(
+        "Display",
+        2,
+        addresses.display_panel_materializer,
+        reinterpret_cast<void*>(&display_panel_materializer_detour),
+        g_display_panel_materializer_hook,
+        g_original_display_panel_materializer);
+    (void)install_panel_materializer_hook(
+        "Sound",
+        3,
+        addresses.sound_panel_materializer,
+        reinterpret_cast<void*>(&sound_panel_materializer_detour),
+        g_sound_panel_materializer_hook,
+        g_original_sound_panel_materializer);
+    (void)install_panel_materializer_hook(
+        "Network",
+        5,
+        addresses.network_panel_materializer,
+        reinterpret_cast<void*>(&network_panel_materializer_detour),
+        g_network_panel_materializer_hook,
+        g_original_network_panel_materializer);
+    (void)install_panel_materializer_hook(
+        "Keyboard/Mouse",
+        7,
+        addresses.keyboard_mouse_panel_materializer,
+        reinterpret_cast<void*>(&keyboard_mouse_panel_materializer_detour),
+        g_keyboard_mouse_panel_materializer_hook,
+        g_original_keyboard_mouse_panel_materializer);
+    (void)install_panel_materializer_hook(
+        "Graphics",
+        8,
+        addresses.graphics_panel_materializer,
+        reinterpret_cast<void*>(&graphics_panel_materializer_detour),
+        g_graphics_panel_materializer_hook,
+        g_original_graphics_panel_materializer);
 }
 
 bool install_sub_hook(const GameAddresses& addresses) noexcept {
@@ -950,11 +1310,37 @@ TextHookInstallStatus install_text_hook(const GameAddresses& addresses) noexcept
 }
 
 void reset_hooks() noexcept {
+    set_color_picker_widget_path_bridge_available(false);
     g_scaleform_path_resolver_hook.reset();
-    reset_dialog_input_gates();
+    reset_dialog_input_gates(false);
     remove_native_popup_choice_bridge();
     g_sub_hook.reset();
-    g_hub_hook.reset();
+    g_graphics_panel_materializer_hook.reset();
+    g_original_graphics_panel_materializer.store(
+        nullptr,
+        std::memory_order_release);
+    g_keyboard_mouse_panel_materializer_hook.reset();
+    g_original_keyboard_mouse_panel_materializer.store(
+        nullptr,
+        std::memory_order_release);
+    g_network_panel_materializer_hook.reset();
+    g_original_network_panel_materializer.store(
+        nullptr,
+        std::memory_order_release);
+    g_sound_panel_materializer_hook.reset();
+    g_original_sound_panel_materializer.store(
+        nullptr,
+        std::memory_order_release);
+    g_display_panel_materializer_hook.reset();
+    g_original_display_panel_materializer.store(
+        nullptr,
+        std::memory_order_release);
+    g_camera_panel_materializer_hook.reset();
+    g_original_camera_panel_materializer.store(
+        nullptr,
+        std::memory_order_release);
+    g_builtin_panel_warning_mask.store(0, std::memory_order_release);
+    g_game_options_hook.reset();
 
     if (g_text_hook_target && g_text_hook_enabled) {
         const MH_STATUS disable_status = MH_DisableHook(g_text_hook_target);
@@ -980,7 +1366,7 @@ void reset_hooks() noexcept {
     g_text_hook_target = nullptr;
     g_text_hook_created = false;
     g_text_hook_enabled = false;
-    g_original_hub.store(nullptr, std::memory_order_release);
+    g_original_game_options.store(nullptr, std::memory_order_release);
     g_original_sub.store(nullptr, std::memory_order_release);
     g_original_text_resolver.store(nullptr, std::memory_order_release);
     g_title_capture.reset();
@@ -1033,6 +1419,8 @@ void request_navigate_page(
         void* const restored_page =
             target.kind == erui::detail::PageRouteKind::root_main
                 ? g_last_page.load(std::memory_order_acquire)
+                : target.kind == erui::detail::PageRouteKind::builtin_main
+                ? g_submenu_navigation.parent_page(parent_page)
                 : g_submenu_navigation.native_page(target);
         unsigned long seh_exception_code = 0;
         const bool invoked = invoke_native_back(
@@ -1060,10 +1448,10 @@ void request_navigate_page(
         return;
     }
 
-    const erui::detail::PageSlice* target_slice = runtime.menu
-        ? runtime.menu->resolve_slice(target)
-        : nullptr;
-    if (!parent_page_slot || !parent_page || !target_slice) {
+    erui::detail::PageSlice target_slice{};
+    const bool target_resolved = runtime.menu &&
+        resolve_page_route_slice(*runtime.menu, target, target_slice);
+    if (!parent_page_slot || !parent_page || !target_resolved) {
         erui::detail::logf(
             erui::LogLevel::error,
             "navigation request rejected kind=%s parentSlot=%p parentPage=%p targetKind=%s logicalPage=%zu slice=%zu capacity=%u",
@@ -1108,7 +1496,7 @@ void request_navigate_page(
         route_kind_name(target.kind),
         target.logical_page_index,
         target.slice_index + 1,
-        target_slice->slice_count);
+        target_slice.slice_count);
 
     if (runtime.options.enable_diagnostics) {
         const std::uint32_t diagnostic_index =
@@ -1170,8 +1558,9 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
     g_last_page.store(nullptr, std::memory_order_release);
     g_dialog_input_page.store(nullptr, std::memory_order_release);
     g_last_injection_tick.store(0, std::memory_order_release);
-    g_hub_entry_count.store(0, std::memory_order_release);
-    g_hub_injection_count.store(0, std::memory_order_release);
+    g_game_options_entry_count.store(0, std::memory_order_release);
+    g_game_options_injection_count.store(0, std::memory_order_release);
+    g_builtin_panel_warning_mask.store(0, std::memory_order_release);
     g_text_entry_count.store(0, std::memory_order_release);
     g_text_log_count.store(0, std::memory_order_release);
     g_text_fault_count.store(0, std::memory_order_release);
@@ -1184,12 +1573,28 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
     const bool enable_rows = runtime.options.enable_row_injection;
     const bool enable_text = runtime.options.enable_custom_text;
     const bool root_overflow = runtime.menu &&
-        runtime.menu->root_plan(runtime.options.controller_visual_capacity)
+        runtime.menu->root_plan(runtime.options.game_options_visual_capacity)
             .pages.slices.size() > 1;
+    bool has_builtin_rows = false;
+    if (runtime.menu) {
+        for (std::uint8_t native_category = 1;
+             native_category < runtime.menu->builtin_page_indices.size();
+             ++native_category) {
+            const erui::detail::CompiledPage* const builtin =
+                runtime.menu->builtin_page(native_category);
+            if (builtin && !builtin->rows.empty()) {
+                has_builtin_rows = true;
+                break;
+            }
+        }
+    }
     const bool enable_submenus = enable_rows && runtime.menu &&
-        (runtime.menu->modeled_submenu_count != 0 || root_overflow);
+        (runtime.menu->modeled_submenu_count != 0 || root_overflow ||
+            has_builtin_rows);
     const bool enable_popup_choices = enable_rows && runtime.menu &&
         runtime.menu->modeled_popup_choice_count != 0;
+    const bool enable_text_inputs = enable_rows && runtime.menu &&
+        runtime.menu->modeled_text_input_count != 0;
 
     if (enable_submenus) {
         std::size_t binding_capacity = 0;
@@ -1205,6 +1610,27 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
                 std::max(maximum_root_slices, plan.pages.slices.size());
         }
         binding_capacity += maximum_root_slices;
+        // Built-in first-page capacity is discovered only after native rows
+        // exist. Reserve against the worst useful case (one free slot, which
+        // becomes a Next-only main page on overflow) so the UI callback never
+        // allocates or exhausts bindings for continuation pages.
+        for (std::uint8_t native_category = 1;
+             native_category < runtime.menu->builtin_page_indices.size();
+             ++native_category) {
+            const erui::detail::CompiledPage* const builtin =
+                runtime.menu->builtin_page(native_category);
+            if (!builtin || builtin->rows.empty()) continue;
+            erui::detail::PageSlice first{};
+            if (erui::detail::resolve_paginated_slice(
+                    runtime.menu->builtin_page_index(native_category),
+                    builtin->rows.size(),
+                    1,
+                    erui::detail::native_subpage_capacity,
+                    0,
+                    first) && first.slice_count > 1) {
+                binding_capacity += first.slice_count - 1;
+            }
+        }
         binding_capacity = std::max<std::size_t>(binding_capacity + 8, 16);
         if (!g_submenu_navigation.initialize(
                 runtime.menu->pages.size(),
@@ -1235,10 +1661,12 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
     }
 
     if (enable_rows) {
-        if (!addresses.hub_handler || !install_hub_hook(addresses)) {
+        if (!addresses.game_options_handler ||
+            !install_game_options_hook(addresses)) {
             reset_hooks();
             return HookInstallStatus::hook_failed;
         }
+        install_builtin_panel_materializers(addresses);
         if (enable_submenus) {
             if (!addresses.sub_handler || !addresses.open_sub_page ||
                 !install_sub_hook(addresses)) {
@@ -1247,26 +1675,6 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
                     "pagination/submenu routes require resolved subpage interfaces");
                 reset_hooks();
                 return HookInstallStatus::hook_failed;
-            }
-            if (addresses.title_bridge_complete()) {
-                auto path_result = SafetyHookMid::create(
-                    reinterpret_cast<void*>(addresses.scaleform_path_resolver),
-                    &observe_scaleform_path);
-                if (path_result) {
-                    g_scaleform_path_resolver_hook = std::move(*path_result);
-                    erui::detail::logf(
-                        erui::LogLevel::info,
-                        "Scaleform physical-page title bridge installed");
-                } else {
-                    erui::detail::logf(
-                        erui::LogLevel::warning,
-                        "Scaleform title bridge hook could not be installed (SafetyHook error type %u); menu rows remain active",
-                        static_cast<unsigned>(path_result.error().type));
-                }
-            } else {
-                erui::detail::logf(
-                    erui::LogLevel::warning,
-                    "Scaleform title interfaces are incomplete; custom page titles are disabled while menu rows remain active");
             }
         }
     }
@@ -1284,9 +1692,22 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
             "Custom text hook disabled; rows use a vanilla fallback message ID");
     }
 
+    // TextInput state may be changed from a client callback or the host
+    // worker. Its native MenuString shadow is therefore synchronized at the
+    // game's page-frame boundary. This frame hook is required independently
+    // of the optional native-alert transport, which merely shares it as an
+    // input gate when available.
+    if (enable_text_inputs && !install_page_frame_gate(addresses)) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "TextInput rows require the page-frame UI pump");
+        reset_hooks();
+        return HookInstallStatus::hook_failed;
+    }
+
     ModuleView game{};
     const bool dialog_input_ready = enable_text &&
-        install_dialog_input_gates(addresses);
+        install_dialog_input_gates(addresses, enable_text_inputs);
     if (!enable_text) {
         erui::detail::logf(
             erui::LogLevel::warning,
@@ -1299,14 +1720,81 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert transport unavailable: main executable could not be parsed");
-        reset_dialog_input_gates();
+        reset_dialog_input_gates(enable_text_inputs);
     } else if (!install_native_dialog_transport(game)) {
         // Alerts are an optional native route. A game update may invalidate
         // their semantic signatures without disabling registered menu rows.
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert transport was not installed; menu rows remain active");
-        reset_dialog_input_gates();
+        reset_dialog_input_gates(enable_text_inputs);
+    }
+
+    bool color_picker_installed = false;
+    const bool color_picker_requested = runtime.menu &&
+        runtime.menu->modeled_color_picker_count != 0;
+    // Resolve and validate ColorPicker before either our title bridge
+    // patches Scaleform_ResolvePath or the optional observation trace detours
+    // ColorPalette/ColorControl entries.
+    if (!color_picker_requested) {
+        erui::detail::logf(
+            erui::LogLevel::trace,
+            "Color Picker backend not requested by the compiled menu");
+    } else if (!native_dialog_available()) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Color Picker unavailable: native dialog transport was not installed");
+    } else if (!install_color_picker(game)) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Color Picker was requested but its native backend could not be installed");
+    } else {
+        color_picker_installed = true;
+    }
+    if (color_picker_requested && !color_picker_installed) {
+        reset_hooks();
+        remove_native_dialog_transport();
+        return HookInstallStatus::hook_failed;
+    }
+
+    const bool title_path_bridge_requested =
+        enable_submenus && addresses.title_bridge_complete();
+    const bool color_widget_path_bridge_requested = color_picker_installed;
+    if (title_path_bridge_requested || color_widget_path_bridge_requested) {
+        void* path_hook_target = reinterpret_cast<void*>(
+            addresses.scaleform_path_resolver);
+        if (!path_hook_target && color_picker_installed) {
+            path_hook_target = color_picker_widget_path_hook_target();
+        }
+        if (path_hook_target) {
+            auto path_result = SafetyHookMid::create(
+                path_hook_target,
+                &observe_scaleform_path);
+            if (path_result) {
+                g_scaleform_path_resolver_hook = std::move(*path_result);
+                set_color_picker_widget_path_bridge_available(
+                    color_picker_installed);
+                erui::detail::logf(
+                    erui::LogLevel::info,
+                    "Shared Scaleform path bridge installed (titles=%d colorWidget=%d)",
+                    title_path_bridge_requested ? 1 : 0,
+                    color_widget_path_bridge_requested ? 1 : 0);
+            } else {
+                set_color_picker_widget_path_bridge_available(false);
+                erui::detail::logf(
+                    erui::LogLevel::warning,
+                    "Shared Scaleform path bridge could not be installed (SafetyHook error type %u); dependent presentation features are disabled",
+                    static_cast<unsigned>(path_result.error().type));
+            }
+        } else {
+            erui::detail::logf(
+                erui::LogLevel::warning,
+                "Shared Scaleform path target is unavailable; dependent presentation features are disabled");
+        }
+    } else if (enable_submenus) {
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Scaleform title interfaces are incomplete; custom page titles are disabled while menu rows remain active");
     }
 
     erui::detail::logf(
@@ -1315,7 +1803,7 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         enable_rows ? 1 : 0,
         enable_submenus ? 1 : 0,
         runtime.menu && runtime.menu->pagination_required_for_capacity(
-            runtime.options.controller_visual_capacity) ? 1 : 0,
+            runtime.options.game_options_visual_capacity) ? 1 : 0,
         enable_text ? 1 : 0,
         runtime.options.enable_diagnostics ? 1 : 0,
         static_cast<unsigned>(runtime.options.injection_cooldown_ms));
@@ -1323,6 +1811,7 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
 }
 
 void remove_native_menu_hooks() noexcept {
+    remove_color_picker();
     remove_native_dialog_transport();
     reset_hooks();
 }

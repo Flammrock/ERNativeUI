@@ -82,17 +82,23 @@ void show_greeting() noexcept {
 }
 
 DWORD WINAPI initialize(void*) noexcept {
-    // Query before registration so even the provider name can be localized.
+    const auto connection = erui::connect();
+    if (!connection) return 1u;
+
+    // Language discovery is explicit on an established connection, so even
+    // the provider name can be localized without discovering the host twice.
     // UNKNOWN and unavailable languages deliberately fall back to English.
-    const erui::LanguageInfo language = erui::query_game_language();
+    const erui::LanguageInfo language =
+        connection.value().game_language();
     g_text = localized(language.known);
 
     erui::ProviderOptions options{};
-    options.provider_id = "org.ernativeui.example.localized-greeting";
+    options.provider_id = "localized-greeting";
     options.display_name = g_text.name;
     options.owner_module = g_module;
 
-    auto result = erui::register_menu(options, [](erui::Menu& menu) {
+    auto result = connection.value().register_menu(
+        options, [](erui::Menu& menu) {
         menu.root().add_button<&show_greeting>(
             g_text.button, g_text.help);
     });
