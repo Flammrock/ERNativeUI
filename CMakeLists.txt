@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(ERNativeUI VERSION 1.1.0 LANGUAGES C CXX) # x-release-please-version
+project(ERNativeUI VERSION 1.1.1 LANGUAGES C CXX) # x-release-please-version
 
 set(_ernativeui_msvc_abi OFF)
 if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")

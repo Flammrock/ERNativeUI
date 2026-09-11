@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.1.0...ERNativeUI-v1.1.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* restore Elden Ring 2.7.1.0 compatibility ([#4](https://github.com/Flammrock/ERNativeUI/issues/4)) ([4d1682f](https://github.com/Flammrock/ERNativeUI/commit/4d1682f30340a05df93e1ddac69a9ec172805dd6))
+
 ## [1.1.0](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.0.0...ERNativeUI-v1.1.0) (2026-09-06)
 
 
