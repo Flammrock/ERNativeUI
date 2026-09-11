@@ -7,6 +7,7 @@
 #include "runtime.hpp"
 
 #include "test_assertions.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -18,6 +19,7 @@ std::function<void()> g_captured_action{};
 std::uint32_t g_native_constructor_calls{};
 std::uint32_t g_text_destructor_calls{};
 std::uint32_t g_public_action_calls{};
+void* g_expected_page{};
 
 void pressed(void*) noexcept {
     ++g_public_action_calls;
@@ -44,7 +46,7 @@ void __fastcall fake_add_button(
     void* display_text_reference,
     void* primary_action,
     void* secondary_action) {
-    ERUI_TEST_CHECK(page == reinterpret_cast<void*>(0x1234));
+    ERUI_TEST_CHECK(page == g_expected_page);
     ERUI_TEST_CHECK(text_references != nullptr);
     ERUI_TEST_CHECK(display_text_reference != nullptr);
     ERUI_TEST_CHECK(primary_action != nullptr);
@@ -91,15 +93,31 @@ int main() {
     addresses.add_button = &fake_add_button;
     addresses.destroy_text_references = &fake_destroy_text_references;
 
+    alignas(8) std::array<std::byte, 0x1B00> native_page{};
+    // Model the live coexistence case: 13 visual rows and five rows already
+    // materialized (four native rows plus one earlier third-party row).
+    constexpr std::uint32_t visual_capacity = 13;
+    constexpr std::uint64_t materialized_rows = 5;
+    std::memcpy(
+        native_page.data() + 0xB14,
+        &visual_capacity,
+        sizeof(visual_capacity));
+    std::memcpy(
+        native_page.data() + 0x1AF0,
+        &materialized_rows,
+        sizeof(materialized_rows));
+    g_expected_page = native_page.data();
+
     const erui::native::RowInjectionOutcome outcome =
         erui::native::inject_registered_rows(
-            reinterpret_cast<void*>(0x1234),
+            native_page.data(),
             addresses);
 
     ERUI_TEST_CHECK(outcome.attempted == 1);
     ERUI_TEST_CHECK(outcome.added == 1);
     ERUI_TEST_CHECK(outcome.faulted == 0);
     ERUI_TEST_CHECK(outcome.skipped == 0);
+    ERUI_TEST_CHECK(outcome.root_capacity == 12);
     ERUI_TEST_CHECK(g_native_constructor_calls == 1);
     ERUI_TEST_CHECK(g_text_destructor_calls == 1);
     ERUI_TEST_CHECK(static_cast<bool>(g_captured_action));
@@ -109,6 +127,25 @@ int main() {
     g_captured_action();
     ERUI_TEST_CHECK(g_public_action_calls == 1);
     ERUI_TEST_CHECK(erui::button_action_hit_count() == 1);
+
+    alignas(8) std::array<std::byte, 0x1B00> full_native_page{};
+    constexpr std::uint32_t full_visual_capacity = 6;
+    constexpr std::uint64_t full_materialized_rows = 6;
+    std::memcpy(
+        full_native_page.data() + 0xB14,
+        &full_visual_capacity,
+        sizeof(full_visual_capacity));
+    std::memcpy(
+        full_native_page.data() + 0x1AF0,
+        &full_materialized_rows,
+        sizeof(full_materialized_rows));
+    const erui::native::RowInjectionOutcome full_outcome =
+        erui::native::inject_registered_rows(
+            full_native_page.data(),
+            addresses);
+    ERUI_TEST_CHECK(full_outcome.attempted == 0);
+    ERUI_TEST_CHECK(full_outcome.added == 0);
+    ERUI_TEST_CHECK(g_native_constructor_calls == 1);
 
     g_captured_action = {};
     runtime.menu.reset();

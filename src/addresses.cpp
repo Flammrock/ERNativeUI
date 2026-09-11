@@ -1,5 +1,6 @@
 #include "addresses.hpp"
 
+#include "game_build_profiles.hpp"
 #include "runtime_log.hpp"
 
 #include <cinttypes>
@@ -34,7 +35,6 @@ constexpr std::uintptr_t kNativeBackRva = 0x747CD0;
 constexpr std::uintptr_t kPageFrameRva = 0x958FF0;
 constexpr std::uintptr_t kScaleformPathResolverRva = 0x74B140;
 constexpr std::uintptr_t kScaleformTextSetterRva = 0x74AE50;
-constexpr std::uintptr_t kScaleformResultDestructorRva = 0xD81590;
 
 constexpr std::string_view kGameOptionsHandlerPattern =
     "40 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 E0 F2 FF FF";
@@ -193,20 +193,11 @@ constexpr std::string_view kScaleformResultDestructorPattern =
     "48 8D 05 ?? ?? ?? ?? 48 89 01 48 8D 59 08 8B 43 18 "
     "C1 E8 06 A8 01 74 1A";
 
-// Exact Elden Ring 2.7.0 TextInput anchors. The path is intentionally
-// unavailable on any other PE identity, even if a short pattern happens to
-// match, because the producer retains owner-relative state and callbacks.
-constexpr std::uint32_t kTextInputTimestamp = 0x69E9C9B9;
-constexpr std::size_t kTextInputImageSize = 0x5E09600;
-constexpr std::uintptr_t kTextInputRowProducerRva = 0x976EF0;
-constexpr std::uintptr_t kNativeMenuStringConstructorRva = 0x5EE0F0;
-constexpr std::uintptr_t kNativeMenuStringBorrowedConstructorRva = 0x6766F0;
-constexpr std::uintptr_t kNativeMenuStringDestructorRva = 0x1BCC60;
-constexpr std::uintptr_t kTextInputEditorFactoryBuilderRva = 0x915D70;
-// Character-creation editor profile. Unlike the 0x81D700 matchmaking route,
-// this selects 02_990_TextInput together with its native 16-character policy,
-// matching flag set, and field geometry as one coherent factory.
-constexpr std::uintptr_t kTextInputEditorFactoryRva = 0x81D610;
+// TextInput retains owner-relative state and callbacks, so a locally matching
+// byte sequence is accepted only after a recognized PE identity selects an
+// explicitly verified build profile.
+// Both supported profiles currently use the same six RVAs. Keeping two
+// explicit records makes a future divergence visible and unit-testable.
 
 constexpr std::string_view kTextInputRowProducerPattern =
     "40 55 53 56 57 41 54 41 55 41 56 41 57 "
@@ -543,6 +534,14 @@ bool resolve_game_addresses(
     output = {};
     output.game_image_base = game.base();
     output.game_image_size = game.image_size();
+    const EldenRingBuild game_build = identify_elden_ring_build(
+        game.timestamp(), game.image_size());
+    const CoreUiAddressProfile* const core_ui_profile =
+        find_core_ui_address_profile(game_build);
+    const std::uintptr_t scaleform_result_destructor_fallback_rva =
+        core_ui_profile
+            ? core_ui_profile->scaleform_result_destructor_rva
+            : std::uintptr_t{0};
 
     if (!require_rows) {
         erui::detail::logf(
@@ -640,7 +639,7 @@ bool resolve_game_addresses(
                     game,
                     "Scaleform result dtor",
                     kScaleformResultDestructorPattern,
-                    kScaleformResultDestructorRva,
+                    scaleform_result_destructor_fallback_rva,
                     kScaleformResultDestructorPattern));
         } else {
             erui::detail::logf(
@@ -816,8 +815,9 @@ bool resolve_game_addresses(
             "Address resolution: custom text hook disabled");
     }
 
-    if (game.timestamp() != kTextInputTimestamp ||
-        game.image_size() != kTextInputImageSize) {
+    const TextInputAddressProfile* const text_input_profile =
+        find_text_input_address_profile(game_build);
+    if (!text_input_profile) {
         if (require_text_inputs) {
             erui::detail::logf(
                 erui::LogLevel::error,
@@ -830,44 +830,52 @@ bool resolve_game_addresses(
                 "Address resolution: no compatible TextInput path for this game image");
         }
     } else {
+        const std::string_view build_name =
+            elden_ring_build_name(game_build);
+        erui::detail::logf(
+            erui::LogLevel::info,
+            "TextInput address profile selected: Elden Ring %.*s",
+            static_cast<int>(build_name.size()),
+            build_name.data());
         output.text_input_row_producer =
             reinterpret_cast<TextInputRowProducerFn>(resolve_optional_direct(
                 game, "text input producer", kTextInputRowProducerPattern,
-                kTextInputRowProducerRva, kTextInputRowProducerPattern));
+                text_input_profile->row_producer_rva,
+                kTextInputRowProducerPattern));
         output.native_menu_string_constructor =
             reinterpret_cast<NativeMenuStringConstructorFn>(
                 resolve_optional_direct(
                     game, "menu string ctor",
                     kNativeMenuStringConstructorPattern,
-                    kNativeMenuStringConstructorRva,
+                    text_input_profile->menu_string_constructor_rva,
                     kNativeMenuStringConstructorPattern));
         output.native_menu_string_borrowed_constructor =
             reinterpret_cast<NativeMenuStringBorrowedConstructorFn>(
                 resolve_optional_direct(
                     game, "menu string literal ctor",
                     kNativeMenuStringBorrowedConstructorPattern,
-                    kNativeMenuStringBorrowedConstructorRva,
+                    text_input_profile->menu_string_borrowed_constructor_rva,
                     kNativeMenuStringBorrowedConstructorPattern));
         output.native_menu_string_destructor =
             reinterpret_cast<NativeMenuStringDestructorFn>(
                 resolve_optional_direct(
                     game, "menu string dtor",
                     kNativeMenuStringDestructorPattern,
-                    kNativeMenuStringDestructorRva,
+                    text_input_profile->menu_string_destructor_rva,
                     kNativeMenuStringDestructorPattern));
         output.text_input_editor_factory_builder =
             reinterpret_cast<TextInputEditorFactoryBuilderFn>(
                 resolve_optional_direct(
                     game, "text editor builder",
                     kTextInputEditorFactoryBuilderPattern,
-                    kTextInputEditorFactoryBuilderRva,
+                    text_input_profile->editor_factory_builder_rva,
                     kTextInputEditorFactoryBuilderPattern));
         output.text_input_editor_factory =
             reinterpret_cast<TextInputEditorFactoryFn>(
                 resolve_optional_direct(
                     game, "text editor factory",
                     kTextInputEditorFactoryPattern,
-                    kTextInputEditorFactoryRva,
+                    text_input_profile->editor_factory_rva,
                     kTextInputEditorFactoryPattern));
         if (require_text_inputs && !output.text_input_complete()) {
             erui::detail::logf(

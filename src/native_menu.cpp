@@ -35,7 +35,7 @@ constexpr std::uint32_t kButtonDiagnosticLogLimit = 128;
 // vanilla/patched runtime comparisons produced the expected capacities, and
 // ERNativeUI row injection does not mutate this field.
 constexpr std::size_t kRootVisualCapacityOffset = 0xB14;
-constexpr std::size_t kRootNativeCountOffset = 0x1AF0;
+constexpr std::size_t kRootMaterializedRowCountOffset = 0x1AF0;
 constexpr std::size_t kChoiceListSize = 0x920;
 constexpr std::size_t kChoiceListElementsOffset = 0x08;
 constexpr std::size_t kChoiceListCountOffset = 0x910;
@@ -797,9 +797,11 @@ bool add_pagination_button(
 }
 
 struct RootCapacityDetection {
-    std::uint8_t accepted_capacity{erui::detail::game_options_vanilla_capacity};
-    std::uint64_t native_count{};
+    std::uint8_t visual_capacity{erui::detail::game_options_vanilla_capacity};
+    std::uint8_t plan_capacity{};
+    std::uint64_t materialized_row_count{};
     bool capacity_read{};
+    bool capacity_valid{};
     bool count_read{};
 };
 
@@ -807,7 +809,7 @@ RootCapacityDetection detect_root_capacity(void* page) noexcept {
     RootCapacityDetection result{};
     const std::uint8_t configured =
         erui::detail::runtime_state().options.game_options_visual_capacity;
-    result.accepted_capacity =
+    result.visual_capacity =
         configured >= erui::detail::game_options_vanilla_capacity &&
                 configured <= erui::detail::game_options_max_visual_capacity
             ? configured
@@ -823,21 +825,27 @@ RootCapacityDetection detect_root_capacity(void* page) noexcept {
         const std::uint32_t runtime_capacity =
             *reinterpret_cast<const std::uint32_t*>(
                 bytes + kRootVisualCapacityOffset);
+        result.capacity_read = true;
         if (runtime_capacity >= erui::detail::game_options_vanilla_capacity &&
             runtime_capacity <= erui::detail::game_options_max_visual_capacity) {
-            result.accepted_capacity =
+            result.visual_capacity =
                 static_cast<std::uint8_t>(runtime_capacity);
-            result.capacity_read = true;
+            result.capacity_valid = true;
         }
-        result.native_count = *reinterpret_cast<const std::uint64_t*>(
-            bytes + kRootNativeCountOffset);
+        result.materialized_row_count =
+            *reinterpret_cast<const std::uint64_t*>(
+                bytes + kRootMaterializedRowCountOffset);
         result.count_read = true;
 #if defined(_MSC_VER)
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        result.native_count = 0;
+        result.materialized_row_count = 0;
         result.count_read = false;
     }
 #endif
+    if (result.capacity_valid && result.count_read) {
+        result.plan_capacity = erui::detail::derive_root_plan_capacity(
+            result.visual_capacity, result.materialized_row_count);
+    }
     return result;
 }
 
@@ -1013,30 +1021,44 @@ RowInjectionOutcome inject_registered_rows(
     }
 
     const RootCapacityDetection capacity = detect_root_capacity(page);
+    if (capacity.plan_capacity == 0) {
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Game Options row injection skipped: visualRows=%u capacityRead=%d capacityValid=%d materializedRowsBefore=%llu countRead=%d (no validated free slot)",
+            static_cast<unsigned>(capacity.visual_capacity),
+            capacity.capacity_read ? 1 : 0,
+            capacity.capacity_valid ? 1 : 0,
+            static_cast<unsigned long long>(
+                capacity.materialized_row_count),
+            capacity.count_read ? 1 : 0);
+        return {};
+    }
     const erui::detail::PageRoute route = erui::detail::PageRoute::root_main(
         runtime.menu->root_page_index,
-        capacity.accepted_capacity);
+        capacity.plan_capacity);
 
     if (runtime.options.enable_diagnostics) {
         const erui::detail::RootPagePlan& plan =
-            runtime.menu->root_plan(capacity.accepted_capacity);
+            runtime.menu->root_plan(capacity.plan_capacity);
         erui::detail::logf(
             erui::LogLevel::trace,
-            "rootCapacity page=%p visualRows=%u memoryRead=%d fallbackRows=%u nativeCountBefore=%llu countRead=%d vanillaRows=%zu customSlots=%zu logicalRows=%zu physicalPages=%zu",
+            "rootCapacity page=%p visualRows=%u capacityRead=%d capacityValid=%d fallbackRows=%u materializedRowsBefore=%llu countRead=%d effectivePlanRows=%u freeSlots=%zu logicalRows=%zu physicalPages=%zu",
             page,
-            static_cast<unsigned>(capacity.accepted_capacity),
+            static_cast<unsigned>(capacity.visual_capacity),
             capacity.capacity_read ? 1 : 0,
+            capacity.capacity_valid ? 1 : 0,
             static_cast<unsigned>(runtime.options.game_options_visual_capacity),
-            static_cast<unsigned long long>(capacity.native_count),
+            static_cast<unsigned long long>(
+                capacity.materialized_row_count),
             capacity.count_read ? 1 : 0,
-            plan.vanilla_row_count,
+            static_cast<unsigned>(capacity.plan_capacity),
             plan.custom_capacity,
             runtime.menu->root_page().rows.size(),
             plan.pages.slices.size());
     }
 
     RowInjectionOutcome outcome = inject_page_route(page, route, addresses);
-    outcome.root_capacity = capacity.accepted_capacity;
+    outcome.root_capacity = capacity.plan_capacity;
     return outcome;
 }
 

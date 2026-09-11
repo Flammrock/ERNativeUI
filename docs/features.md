@@ -39,7 +39,7 @@ runtime API when the player installs a newer compatible host.
 | [Submenu](guides/controls/submenu.md) | A native row opening a provider-owned settings page with native focus, transitions, and Back behavior. | 1.0; `ERUI_CAP_SUBMENU` | No; the shared action-row/capacity improvements above still apply. | A disabled submenu is omitted because the native action-row constructor has no proven disabled presentation. |
 | [Inline choice](guides/controls/inline-choice.md) | A named value changed in place with left/right input. | 1.0; `ERUI_CAP_INLINE_CHOICE` | No. | 1–32 non-empty labels; callbacks and getters use a zero-based index. Choice rows have no supported disabled state. |
 | [Popup choice](guides/controls/popup-choice.md) | An action row opening Elden Ring's native selection list. | 1.0; `ERUI_CAP_POPUP_CHOICE` | No; action-row presentation can benefit from `02_040`. | Same 1–32 labels and zero-based value model as inline choice. [Showcase](../examples/tarnished_ui_showcase/README.md). |
-| Automatic pagination | Native Next/Previous rows when logical content exceeds the current panel capacity. | 1.0; `ERUI_CAP_PAGINATION` | No. The optional 13-row GFX reduces how often Game Options must paginate. | Clients add logical content only; they must not create their own pagination rows. |
+| Automatic pagination | Native Next/Previous rows when logical content exceeds the current panel capacity. | 1.0; `ERUI_CAP_PAGINATION` | No. The optional 13-row GFX reduces how often Game Options must paginate. | The host subtracts every row already materialized by the game or an earlier compatible hook. Clients add logical content only; they must not create their own pagination rows. |
 | Page presentation | Provider submenu headings and base titles, default `Title (n/t)` pagination suffixes, and an optional startup formatter. | 1.0; `ERUI_CAP_PAGE_PRESENTATION` | No. | The shared Game Options heading remains game-owned. Formatters run during startup compilation, not when a page opens. |
 | [Native modal alerts](guides/native-dialogs.md) | Bottom or centered native messages with dismiss-only, OK, CANCEL, YES, NO, OK+CANCEL, or YES+NO responses. | 1.0; `ERUI_CAP_ALERT` | No. | Requests share a bounded FIFO. Completion is asynchronous; only one owned modal is presented at a time. [Localized example](../examples/localized_greeting/README.md). |
 | [Game-language discovery](guides/localization.md) | Client text can follow Elden Ring's selected Steam language; unknown identifiers remain available for forward-compatible localization. | 1.0; `ERUI_CAP_GAME_LANGUAGE` | No. Host-owned Previous/Next translations use separate locale INI files. | Fall back to English when unavailable or unknown. [Localized example](../examples/localized_greeting/README.md). |
@@ -110,9 +110,10 @@ coexistence, and validation requirements may move to API 1.3 or later.
   ends.
 - Input-binding callbacks are global observations. Mods decide their own game
   context policy, and the underlying Elden Ring input may also act.
-- Solid Uncapper 2.3 coexistence was validated for the released menu hooks on
-  Elden Ring executable 2.7.0.0 when Solid Uncapper loads first. API 1.1 input
-  bindings have not been separately validated in that combination.
+- Solid Uncapper 2.3 coexistence was live-validated on Elden Ring executables
+  2.7.0.0 and 2.7.1.0 when Solid Uncapper loads first. The 1.1.1 host patch
+  deliberately validates and chains its shared menu, API 1.1 Input Bindings,
+  and ColorPicker overlaps.
 - Seamless Co-op 2.0.1 was live-validated on Elden Ring executable 2.7.0.0,
   with no incompatibility observed for that exact combination.
 - DLC compatibility has not been live-validated; no incompatibility is

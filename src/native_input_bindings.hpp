@@ -8,6 +8,20 @@ struct CompiledMenu;
 
 namespace erui::native {
 
+// Captures the exact-build input-binding interfaces while their entry points
+// are still pristine. This is an optional compatibility step for hosts that
+// deliberately load alongside a known third-party UI hook.
+[[nodiscard]] bool capture_native_input_bindings_before_third_party_hooks()
+    noexcept;
+
+// Revalidates a prior capture after third-party initialization. Every entry
+// must remain pristine except the two documented Solid Uncapper overlaps,
+// which may be absolute-indirect detours into executable code owned by the
+// supplied module. The opaque handle is an HMODULE kept out of this private
+// header's public include surface.
+[[nodiscard]] bool approve_captured_native_input_bindings(
+    void* allowed_detour_module) noexcept;
+
 // Copies the compiled binding catalog into process-stable native storage and
 // allocates every buffer used by the hooks.
 // This must complete before install_native_input_bindings().

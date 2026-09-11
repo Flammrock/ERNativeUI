@@ -23,6 +23,21 @@ Every RVA and object offset on this page belongs to that executable. Current
 patterns and validation in the source are authoritative; these numbers are
 navigation aids, not an ABI or a promise for another game build.
 
+## Elden Ring 2.7.1.0 profile update
+
+Static comparison confirmed that the six production TextInput boundaries and
+their required vtables retain their 2.7.0.0 RVAs in game version `2.7.1.0`
+(PE timestamp `0x6A96B418`, image size `0x5E0DA00`). The row producer contains
+updated relative displacements to helpers that moved by `0x70`, but its entry,
+control flow, bounds accesses, call shape, entry validator, and inspected
+vtables show no detected contract change. The complete host subsequently
+reached readiness during the live 2.7.1.0 compatibility regression.
+
+Production now selects a distinct profile for each exact PE identity even
+though their TextInput RVAs currently match. See the
+[2.7.1.0 update record](../game-updates/elden-ring-2.7.1.0.md) for the complete
+comparison and recorded live compatibility matrix.
+
 ## Questions and layers
 
 The investigation deliberately treated these as separate questions:
@@ -278,12 +293,13 @@ native menu string, editor factory, packed job, vtable, or Scaleform object.
 Lengths are public UTF-16 code-unit counts. Zero selects 16; explicit maxima
 must be in `1..35` and are fixed when the row is registered.
 
-Production requires the exact timestamp and image size above, then validates
-every TextInput entry with its full expected pattern. It also validates page
-identity, row count bounds, the created row/controller vtables, and the exact
-bound-value pointer. If any required boundary is absent, ambiguous, faults,
-or fails a postcondition, installation fails closed rather than calling a
-nearby function or publishing a partially working row.
+Production requires an exact recognized timestamp/image-size pair, then
+selects that build's TextInput profile and validates every entry with its full
+expected pattern. It also validates page identity, row count bounds, the
+created row/controller vtables, and the exact bound-value pointer. If any
+required boundary is absent, ambiguous, faults, or fails a postcondition,
+installation fails closed rather than calling a nearby function or publishing
+a partially working row.
 
 The API capability belongs to finished ERUI API 1.1. Its position in the
 append-only table and the frozen API 1.0 prefix are tested independently of

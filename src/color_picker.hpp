@@ -7,6 +7,14 @@
 
 namespace erui::native {
 
+// Solid Uncapper uses the same Scaleform property setter as ColorPicker.
+// Capture its pristine exact-build entry before the third-party worker can
+// install its hook, then approve only a narrowly owned chain after startup.
+[[nodiscard]] bool capture_color_picker_visibility_before_third_party_hooks(
+    const ModuleView& game) noexcept;
+[[nodiscard]] bool approve_captured_color_picker_visibility(
+    void* allowed_detour_module) noexcept;
+
 // Scaleform panel that owns the physical row. Built-in Configuration pages
 // share the same native row constructors but live under distinct WindowList
 // paths; keeping this separate from button text layout prevents Camera's

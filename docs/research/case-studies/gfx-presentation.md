@@ -151,6 +151,10 @@ through 13, refuses shrinking, and clones the existing placement convention.
 The DLL does not read the loose movie. Native code reports the current live
 capacity from the constructed page, so pagination works with the original
 movie, the optional 13-row movie, or another structurally compatible capacity.
+The runtime also subtracts the post-materializer live row count. A compatible
+mod that adds a row earlier in the native call chain therefore consumes one
+of those placements just like an Elden Ring row; the GFX capacity itself does
+not change.
 See the [settings pages and pagination case study](settings-pages-and-pagination.md)
 for the native half.
 

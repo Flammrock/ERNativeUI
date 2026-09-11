@@ -445,10 +445,10 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
         }
     }
 
-    for (std::uint8_t capacity = game_options_vanilla_capacity;
+    for (std::uint8_t capacity = game_options_min_plan_capacity;
          capacity <= game_options_max_visual_capacity; ++capacity) {
         RootPagePlan& plan = compiled->root_plans[
-            capacity - game_options_vanilla_capacity];
+            capacity - game_options_min_plan_capacity];
         plan = paginate_root_page(
             compiled->root_page_index,
             compiled->root_page().rows.size(),
@@ -468,9 +468,9 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             compiled->page_plans[page_index].slices.size(),
             compiled->pages[page_index].physical_title_ids);
     }
-    for (std::uint8_t capacity = game_options_vanilla_capacity;
+    for (std::uint8_t capacity = game_options_min_plan_capacity;
          capacity <= game_options_max_visual_capacity; ++capacity) {
-        const std::size_t index = capacity - game_options_vanilla_capacity;
+        const std::size_t index = capacity - game_options_min_plan_capacity;
         compile_physical_titles(
             *compiled,
             *menu.root_page_,

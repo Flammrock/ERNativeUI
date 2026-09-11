@@ -6,11 +6,12 @@ resolver, and feature backends; it is not copied from the historical symbol
 CSV or the earlier research notebooks.
 
 The names below are ERNativeUI's analytical source names, not symbols supplied
-by FromSoftware. An RVA is shown only where production intentionally binds an
-interface to the [reference executable](../README.md#reference-build). Generic
-resolver fallback constants are not presented as current addresses: they are
-accepted only when their local validation still succeeds, while the unique AOB
-result is authoritative.
+by FromSoftware. The 2.7.0.0 baseline remains the
+[reference executable](../README.md#reference-build); explicit 2.7.1.0 deltas
+are shown where a production profile differs. Generic resolver fallback
+constants are not presented as current addresses: they are accepted only when
+their local validation still succeeds, while the unique AOB result is
+authoritative.
 
 This inventory documents private implementation boundaries. Mod clients must
 use the public [C ABI](https://github.com/Flammrock/ERNativeUI/blob/main/include/ernativeui/erui.h) or
@@ -24,13 +25,21 @@ The current source uses four resolution classes:
 |---|---|
 | Semantic AOB | Scan executable sections, require exactly one match, and derive a `rel32` call target when the semantic anchor is a caller rather than the callee entry. |
 | Validated fallback | If an AOB is missing or ambiguous, accept the source fallback RVA only when it is in executable memory and matches the required local bytes or structure. It is never an unchecked fallback. |
-| Build-gated AOB | First require the reference PE timestamp and image size, then resolve each entry with a unique AOB or validated fallback. TextInput uses this class because it retains layout-coupled native state. |
-| Exact-RVA feature backend | Require the reference PE timestamp and image size, fetch every feature-local RVA, and validate the expected entry bytes plus required data anchors. ColorPicker and Input Bindings use this class. |
+| Build-gated AOB | First select one recognized PE timestamp/image-size profile, then resolve each entry with a unique AOB or validated fallback. TextInput uses this class because it retains layout-coupled native state. |
+| Exact-RVA feature backend | Select one recognized PE timestamp/image-size profile, fetch every feature-local RVA from it, and validate the expected entry bytes plus required data anchors. ColorPicker and Input Bindings use this class. |
 
 The complete executable SHA-256 is recorded for research and release testing,
-but the build-locked runtime backends currently gate on PE timestamp
-`0x69E9C9B9` and image size `0x5E09600`, followed by local byte and data
-validation. They do not calculate the executable hash in the injected process.
+but the injected runtime does not calculate the hash. Its recognized profiles
+are:
+
+| Game build | PE timestamp | Image size |
+|---|---:|---:|
+| `2.7.0.0` | `0x69E9C9B9` | `0x5E09600` |
+| `2.7.1.0` | `0x6A96B418` | `0x5E0DA00` |
+
+Both fields must match one profile. Local byte, vtable, executable-memory, and
+data validation then remains mandatory. The complete comparison is recorded
+in the [2.7.1.0 update note](../game-updates/elden-ring-2.7.1.0.md).
 
 Hooks are installed with SafetyHook unless the table says otherwise. All
 SafetyHook inline hooks are prepared disabled, their original trampolines are
@@ -77,7 +86,7 @@ live in [`hooks.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/hook
 
 | Target in current source | Condition | Owner and scope | Resolution | Behavior on failure |
 |---|---|---|---|---|
-| `GameOptionsHandlerFn` | Always, because row injection is the runtime's base feature. | The live Game Options page. Calls vanilla once, publishes the current page for modal gating, then injects the resolved root slice subject to the cooldown. | Direct semantic AOB, then byte-validated fallback. | Hard installation failure. |
+| `GameOptionsHandlerFn` | Always, because row injection is the runtime's base feature. | The live Game Options page. Calls the complete validated chain once, publishes the current page for modal gating, reads visual capacity and the post-chain materialized count, then injects only the fitting root slice subject to the cooldown. Earlier compatible rows therefore consume real capacity. | Direct semantic AOB, then byte-validated fallback. | Hard installation failure. |
 | Camera, Display, Sound, Network, Keyboard/Mouse, and Graphics `BuiltinPanelMaterializerFn` entries | Only when providers declared rows for that destination. | One concrete native category page per detour. Calls vanilla once, validates the page/vtable, reads live native count and visual capacity, then appends only the fitting slice. | Independent direct semantic AOBs, each with a byte-validated fallback. | Local degradation for that destination; installation continues. |
 | `SubHandlerFn` | Any provider submenu, root continuation, or built-in continuation. | The existing Advanced Settings-style physical page. Resolves only ERNativeUI-owned pending/bound routes; unrelated pages are passed to vanilla. | Direct semantic AOB, then byte-validated fallback. | Hard installation failure when the compiled menu needs the route. |
 | `TextResolverFn` | Custom text enabled; the production host enables it. | Five-argument native UI result-object resolver. Rewrites only host text IDs, scoped root-button IDs, and live dialog IDs; every other ID calls vanilla. | Direct semantic AOB/prologue, then byte-validated fallback. | Hard core-hook failure. Uses MinHook rather than SafetyHook. |
@@ -186,8 +195,8 @@ are in [Native popup-choice rows](../case-studies/popup-choice.md).
 
 TextInput adds no feature-local detour. It uses exact native construction calls
 and the shared `PageFrameFn` hook described above. The address block in
-the current online [`addresses.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/addresses.cpp) first requires the reference PE
-timestamp and image size, then uses build-gated AOBs with validated fallbacks.
+the current online [`addresses.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/addresses.cpp) first selects a recognized PE profile,
+then uses build-gated AOBs with validated fallbacks.
 
 | Boundary | Reference-build RVA | Production role |
 |---|---:|---|
@@ -197,6 +206,10 @@ timestamp and image size, then uses build-gated AOBs with validated fallbacks.
 | `NativeMenuStringDestructorFn` | `0x1BCC60` | Destroy host-owned or temporary native menu strings through the matching native contract. |
 | `TextInputEditorFactoryBuilderFn` | `0x915D70` | Build the erased editor-factory callable passed to the row producer. |
 | `TextInputEditorFactoryFn` | `0x81D610` | Create the character-creation-style editor job with its native input and length policy. |
+
+All six RVAs are identical in the 2.7.1.0 profile. Their entry patterns and
+the supporting vtables were independently compared before the new identity
+was admitted.
 
 Before publishing a row, production validates the parent as the expected
 OptionSetting or PadSetting page and bounds its property count. After the call,
@@ -249,9 +262,9 @@ button-result normalization, queueing, and the bounded reproduction procedure.
 
 ## ColorPicker
 
-The backend in the current online [`color_picker.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/color_picker.cpp) requires the
-reference timestamp/image size, then validates every exact RVA below. The
-recorded SHA-256 is a release/research identity, not an in-process hash check.
+The backend in the current online [`color_picker.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/color_picker.cpp) selects an exact
+profile, then validates every RVA below. The recorded SHA-256 is a
+release/research identity, not an in-process hash check.
 
 ### Feature-local detour
 
@@ -277,14 +290,26 @@ valid.
 | color-control constructor | `0x8B6F90` | Construct the `04_031_ChrMake_ColorEditor` controller and live completion callable. |
 | movie-name data | `0x2AB8DE8` | Must validate as the expected `04_031_ChrMake_ColorEditor` UTF-16 literal. |
 | Scaleform path resolver | `0x74B140` | Resolve only known existing widget/fill paths; also supplies the target for the shared path bridge if the generic title resolver was unavailable. |
-| visibility setter/value-exists/color-transform setter | `0x734190` / `0x733FA0` / `0xD85610` | Preflight and update the standalone widget and its current RGB swatch. |
+| visibility setter | `0x734190` | Hide or show a validated standalone widget object. Normally pristine; the narrowly supported Solid Uncapper call chain is documented below. |
+| value-exists/color-transform setter | `0x733FA0` / `0xD85610` | Preflight and update the standalone widget's current RGB swatch. |
 
-Every executable entry must match its long local pattern, every data pointer
-must validate, and the dialog transport must already be active. One failed
-validation rejects ColorPicker installation. The normal dialog job-poll hook
-observes accept/cancel for the exact active ColorPicker job. Outstanding native
-sessions make hot removal unsupported; the host rejects new requests and keeps
-resolved native entries alive through process exit.
+The 2.7.1.0 profile changes only these three entries:
+
+| Boundary | 2.7.0.0 | 2.7.1.0 |
+|---|---:|---:|
+| game allocation dispatch | `0x1EBBCD0` | `0x1EBBD40` |
+| temporary SceneObjProxy destructor | `0xD81590` | `0xD81600` |
+| Scaleform color-transform setter | `0xD85610` | `0xD85680` |
+
+Every executable entry normally must match its long local pattern, every data
+pointer must validate, and the dialog transport must already be active. The
+only supported exception is an early-captured visibility setter whose current
+entry is either pristine or a validated Solid Uncapper-owned `FF 25` detour;
+it is revalidated immediately before publication. One failed validation
+rejects ColorPicker installation. The normal dialog job-poll hook observes
+accept/cancel for the exact active ColorPicker job. Outstanding native
+sessions make hot removal unsupported; the host rejects new requests and
+keeps resolved native entries alive through process exit.
 
 See [Native color picker](../case-studies/color-picker.md) and
 [GFX presentation](../case-studies/gfx-presentation.md).
@@ -295,7 +320,7 @@ The backend in
 the current online [`native_input_bindings.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/native_input_bindings.cpp) is
 independent of the generic built-in-page materializers. It extends the
 specialized scrolling binding model and samples player input globally. Any
-declared input action activates the exact reference-build identity gate and
+declared input action activates the exact recognized-build profile gate and
 requires the complete backend.
 
 ### Production detours
@@ -333,10 +358,25 @@ the unpublished group and rejects runtime installation.
 | KeyConfig dialog/list/config vtables | `0x2B0DCC0` / `0x2AD6E70` / `0x2AD68D0` | Exact owner checks before list publication or mutation. |
 | SoftwareKeyboardJob/TextInputDialog vtables | `0x2AC5AD0` / `0x2B2B908` | Exact identity checks for editor lifetime tracking. |
 
-Each function is fetched at its exact RVA and must match its feature-local
-pattern. Data anchors must lie inside the current image. At runtime, unknown
-objects, threads, tokens, or layouts fail closed; callbacks are discarded while
-remapping, a native text editor, or an owned dialog has input focus.
+The 2.7.1.0 profile changes two executable entries:
+
+| Boundary | 2.7.0.0 | 2.7.1.0 |
+|---|---:|---:|
+| query-input-states forwarding thunk | `0x2667AD0` | `0x2667B40` |
+| input-manager update | `0x266A480` | `0x266A4F0` |
+
+The singleton slot, native binding helpers, editor-lifetime functions, and
+required vtables retain their baseline RVAs. The query-thunk validator was
+also lengthened: it wildcards the six unstable neighboring bytes, then uses a
+longer stable prefix from that adjacent function only as uniqueness context.
+
+Each function is fetched at its exact RVA and normally must match its
+feature-local pattern. Data anchors must lie inside the current image. The
+only supported third-party exception is described below: after an early
+pristine capture, the two known Solid Uncapper overlaps may have one narrowly
+validated owned-detour form. At runtime, unknown objects, threads, tokens, or
+layouts fail closed; callbacks are discarded while remapping, a native text
+editor, or an owned dialog has input focus.
 
 After native cells have been published, hot removal retains the mutation and
 editor guards plus backing storage because an open KeyConfig dialog may still
@@ -350,22 +390,42 @@ The only explicit third-party hook ownership path is in
 the current online [`host_dllmain.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/host_dllmain.cpp). When
 `Solid Uncapper.dll` is already loaded, ERNativeUI:
 
-1. resolves and saves pristine native interfaces before Solid Uncapper's
-   asynchronous hook installation;
+1. resolves and saves the shared menu interfaces, the complete Input Bindings
+   interface set, and the ColorPicker visibility-setter entry before Solid
+   Uncapper's asynchronous hook installation;
 2. watches exactly the Game Options materializer, subpage materializer, and
    text resolver for at most 20 seconds and requires the three entries to be
    unchanged or all changed;
 3. requires a 500 ms all-changed stable window;
 4. if changed, accepts only the observed absolute-indirect jump shape whose
    destination lies in executable Solid Uncapper image memory; and
-5. installs ERNativeUI through the pre-resolved interface set so the hook
-   library can form the validated chain.
+5. validates every captured Input Bindings entry again after the wait;
+6. requires every input entry except `clear_key_setting` and
+   `write_binding_value` to remain pristine;
+7. accepts either known input overlap as changed only when its entry is an
+   `FF 25` absolute-indirect detour whose resolved destination is executable
+   and owned by `Solid Uncapper.dll`;
+8. independently applies the same unchanged-or-owned-`FF 25` rule to the
+   captured ColorPicker visibility setter at `0x734190`, while every other
+   ColorPicker boundary retains pristine validation;
+9. revalidates the input entries before native input calls and hook creation,
+   and the visibility setter immediately before publishing ColorPicker; and
+10. installs ERNativeUI through the captured interface sets and original game
+    entry addresses so its hooks and direct calls form the validated chains.
 
 A partial one- or two-target change, an unknown jump shape, or a destination
-outside the detected module fails host startup. If none of the three targets
-changes before the timeout, installation proceeds without special chaining.
-This mechanism does not claim compatibility with arbitrary foreign detours on
-other feature-local entries.
+outside the detected module fails the three-entry menu path. The two input
+overlaps and one ColorPicker overlap are checked independently because any of
+them can still be pristine; a change to any other exact Input Bindings or
+ColorPicker entry fails its feature path. If none of the three menu targets
+changes before the timeout, installation proceeds through their captured
+pristine entries. This mechanism does not claim compatibility with arbitrary
+foreign detours on other feature-local entries.
+
+The complete menu, two-entry Input Bindings, and one-entry ColorPicker chains
+were live-tested on 2.7.0.0 and 2.7.1.0 with Solid Uncapper 2.3 loaded first.
+The corresponding pristine paths were also regression-tested without Solid
+Uncapper.
 
 ## Teardown and callback boundary
 

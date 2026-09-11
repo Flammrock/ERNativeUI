@@ -1,6 +1,7 @@
 #include "runtime.hpp"
 
 #include "addresses.hpp"
+#include "game_build.hpp"
 #include "hooks.hpp"
 #include "module.hpp"
 #include "runtime_log.hpp"
@@ -252,9 +253,23 @@ InstallResult install_impl(
         game.image_size(),
         static_cast<unsigned>(game.timestamp()));
 
+    if (const erui::native::EldenRingBuildIdentity* const identity =
+            erui::native::find_elden_ring_build(
+                game.timestamp(), game.image_size())) {
+        detail::logf(
+            LogLevel::info,
+            "Selected exact native profile: Elden Ring %.*s",
+            static_cast<int>(identity->product_version.size()),
+            identity->product_version.data());
+    } else {
+        detail::logf(
+            LogLevel::warning,
+            "No exact native profile for this game image; build-locked features will remain unavailable");
+    }
+
     const bool active_pagination = options.enable_row_injection &&
         runtime.menu->pagination_required_for_capacity(
-            options.game_options_visual_capacity);
+            detail::game_options_min_plan_capacity);
     bool has_non_game_builtin_rows = false;
     for (std::uint8_t native_category = 1;
          native_category < runtime.menu->builtin_page_indices.size();
@@ -278,7 +293,7 @@ InstallResult install_impl(
     bool require_buttons = active_pagination || runtime_capacity_pagination ||
         runtime.menu->modeled_color_picker_count != 0;
     bool require_submenus = options.enable_row_injection &&
-        (runtime.menu->root_plan(options.game_options_visual_capacity)
+        (runtime.menu->root_plan(detail::game_options_min_plan_capacity)
             .pages.slices.size() > 1 || runtime_capacity_pagination);
     const bool require_native_back =
         active_pagination || runtime_capacity_pagination;

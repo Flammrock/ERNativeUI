@@ -101,6 +101,27 @@ RootPagePlan paginate_root_page(
     return root;
 }
 
+std::uint8_t derive_root_plan_capacity(
+    std::uint8_t visual_capacity,
+    std::uint64_t materialized_row_count) noexcept {
+    if (visual_capacity < game_options_vanilla_capacity ||
+        visual_capacity > game_options_max_visual_capacity ||
+        materialized_row_count < game_options_vanilla_row_count ||
+        materialized_row_count >= visual_capacity) {
+        return 0;
+    }
+
+    const std::uint64_t free_slots =
+        static_cast<std::uint64_t>(visual_capacity) -
+        materialized_row_count;
+    const std::uint64_t effective_capacity =
+        game_options_vanilla_row_count + free_slots;
+    return effective_capacity >= game_options_min_plan_capacity &&
+            effective_capacity <= game_options_max_visual_capacity
+        ? static_cast<std::uint8_t>(effective_capacity)
+        : 0;
+}
+
 bool resolve_paginated_slice(
     std::size_t logical_page_index,
     std::size_t logical_row_count,

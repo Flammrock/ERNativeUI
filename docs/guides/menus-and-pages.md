@@ -104,8 +104,10 @@ the dedicated [Submenu control reference](controls/submenu.md).
 
 Declare logical content in the order it should appear and do not add your own
 Previous or Next rows. ERNativeUI reads the live visual capacity of the native
-panel, subtracts its existing game rows, merges provider content, and creates
-as many physical slices as required.
+panel, subtracts every row that has already been materialized, merges provider
+content, and creates as many physical slices as required. The measured count
+includes Elden Ring's rows and rows appended earlier by a supported cooperative
+hook such as Solid Uncapper; it is not a fixed vanilla-row assumption.
 
 For a page with capacity `C`, the general shape is:
 
@@ -118,6 +120,14 @@ final slice:   Previous + up to C - 1 content rows
 When every content row fits, no pagination row is added. Previous uses Elden
 Ring's real asynchronous page-pop path, so the game restores its own parent
 state rather than ERNativeUI imitating a Back animation.
+
+For example, the unmodified Game Options movie has six visible slots. Elden
+Ring materializes four rows in the tested setup. If Solid Uncapper has already
+added a fifth row, the sole remaining slot becomes **Next** whenever the
+ERNativeUI content overflows; the provider content begins on the continuation
+instead of producing a seventh physical row. With the optional 13-row movie,
+the same five already-materialized rows leave eight slots. An overflowing
+first slice can therefore contain seven provider rows and **Next**.
 
 ![The middle slice of a three-page ERNativeUI submenu with Previous and Next rows](../assets/images/menus/pagination-middle-page.png)
 

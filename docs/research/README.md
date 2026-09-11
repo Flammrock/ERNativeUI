@@ -62,6 +62,7 @@ launch's module base to obtain an RVA.
 | Which existing GFX resources are useful leads, and when is reuse actually safe? | [GFX resource catalog](reference/gfx-resource-catalog.md) |
 | Which linked Scaleform exports, RTTI records, vtables, and public SDK concepts are useful navigation seeds? | [Scaleform runtime seeds](reference/scaleform-runtime-seeds.md) |
 | How can the local executable database and bounded exporters be reproduced? | [Ghidra workflow](tools/ghidra-workflow.md) |
+| What changed when Elden Ring 2.7.1.0 replaced the 2.7.0.0 baseline? | [2.7.1.0 native-profile update](game-updates/elden-ring-2.7.1.0.md) |
 | Which analytical symbols were captured in the baseline? | [Historical build-locked address map](address-map/README.md) |
 | Which hooks and native call boundaries does the current production host actually install? | [Current native hook and call inventory](reference/native-hook-inventory.md) |
 | How were built-in settings destinations, live capacities, and pagination recovered? | [Settings pages and pagination case study](case-studies/settings-pages-and-pagination.md) |

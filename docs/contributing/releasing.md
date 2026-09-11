@@ -4,11 +4,12 @@ ERNativeUI uses Release Please, Semantic Versioning, Conventional Commits, and
 GitHub Actions. The normal release path does not require manually editing the
 project version, `CHANGELOG.md`, a tag, or a GitHub Release.
 
-This guide describes the intended ERNativeUI **1.1.0** release, which first
-ships the finished ERUI **API 1.1** contract. Those numbers happen to match;
-they version different things and can diverge later:
+ERNativeUI **1.1.0** first shipped the finished ERUI **API 1.1** contract. The
+Elden Ring 2.7.1 compatibility work targets project release **1.1.1** while
+retaining that same API. Project and API versions track different things and
+can diverge:
 
-- `1.1.0` is the project, package, tag, and changelog version.
+- `1.1.0` and `1.1.1` are project, package, tag, and changelog versions.
 - `1.1` is the runtime C function-table contract requested through
   `ERUI_GetApi` and by `erui::connect()`.
 
@@ -73,11 +74,12 @@ The relevant release rules are:
 When a pull request is squash-merged, its title becomes the commit subject.
 Keep that title in Conventional Commit form.
 
-The current release manifest records `1.0.0`. With the accepted `feat:` work,
-Release Please should therefore propose project release `1.1.0`. Confirm the
-calculated version in the release PR instead of editing the manifest yourself.
-It is expected that ordinary development still shows `1.0.0` in
-`CMakeLists.txt` until that generated release PR advances it.
+Before the compatibility fix lands, the release manifest records `1.1.0`. A
+`fix:` subject therefore makes Release Please propose project release `1.1.1`;
+the public ERUI API remains `1.1`. Confirm the calculated version in the
+release PR instead of editing the manifest yourself. It is expected that the
+fix branch still shows `1.1.0` in `CMakeLists.txt`; the generated release PR
+advances it.
 If an intentional version override is ever necessary, use a dedicated
 Conventional Commit with a `Release-As: X.Y.Z` footer; do not use that override
 to make the project version mirror an API version.
@@ -108,7 +110,7 @@ The preset builds the host, examples, GFX patcher, and tests in
 tree in `build/preset-release/deploy/Release`; `build.bat` then installs the
 SDK/runtime tree under `dist/ERNativeUI`.
 
-Before releasing 1.1.0, also review:
+Before releasing, also review:
 
 - the [validation checklist](../../VALIDATION.md);
 - the [API 1.0 to 1.1 migration guide](../migrations/1.0-to-1.1.md);
@@ -138,10 +140,11 @@ Its configuration is stored in
 `.release-please-manifest.json` records the most recently released project
 version.
 
-Release Please creates or refreshes one release PR. For 1.1.0, verify that it:
+Release Please creates or refreshes one release PR. For the 1.1.1
+compatibility release, verify that it:
 
-- changes `project(ERNativeUI VERSION ...)` in `CMakeLists.txt` to `1.1.0`;
-- changes the manifest from `1.0.0` to `1.1.0`;
+- changes `project(ERNativeUI VERSION ...)` in `CMakeLists.txt` to `1.1.1`;
+- changes the manifest from `1.1.0` to `1.1.1`;
 - updates `CHANGELOG.md` with the intended changes;
 - does not present exploratory API 1.2 ideas as released features.
 
@@ -171,15 +174,15 @@ job uses its scoped `GITHUB_TOKEN` to upload to the GitHub Release.
 
 ## 5. Merge and verify the GitHub Release
 
-Merging the release PR causes a later Release Please run to create the
-`ERNativeUI-v1.1.0` tag and GitHub Release. The component-prefixed form matches
+Merging the 1.1.1 release PR causes a later Release Please run to create the
+`ERNativeUI-v1.1.1` tag and GitHub Release. The component-prefixed form matches
 the existing `ERNativeUI-v1.0.0` release and the current manifest
 configuration. The workflow's Windows package job then:
 
 1. checks out the exact released tag;
 2. configures, builds, and tests with `windows-release`;
 3. runs `tools/package_release.ps1` without `-IncludeNexus`;
-4. uploads `ERNativeUI-1.1.0-windows-x64.zip` as a workflow artifact;
+4. uploads `ERNativeUI-1.1.1-windows-x64.zip` as a workflow artifact;
 5. attaches that same single ZIP to the GitHub Release.
 
 Verify the tag and release point to the release-PR merge commit, the release
@@ -200,14 +203,14 @@ runtime/SDK archive with:
 ```powershell
 .\tools\package_release.ps1 `
   -BuildDirectory build/preset-release `
-  -Version 1.1.0
+  -Version 1.1.1
 ```
 
 The script installs the built tree and creates:
 
 ```text
 dist/release/
-|-- ERNativeUI-1.1.0-windows-x64.zip
+|-- ERNativeUI-1.1.1-windows-x64.zip
 `-- SHA256SUMS.txt
 ```
 
@@ -233,7 +236,7 @@ ctest --preset windows-release
 
 .\tools\package_release.ps1 `
   -BuildDirectory build/preset-release `
-  -Version 1.1.0 `
+  -Version 1.1.1 `
   -IncludeNexus
 ```
 
@@ -241,8 +244,8 @@ This creates:
 
 ```text
 dist/release/
-|-- ERNativeUI-1.1.0-windows-x64.zip
-|-- ERNativeUI-1.1.0-nexus.zip
+|-- ERNativeUI-1.1.1-windows-x64.zip
+|-- ERNativeUI-1.1.1-nexus.zip
 `-- SHA256SUMS.txt
 ```
 
@@ -268,14 +271,14 @@ its layout, hashes, DLL file versions, player README links, game-build
 compatibility statement, description, screenshots, credits, permissions, and
 AI disclosure fields. Confirm that repository README/SDK links were not
 accidentally copied into this intentionally small package.
-Upload `ERNativeUI-1.1.0-nexus.zip` manually; do not attach it to the GitHub
+Upload `ERNativeUI-1.1.1-nexus.zip` manually; do not attach it to the GitHub
 Release.
 
 ## 8. After publication
 
 - Test a fresh Mod Engine 2 installation using the published Nexus ZIP.
 - Test an SDK consumer using the published Windows ZIP.
-- Confirm clients built against API 1.0 still register with the 1.1.0 host and
+- Confirm clients built against API 1.0 still register with the 1.1.1 host and
   a current client negotiates API 1.1. This includes both a previously built
   binary and a client intentionally built from the frozen 1.0 SDK.
 - Record any newly verified game or mod compatibility in the compatibility

@@ -1,6 +1,7 @@
 #include "color_picker.hpp"
 
 #include "addresses.hpp"
+#include "game_build_profiles.hpp"
 #include "native_dialog.hpp"
 #include "runtime_log.hpp"
 
@@ -14,6 +15,7 @@
 #include <cstring>
 #include <cwchar>
 #include <functional>
+#include <limits>
 #include <malloc.h>
 #include <memory>
 #include <mutex>
@@ -29,29 +31,10 @@
 namespace erui::native {
 namespace {
 
-// Elden Ring 2.7.0.0, SHA-256
-// D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134.
-// Timestamp/size are supplemented by long entry validation below. Every
-// other executable build fails closed.
-constexpr std::uint32_t kSupportedTimestamp = 0x69E9C9B9;
-constexpr std::size_t kSupportedImageSize = 0x5E09600;
-constexpr std::uintptr_t kBuildMenuWindowJobRva = 0x7AD980;
-constexpr std::uintptr_t kSubmitConsumeRva = 0x7AA0D0;
-constexpr std::uintptr_t kHeapProviderRva = 0x7A8120;
-constexpr std::uintptr_t kGameAllocateRva = 0x1EBBCD0;
-constexpr std::uintptr_t kColorPaletteConstructorRva = 0x77C620;
-constexpr std::uintptr_t kColorPaletteDestructorRva = 0x77CA10;
-constexpr std::uintptr_t kColorPalettePopulateRva = 0x77CF90;
-constexpr std::uintptr_t kSceneProxyBridgeRva = 0x7460D0;
-constexpr std::uintptr_t kSceneObjProxyDestructorRva = 0xD81590;
-constexpr std::uintptr_t kColorControlConstructorRva = 0x8B6F90;
-constexpr std::uintptr_t kColorPickerMovieNameRva = 0x2AB8DE8;
-constexpr std::uintptr_t kScaleformPathResolverRva = 0x74B140;
-constexpr std::uintptr_t kGameOptionsActionWidgetProducerRva = 0x86B940;
-constexpr std::uintptr_t kScaleformVisibilitySetterRva = 0x734190;
-constexpr std::uintptr_t kScaleformValueExistsRva = 0x733FA0;
-constexpr std::uintptr_t kScaleformColorTransformSetterRva = 0xD85610;
-
+// Native object layouts and data anchors remain exact-build evidence even
+// where code signatures happen to survive an update. Each supported PE
+// identity therefore selects a complete RVA profile, and all selected entries
+// are still validated against their long patterns below before use.
 constexpr std::size_t kColorPaletteSize = 0x980;
 constexpr std::size_t kColorPalettePopulatedCountOffset = 0x930;
 constexpr std::uint64_t kExpectedColorPalettePopulatedCount = 143;
@@ -279,6 +262,23 @@ struct PaletteOwner {
 };
 
 NativeInterfaces g_native{};
+struct CapturedVisibilityEntry {
+    const void* address{};
+    std::array<std::uint8_t, 16> bytes{};
+    std::uint32_t timestamp{};
+    std::size_t image_size{};
+};
+
+enum class CapturedVisibilityState : std::uint8_t {
+    pristine,
+    allowed_detour,
+    invalid,
+};
+
+CapturedVisibilityEntry g_captured_visibility{};
+HMODULE g_captured_visibility_owner{};
+std::atomic_bool g_captured_visibility_ready{};
+std::atomic_bool g_captured_visibility_approved{};
 std::atomic_bool g_available{};
 std::mutex g_mutex{};
 std::weak_ptr<Session> g_active{};
@@ -291,6 +291,115 @@ std::atomic<std::uint32_t> g_preview_fault_logs{};
 std::atomic_bool g_widget_path_bridge_available{};
 thread_local ColorRowConstructionContext g_color_row_construction{};
 thread_local void* g_color_widget_route_source{};
+
+const void* absolute_indirect_jump_target(
+    const ModuleView& game,
+    const std::uint8_t* entry) noexcept {
+    if (!entry || !game.contains(entry, 6) ||
+        entry[0] != 0xFF || entry[1] != 0x25) {
+        return nullptr;
+    }
+    std::int32_t displacement{};
+    std::memcpy(&displacement, entry + 2, sizeof(displacement));
+    const std::uintptr_t instruction_end =
+        reinterpret_cast<std::uintptr_t>(entry) + 6u;
+    std::uintptr_t slot_value{};
+    if (displacement >= 0) {
+        const auto distance = static_cast<std::uintptr_t>(displacement);
+        if (instruction_end >
+            (std::numeric_limits<std::uintptr_t>::max)() - distance) {
+            return nullptr;
+        }
+        slot_value = instruction_end + distance;
+    } else {
+        const auto distance = static_cast<std::uintptr_t>(
+            -static_cast<std::int64_t>(displacement));
+        if (instruction_end < distance) return nullptr;
+        slot_value = instruction_end - distance;
+    }
+    const auto* const slot = reinterpret_cast<const std::uint8_t*>(slot_value);
+    if (!game.contains(slot, sizeof(void*))) return nullptr;
+
+    MEMORY_BASIC_INFORMATION memory{};
+    if (VirtualQuery(slot, &memory, sizeof(memory)) != sizeof(memory) ||
+        memory.State != MEM_COMMIT ||
+        (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+        return nullptr;
+    }
+    const auto region_end = reinterpret_cast<std::uintptr_t>(
+        memory.BaseAddress) + memory.RegionSize;
+    if (slot_value > region_end ||
+        sizeof(void*) > region_end - slot_value) {
+        return nullptr;
+    }
+
+    const void* target{};
+#if defined(_MSC_VER)
+    __try {
+#endif
+    std::memcpy(&target, slot, sizeof(target));
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+#endif
+    return target;
+}
+
+CapturedVisibilityState validate_captured_visibility(
+    const ModuleView& game,
+    HMODULE allowed_detour_module) noexcept {
+    if (!g_captured_visibility_ready.load(std::memory_order_acquire) ||
+        game.timestamp() != g_captured_visibility.timestamp ||
+        game.image_size() != g_captured_visibility.image_size) {
+        return CapturedVisibilityState::invalid;
+    }
+
+    const EldenRingBuild build = identify_elden_ring_build(
+        game.timestamp(), game.image_size());
+    const ColorPickerAddressProfile* const profile =
+        find_color_picker_address_profile(build);
+    const auto* const entry = profile
+        ? game.at_rva(profile->scaleform_visibility_setter_rva)
+        : nullptr;
+    if (!entry || entry != g_captured_visibility.address ||
+        !game.contains(entry, g_captured_visibility.bytes.size()) ||
+        !game.is_executable(entry)) {
+        return CapturedVisibilityState::invalid;
+    }
+
+    if (std::memcmp(
+            entry,
+            g_captured_visibility.bytes.data(),
+            g_captured_visibility.bytes.size()) == 0 &&
+        game.matches(entry, kScaleformVisibilitySetterPattern)) {
+        return CapturedVisibilityState::pristine;
+    }
+
+    ModuleView allowed_owner{};
+    if (!allowed_owner.initialize(allowed_detour_module)) {
+        return CapturedVisibilityState::invalid;
+    }
+    const void* const destination = absolute_indirect_jump_target(
+        game, entry);
+    return destination && allowed_owner.contains(destination) &&
+            allowed_owner.is_executable(destination)
+        ? CapturedVisibilityState::allowed_detour
+        : CapturedVisibilityState::invalid;
+}
+
+const char* captured_visibility_state_name(
+    CapturedVisibilityState state) noexcept {
+    switch (state) {
+    case CapturedVisibilityState::pristine:
+        return "pristine";
+    case CapturedVisibilityState::allowed_detour:
+        return "owned-detour";
+    case CapturedVisibilityState::invalid:
+        return "invalid";
+    }
+    return "invalid";
+}
 
 PreviewBinding* find_preview_binding_locked(
     const detail::ColorPickerState* state) noexcept {
@@ -923,6 +1032,69 @@ bool read_property_row_index(
 
 } // namespace
 
+bool capture_color_picker_visibility_before_third_party_hooks(
+    const ModuleView& game) noexcept {
+    g_captured_visibility_approved.store(false, std::memory_order_release);
+    g_captured_visibility_ready.store(false, std::memory_order_release);
+    g_captured_visibility_owner = nullptr;
+    g_captured_visibility = {};
+
+    const EldenRingBuild build = identify_elden_ring_build(
+        game.timestamp(), game.image_size());
+    const ColorPickerAddressProfile* const profile =
+        find_color_picker_address_profile(build);
+    const auto* const entry = profile
+        ? game.at_rva(profile->scaleform_visibility_setter_rva)
+        : nullptr;
+    if (!entry || !game.is_executable(entry) ||
+        !game.contains(entry, g_captured_visibility.bytes.size()) ||
+        !game.matches(entry, kScaleformVisibilitySetterPattern)) {
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Color Picker visibility interface could not be captured before third-party hooks");
+        return false;
+    }
+
+    g_captured_visibility.address = entry;
+    g_captured_visibility.timestamp = game.timestamp();
+    g_captured_visibility.image_size = game.image_size();
+    std::memcpy(
+        g_captured_visibility.bytes.data(),
+        entry,
+        g_captured_visibility.bytes.size());
+    g_captured_visibility_ready.store(true, std::memory_order_release);
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Captured Color Picker visibility interface before third-party hook installation");
+    return true;
+}
+
+bool approve_captured_color_picker_visibility(
+    void* allowed_detour_module) noexcept {
+    g_captured_visibility_approved.store(false, std::memory_order_release);
+    g_captured_visibility_owner = nullptr;
+
+    ModuleView game{};
+    const CapturedVisibilityState state =
+        allowed_detour_module &&
+            game.initialize(GetModuleHandleW(nullptr))
+        ? validate_captured_visibility(
+              game, static_cast<HMODULE>(allowed_detour_module))
+        : CapturedVisibilityState::invalid;
+    erui::detail::logf(
+        state == CapturedVisibilityState::invalid
+            ? erui::LogLevel::error
+            : erui::LogLevel::info,
+        "Solid Uncapper Color Picker chaining: visibility=%s",
+        captured_visibility_state_name(state));
+    if (state == CapturedVisibilityState::invalid) return false;
+
+    g_captured_visibility_owner =
+        static_cast<HMODULE>(allowed_detour_module);
+    g_captured_visibility_approved.store(true, std::memory_order_release);
+    return true;
+}
+
 const char* color_picker_widget_path_override(
     const char* observed_path,
     const void* source_proxy) noexcept {
@@ -1073,8 +1245,11 @@ bool install_color_picker(const ModuleView& game) noexcept {
     }
     g_native = {};
 
-    if (game.timestamp() != kSupportedTimestamp ||
-        game.image_size() != kSupportedImageSize) {
+    const EldenRingBuild build = identify_elden_ring_build(
+        game.timestamp(), game.image_size());
+    const ColorPickerAddressProfile* const profile =
+        find_color_picker_address_profile(build);
+    if (!profile) {
         erui::detail::logf(
             erui::LogLevel::warning,
             "Color Picker unavailable: unsupported PE identity timestamp=0x%08X size=0x%zX",
@@ -1082,31 +1257,62 @@ bool install_color_picker(const ModuleView& game) noexcept {
         return false;
     }
 
-    auto* const build_job = game.at_rva(kBuildMenuWindowJobRva);
-    auto* const submit_consume = game.at_rva(kSubmitConsumeRva);
-    auto* const heap_provider = game.at_rva(kHeapProviderRva);
-    auto* const allocate = game.at_rva(kGameAllocateRva);
+    const std::string_view build_name = elden_ring_build_name(build);
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Color Picker native profile: Elden Ring %.*s timestamp=0x%08X size=0x%zX",
+        static_cast<int>(build_name.size()),
+        build_name.data(),
+        static_cast<unsigned>(game.timestamp()),
+        game.image_size());
+
+    auto* const build_job =
+        game.at_rva(profile->build_menu_window_job_rva);
+    auto* const submit_consume =
+        game.at_rva(profile->submit_consume_rva);
+    auto* const heap_provider =
+        game.at_rva(profile->heap_provider_rva);
+    auto* const allocate = game.at_rva(profile->game_allocate_rva);
     auto* const palette_constructor =
-        game.at_rva(kColorPaletteConstructorRva);
+        game.at_rva(profile->color_palette_constructor_rva);
     auto* const palette_destructor =
-        game.at_rva(kColorPaletteDestructorRva);
-    auto* const populate_palette = game.at_rva(kColorPalettePopulateRva);
-    auto* const bridge_scene_proxy = game.at_rva(kSceneProxyBridgeRva);
+        game.at_rva(profile->color_palette_destructor_rva);
+    auto* const populate_palette =
+        game.at_rva(profile->color_palette_populate_rva);
+    auto* const bridge_scene_proxy =
+        game.at_rva(profile->scene_proxy_bridge_rva);
     auto* const destroy_scene_obj_proxy =
-        game.at_rva(kSceneObjProxyDestructorRva);
+        game.at_rva(profile->scene_obj_proxy_destructor_rva);
     auto* const color_control_constructor =
-        game.at_rva(kColorControlConstructorRva);
+        game.at_rva(profile->color_control_constructor_rva);
     auto* const action_widget_producer =
-        game.at_rva(kGameOptionsActionWidgetProducerRva);
-    auto* const resolve_path = game.at_rva(kScaleformPathResolverRva);
+        game.at_rva(profile->game_options_action_widget_producer_rva);
+    auto* const resolve_path =
+        game.at_rva(profile->scaleform_path_resolver_rva);
     auto* const set_visible =
-        game.at_rva(kScaleformVisibilitySetterRva);
+        game.at_rva(profile->scaleform_visibility_setter_rva);
     auto* const value_exists =
-        game.at_rva(kScaleformValueExistsRva);
+        game.at_rva(profile->scaleform_value_exists_rva);
     auto* const set_color_transform =
-        game.at_rva(kScaleformColorTransformSetterRva);
+        game.at_rva(profile->scaleform_color_transform_setter_rva);
     const auto* const movie_name = reinterpret_cast<const wchar_t*>(
-        game.at_rva(kColorPickerMovieNameRva));
+        game.at_rva(profile->color_picker_movie_name_rva));
+
+    bool visibility_ready =
+        game.matches(set_visible, kScaleformVisibilitySetterPattern);
+    if (g_captured_visibility_approved.load(std::memory_order_acquire)) {
+        const CapturedVisibilityState visibility_state =
+            validate_captured_visibility(
+                game, g_captured_visibility_owner);
+        erui::detail::logf(
+            visibility_state == CapturedVisibilityState::invalid
+                ? erui::LogLevel::error
+                : erui::LogLevel::info,
+            "Solid Uncapper Color Picker chaining revalidated: visibility=%s",
+            captured_visibility_state_name(visibility_state));
+        visibility_ready =
+            visibility_state != CapturedVisibilityState::invalid;
+    }
 
     if (!build_job || !submit_consume || !heap_provider || !allocate ||
         !palette_constructor || !palette_destructor || !populate_palette ||
@@ -1130,7 +1336,7 @@ bool install_color_picker(const ModuleView& game) noexcept {
             action_widget_producer,
             kGameOptionsActionWidgetProducerPattern) ||
         !game.matches(resolve_path, kScaleformPathResolverPattern) ||
-        !game.matches(set_visible, kScaleformVisibilitySetterPattern) ||
+        !visibility_ready ||
         !game.matches(value_exists, kScaleformValueExistsPattern) ||
         !game.matches(
             set_color_transform,

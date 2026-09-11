@@ -159,12 +159,17 @@ int main() {
     ERUI_TEST_CHECK(compiled->next_page_label_id != 0);
     ERUI_TEST_CHECK(compiled->root_plan(6).pages.slices.size() == 2);
     ERUI_TEST_CHECK(compiled->root_plan(13).pages.slices.size() == 1);
-    for (std::uint8_t capacity = 6; capacity <= 13; ++capacity) {
+    for (std::uint8_t capacity =
+             erui::detail::game_options_min_plan_capacity;
+         capacity <= erui::detail::game_options_max_visual_capacity;
+         ++capacity) {
         const auto& plan = compiled->root_plan(capacity);
         ERUI_TEST_CHECK(plan.native_capacity == capacity);
         ERUI_TEST_CHECK(plan.custom_capacity == capacity - 4);
         ERUI_TEST_CHECK(
-            compiled->root_physical_title_ids[capacity - 6].size() ==
+            compiled->root_physical_title_ids[
+                capacity - erui::detail::game_options_min_plan_capacity]
+                .size() ==
             plan.pages.slices.size());
     }
     ERUI_TEST_CHECK(compiled->page_plans[1].slices.size() == 1);
@@ -175,7 +180,9 @@ int main() {
         child_presentation.outer_title_id)) == L"Demo");
     ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
         child_presentation.page_title_id)) == L"Advanced");
-    const auto& vanilla_titles = compiled->root_physical_title_ids[0];
+    const auto& vanilla_titles = compiled->root_physical_title_ids[
+        erui::detail::game_options_vanilla_capacity -
+        erui::detail::game_options_min_plan_capacity];
     ERUI_TEST_CHECK(vanilla_titles.size() == 2);
     ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
         vanilla_titles[0])) ==
