@@ -5,6 +5,7 @@
 #include "logger.hpp"
 #include "module.hpp"
 #include "native_dialog.hpp"
+#include "native_input_bindings.hpp"
 #include "color_picker.hpp"
 #include "runtime_log.hpp"
 #include "steam_language.hpp"
@@ -22,6 +23,7 @@
 #include <filesystem>
 #include <memory>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -118,9 +120,48 @@ const void* absolute_indirect_jump_target(const unsigned char* entry) noexcept {
     if (!entry || entry[0] != 0xFF || entry[1] != 0x25) return nullptr;
     std::int32_t displacement{};
     std::memcpy(&displacement, entry + 2, sizeof(displacement));
-    const auto* slot = entry + 6 + displacement;
+
+    const std::uintptr_t instruction_end =
+        reinterpret_cast<std::uintptr_t>(entry) + 6u;
+    std::uintptr_t slot_value{};
+    if (displacement >= 0) {
+        const auto distance = static_cast<std::uintptr_t>(displacement);
+        if (instruction_end >
+            (std::numeric_limits<std::uintptr_t>::max)() - distance) {
+            return nullptr;
+        }
+        slot_value = instruction_end + distance;
+    } else {
+        const auto distance = static_cast<std::uintptr_t>(
+            -static_cast<std::int64_t>(displacement));
+        if (instruction_end < distance) return nullptr;
+        slot_value = instruction_end - distance;
+    }
+    const auto* const slot = reinterpret_cast<const void*>(slot_value);
+
+    MEMORY_BASIC_INFORMATION memory{};
+    if (VirtualQuery(slot, &memory, sizeof(memory)) != sizeof(memory) ||
+        memory.State != MEM_COMMIT ||
+        (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+        return nullptr;
+    }
+    const auto region_end = reinterpret_cast<std::uintptr_t>(
+        memory.BaseAddress) + memory.RegionSize;
+    if (slot_value > region_end ||
+        sizeof(void*) > region_end - slot_value) {
+        return nullptr;
+    }
+
     const void* target{};
+#if defined(_MSC_VER)
+    __try {
+#endif
     std::memcpy(&target, slot, sizeof(target));
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+#endif
     return target;
 }
 
@@ -158,21 +199,62 @@ DWORD run_host() noexcept {
             log::write("WARN: host module could not be pinned; do not hot-unload it");
         }
 
-        const bool solid_uncapper_loaded =
-            GetModuleHandleW(L"Solid Uncapper.dll") != nullptr;
+        HMODULE const solid_uncapper_module =
+            GetModuleHandleW(L"Solid Uncapper.dll");
+        const bool solid_uncapper_loaded = solid_uncapper_module != nullptr;
         erui::native::GameAddresses early_addresses{};
+        std::array<std::array<unsigned char, 16>, 3>
+            early_shared_entry_bytes{};
         if (solid_uncapper_loaded) {
             log::write(
                 "Solid Uncapper detected; capturing native interfaces before its asynchronous hook installation");
             erui::native::ModuleView game{};
-            if (!game.initialize(GetModuleHandleW(nullptr)) ||
-                !erui::native::resolve_game_addresses(
+            if (!game.initialize(GetModuleHandleW(nullptr))) {
+                log::write(
+                    "ERROR: could not inspect the game image before Solid Uncapper initialization");
+                set_api_state(ApiState::failed);
+                return 1;
+            }
+            if (!erui::native::
+                    capture_color_picker_visibility_before_third_party_hooks(
+                        game)) {
+                log::write(
+                    "WARN: Color Picker visibility interface could not be captured early; menus without ColorPicker rows may remain available");
+            }
+            const bool captured_input_bindings =
+                erui::native::capture_native_input_bindings_before_third_party_hooks();
+            if (!captured_input_bindings) {
+                log::write(
+                    "WARN: native input-binding interfaces could not be captured early; menus without custom bindings may remain available");
+            }
+            if (!erui::native::resolve_game_addresses(
                     game, early_addresses,
                     true, true, true, true, true, false, true)) {
                 log::write(
                     "ERROR: could not capture native interfaces before Solid Uncapper initialization");
                 set_api_state(ApiState::failed);
                 return 1;
+            }
+            const std::array<const unsigned char*, 3> shared_entries{
+                reinterpret_cast<const unsigned char*>(
+                    early_addresses.game_options_handler),
+                reinterpret_cast<const unsigned char*>(
+                    early_addresses.sub_handler),
+                reinterpret_cast<const unsigned char*>(
+                    early_addresses.text_resolver)};
+            for (std::size_t index = 0;
+                 index < shared_entries.size(); ++index) {
+                if (absolute_indirect_jump_target(shared_entries[index])) {
+                    log::write(
+                        "ERROR: shared native interface %zu was detoured before its pristine entry could be captured",
+                        index);
+                    set_api_state(ApiState::failed);
+                    return 1;
+                }
+                std::memcpy(
+                    early_shared_entry_bytes[index].data(),
+                    shared_entries[index],
+                    early_shared_entry_bytes[index].size());
             }
             log::write(
                 "Solid Uncapper compatibility: native interfaces captured");
@@ -317,15 +399,11 @@ DWORD run_host() noexcept {
             // then validate their destinations before adding our chain links.
             constexpr DWORD kSolidUncapperTimeoutMs = 20000;
             constexpr DWORD kStableWindowMs = 500;
-            std::array<std::array<unsigned char, 16>, 3> pristine{};
             const std::array<const unsigned char*, 3> targets{
                 reinterpret_cast<const unsigned char*>(
                     early_addresses.game_options_handler),
                 reinterpret_cast<const unsigned char*>(early_addresses.sub_handler),
                 reinterpret_cast<const unsigned char*>(early_addresses.text_resolver)};
-            for (std::size_t index = 0; index < targets.size(); ++index) {
-                std::memcpy(pristine[index].data(), targets[index], pristine[index].size());
-            }
             log::write(
                 "Solid Uncapper compatibility: waiting up to %lu ms for shared menu hooks",
                 static_cast<unsigned long>(kSolidUncapperTimeoutMs));
@@ -336,8 +414,9 @@ DWORD run_host() noexcept {
                 bool all_changed = true;
                 for (std::size_t index = 0; index < targets.size(); ++index) {
                     if (std::memcmp(
-                            pristine[index].data(), targets[index],
-                            pristine[index].size()) == 0) {
+                            early_shared_entry_bytes[index].data(),
+                            targets[index],
+                            early_shared_entry_bytes[index].size()) == 0) {
                         all_changed = false;
                         break;
                     }
@@ -358,8 +437,9 @@ DWORD run_host() noexcept {
             std::size_t changed_count = 0;
             for (std::size_t index = 0; index < targets.size(); ++index) {
                 if (std::memcmp(
-                        pristine[index].data(), targets[index],
-                        pristine[index].size()) != 0) {
+                        early_shared_entry_bytes[index].data(),
+                        targets[index],
+                        early_shared_entry_bytes[index].size()) != 0) {
                     ++changed_count;
                 }
             }
@@ -379,7 +459,7 @@ DWORD run_host() noexcept {
             if (changed_count == targets.size()) {
                 erui::native::ModuleView solid_uncapper{};
                 if (!solid_uncapper.initialize(
-                        GetModuleHandleW(L"Solid Uncapper.dll"))) {
+                        solid_uncapper_module)) {
                     log::write(
                         "ERROR: could not inspect Solid Uncapper image for hook ownership");
                     set_api_state(ApiState::failed);
@@ -402,6 +482,23 @@ DWORD run_host() noexcept {
             } else {
                 log::write(
                     "Solid Uncapper compatibility: no shared hooks appeared; continuing without menu chaining");
+            }
+
+            if (!erui::native::approve_captured_native_input_bindings(
+                    solid_uncapper_module)) {
+                log::write(
+                    "WARN: Solid Uncapper input-binding chain was not approved; installation can continue only when no client registered custom bindings");
+            } else {
+                log::write(
+                    "Solid Uncapper compatibility: input-binding chain approved");
+            }
+            if (!erui::native::approve_captured_color_picker_visibility(
+                    solid_uncapper_module)) {
+                log::write(
+                    "WARN: Solid Uncapper Color Picker chain was not approved; installation can continue only when no client registered ColorPicker rows");
+            } else {
+                log::write(
+                    "Solid Uncapper compatibility: Color Picker chain approved");
             }
         }
 

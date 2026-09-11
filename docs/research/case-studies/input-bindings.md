@@ -51,6 +51,38 @@ against the current production source and its focused tests, linked under
 [Current source anchors](#current-source-anchors). A new reproduction should
 record the ERNativeUI commit and DLL hash in addition to the game identity.
 
+## Elden Ring 2.7.1.0 profile update
+
+Static comparison added an explicit profile for game version `2.7.1.0` (PE
+timestamp `0x6A96B418`, image size `0x5E0DA00`). Two executable boundaries
+moved by `0x70`:
+
+| Boundary | 2.7.0.0 | 2.7.1.0 |
+|---|---:|---:|
+| query-input-states forwarding thunk | `0x2667AD0` | `0x2667B40` |
+| input-manager update | `0x266A480` | `0x266A4F0` |
+
+The singleton slot, list/remapping helpers, editor-lifetime functions, and
+five required vtables retain their baseline RVAs. The query-thunk signature
+was refined because its old suffix included bytes from the neighboring
+function; the replacement has one match in each compared build and both
+selected entries still require exact local validation. See the
+[2.7.1.0 update record](../game-updates/elden-ring-2.7.1.0.md).
+
+The first live 2.7.1.0 candidate also exposed a third-party ordering issue,
+not a profile error. Solid Uncapper changes `write_binding_value` at
+`0x242960` and `clear_key_setting` at `0x8687D0` after ERNativeUI has loaded.
+Both entries match their production patterns in the pristine executable. The
+1.1.1 host patch therefore captures the complete backend before that
+asynchronous installation, then later accepts changes only at those two known
+entries and only when each is an `FF 25` detour to executable memory owned by
+`Solid Uncapper.dll`. Every other Input Bindings function must remain
+pristine. The deliberate chain is documented in the
+[2.7.1.0 update record](../game-updates/elden-ring-2.7.1.0.md). The resulting
+chain was live-validated on 2.7.1.0 with Solid Uncapper 2.3 loaded first and
+the pristine path was validated without it; the 2.7.0.0 profile was also
+regression-tested in both configurations.
+
 ## Static derivation
 
 ### 1. Find the dedicated binding dialog
@@ -502,14 +534,21 @@ continued to work.
 
 ### Failure and lifetime rules
 
-Production resolution first requires timestamp `0x69E9C9B9` and image size
-`0x5E09600`. Every function is then accepted only at its build-locked RVA when
-the expected local instruction pattern and executable-section check pass;
-data and vtable addresses must remain inside the image. Live objects are
-validated again before dereference or publication. The current byte patterns
-live beside the constants in
-[`native_input_bindings.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/native_input_bindings.cpp) and are
-the source of truth.
+Production resolution first requires one exact recognized PE timestamp/image-
+size pair and selects its complete build profile. Every function is normally
+accepted only at that profile's build-locked RVA when the expected local
+instruction pattern and executable-section check pass; data and vtable
+addresses must remain inside the image. The only third-party exception is the
+explicit Solid Uncapper chain: after an early pristine capture,
+`write_binding_value` and `clear_key_setting` may be recognized later as
+`FF 25` detours whose destinations are executable and owned by the detected
+`Solid Uncapper.dll`. No other changed Input Bindings entry is accepted. Live
+objects are validated again before dereference or publication. Complete build
+profiles live in
+[`game_build_profiles.hpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/game_build_profiles.hpp);
+their byte patterns, validation, and runtime consumption live in
+[`native_input_bindings.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/native_input_bindings.cpp).
+Together they are the source of truth.
 
 All mutation, editor-lifecycle, runtime-query, and list-builder hooks are
 created before publication. Destructor tracking is enabled before constructor

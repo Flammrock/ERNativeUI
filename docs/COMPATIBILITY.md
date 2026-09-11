@@ -21,11 +21,39 @@ called compatible or incompatible merely because its features look unrelated.
 - Keep the host loaded for the complete process lifetime. Hot-unloading the
   host or a committed client is unsupported.
 
-The reference native analysis covers Windows `eldenring.exe` product version
-`2.7.0.0`, SHA-256
-`D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134`,
-PE timestamp `0x69E9C9B9`, and image size `0x5E09600`. Release notes remain the
-authority for the exact game builds supported by a packaged host.
+The completed analysis and live regression matrix cover Windows
+`eldenring.exe` product versions `2.7.0.0` and `2.7.1.0`. Release notes remain
+the authority for the exact game builds supported by a packaged host.
+
+## Elden Ring executable support
+
+The ERUI API version and the Elden Ring executable version are independent.
+A game compatibility patch can therefore keep API 1.1 unchanged.
+
+| ERNativeUI host | Public APIs | Elden Ring 2.7.0.0 | Elden Ring 2.7.1.0 |
+|---|---|---|---|
+| `1.0.0` | API 1.0 | Supported | No declared support; use the current host |
+| `1.1.0` | APIs 1.0 and 1.1 | Supported | No declared support; use the current host |
+| `1.1.1` | APIs 1.0 and 1.1 | Live-validated | Live-validated |
+
+Existing client DLLs compiled for ERUI API 1.0 do not need to be rebuilt for
+the 1.1.1 host; players update the single host DLL.
+
+The two exact runtime identities are:
+
+| Game version | SHA-256 | PE timestamp | Image size |
+|---|---|---:|---:|
+| `2.7.0.0` | `D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134` | `0x69E9C9B9` | `0x5E09600` |
+| `2.7.1.0` | `1A3547101327F65D0C76DA2F9190AC0AA66871EA42BAE2AECC61E11A8B597891` | `0x6A96B418` | `0x5E0DA00` |
+
+The host identifies the loaded image from the PE timestamp **and** image size,
+selects one private address profile, then validates every build-locked entry,
+vtable, and data anchor before use. A timestamp-only or size-only match is not
+accepted. Unknown future builds continue to fail closed for features that
+depend on exact native layouts.
+
+The [2.7.1.0 update record](research/game-updates/elden-ring-2.7.1.0.md)
+documents what moved and how the new profile was derived.
 
 ## Several ERNativeUI client mods
 
@@ -47,8 +75,8 @@ supported substitute for multiple providers.
 
 ## Solid Uncapper
 
-ERNativeUI was live-tested with Solid Uncapper 2.3 on the Elden Ring 2.7.0.0
-reference executable. List Solid Uncapper first:
+ERNativeUI was live-tested with Solid Uncapper 2.3, the latest version at test
+time, on Elden Ring executables 2.7.0.0 and 2.7.1.0. List Solid Uncapper first:
 
 ```toml
 external_dlls = [
@@ -60,10 +88,9 @@ external_dlls = [
 
 Both DLLs complete initialization on workers, so list order alone cannot prove
 which detour is installed first. ERNativeUI captures the pristine native
-entries early, waits up to 20 seconds for Solid Uncapper's shared detours to
-appear and stabilize, verifies that each supported absolute-indirect detour
-targets executable code owned by `Solid Uncapper.dll`, then installs itself as
-the next cooperative layer:
+entries early, waits up to 20 seconds for Solid Uncapper's shared menu detours
+to appear and stabilize, verifies the accepted ownership and entry shapes,
+then installs itself as the next cooperative layer:
 
 ```text
 Elden Ring caller
@@ -72,18 +99,64 @@ Elden Ring caller
         `-- original Elden Ring function
 ```
 
-The three shared entries are the Game Options root materializer, provider
+The three shared menu entries are the Game Options root materializer, provider
 subpage materializer, and native UI text resolver. ERNativeUI rejects partial,
 foreign, changing, or unsupported detours rather than guessing. If Solid
 Uncapper has its menu disabled and installs none of the three, ERNativeUI uses
 the captured native entries normally.
 
-The exercised matrix covered both mods' root and child pages, values, repeated
-cross-navigation, ERNativeUI pagination and dialogs, persistence after restart,
-and ERNativeUI again without Solid Uncapper. API 1.1 later added independent
-input-binding and text-editor hooks; that complete newer feature set has not
-yet been separately certified in combination with Solid Uncapper 2.3. Report
-the distinction if a problem involves those features.
+The 2.7.1.0 candidate test exposed two additional overlaps in the API 1.1
+Input Bindings backend. Solid Uncapper detours `clear_key_setting` and
+`write_binding_value` after ERNativeUI has loaded. A late pristine-byte check
+therefore rejected an otherwise correct 2.7.1.0 profile and aborted the atomic
+ERNativeUI hook install; the visible result was Solid Uncapper's row without
+any ERNativeUI rows.
+
+The 1.1.1 host patch addresses that race deliberately. It captures the complete
+Input Bindings interface set before Solid Uncapper's asynchronous installer
+can change it. After Solid Uncapper has initialized, every input entry is
+checked again. All entries except the two known overlaps must remain pristine.
+Each known overlap may also be an `FF 25` absolute-indirect detour, but only
+when its resolved destination is executable memory owned by
+`Solid Uncapper.dll`. ERNativeUI then hooks or calls the captured entry so the
+validated Solid Uncapper layer remains in the chain. A foreign detour, a
+different entry shape, or any modification to another input interface still
+fails closed.
+
+The next candidate reached native Input Bindings preparation but exposed one
+more independent overlap while installing ColorPicker. Solid Uncapper also
+detours the Scaleform visibility setter at game RVA `0x734190`, which
+ERNativeUI calls when preflighting and presenting the standalone color swatch.
+This is not a 2.7.1.0 relocation: the same RVA and pristine entry pattern are
+present in both supported game profiles.
+
+ERNativeUI now captures that one pristine entry before Solid Uncapper's worker
+can modify it. After the existing stabilization wait, the entry must either
+remain byte-for-byte unchanged or be an `FF 25` absolute-indirect detour into
+executable memory owned by `Solid Uncapper.dll`. The accepted entry is checked
+again immediately before the ColorPicker backend is published. ERNativeUI
+continues to call the game entry, preserving the validated chain through Solid
+Uncapper to the original setter; it does not copy, bypass, or call the foreign
+detour target directly. Every other ColorPicker boundary retains its ordinary
+exact-profile validation.
+
+The compatibility regression succeeded on 2.7.0.0 and 2.7.1.0, both with
+Solid Uncapper 2.3 loaded first and without it. The recognized shared menu,
+Input Bindings, and ColorPicker chains remained operational when Solid
+Uncapper was present, while the same entries followed their pristine paths
+when it was absent.
+
+The same patch also accounts for Solid Uncapper's already-materialized
+Game Options row when selecting the root pagination plan. With the vanilla
+six-row movie, four game rows plus Solid Uncapper leave one slot: an
+overflowing ERNativeUI menu places only Next there. With the optional 13-row
+movie, the same five existing rows leave eight slots. This prevents a provider
+or navigation row from being appended beyond the movie's actual placements.
+Both the original six-row layout and optional 13-row layout were
+live-validated with and without Solid Uncapper.
+
+Report the exact game and Solid Uncapper versions when describing a
+compatibility result.
 
 ## Optional loose GFX and other asset mods
 

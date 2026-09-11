@@ -1573,7 +1573,7 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
     const bool enable_rows = runtime.options.enable_row_injection;
     const bool enable_text = runtime.options.enable_custom_text;
     const bool root_overflow = runtime.menu &&
-        runtime.menu->root_plan(runtime.options.game_options_visual_capacity)
+        runtime.menu->root_plan(erui::detail::game_options_min_plan_capacity)
             .pages.slices.size() > 1;
     bool has_builtin_rows = false;
     if (runtime.menu) {
@@ -1803,7 +1803,7 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         enable_rows ? 1 : 0,
         enable_submenus ? 1 : 0,
         runtime.menu && runtime.menu->pagination_required_for_capacity(
-            runtime.options.game_options_visual_capacity) ? 1 : 0,
+            erui::detail::game_options_min_plan_capacity) ? 1 : 0,
         enable_text ? 1 : 0,
         runtime.options.enable_diagnostics ? 1 : 0,
         static_cast<unsigned>(runtime.options.injection_cooldown_ms));

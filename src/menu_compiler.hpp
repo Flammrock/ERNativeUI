@@ -215,11 +215,11 @@ struct CompiledMenu {
     [[nodiscard]] const RootPagePlan& root_plan(
         std::uint8_t native_capacity) const noexcept {
         const std::uint8_t accepted =
-            native_capacity >= game_options_vanilla_capacity &&
+            native_capacity >= game_options_min_plan_capacity &&
                     native_capacity <= game_options_max_visual_capacity
                 ? native_capacity
                 : game_options_vanilla_capacity;
-        return root_plans[accepted - game_options_vanilla_capacity];
+        return root_plans[accepted - game_options_min_plan_capacity];
     }
 
     [[nodiscard]] bool page_reachable(std::size_t page_index) const noexcept {
@@ -321,12 +321,13 @@ struct CompiledMenu {
             };
         }
         const std::uint8_t capacity =
-            route.root_capacity >= game_options_vanilla_capacity &&
+            route.root_capacity >= game_options_min_plan_capacity &&
                     route.root_capacity <= game_options_max_visual_capacity
                 ? route.root_capacity
                 : game_options_vanilla_capacity;
         const std::vector<TextId>& titles =
-            root_physical_title_ids[capacity - game_options_vanilla_capacity];
+            root_physical_title_ids[
+                capacity - game_options_min_plan_capacity];
         if (route.slice_index >= titles.size()) return {};
         return {
             .outer_title_id = title_id,

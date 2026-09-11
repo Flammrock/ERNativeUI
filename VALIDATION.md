@@ -16,6 +16,9 @@ ctest --preset windows-release
 
 The suite covers:
 
+- exact Elden Ring PE identity matching, rejection of mixed timestamp/image-
+  size pairs, distinct 2.7.0.0/2.7.1.0 native profiles, and the known moved
+  core UI, ColorPicker, and Input Bindings RVAs;
 - C ABI layout, the frozen API 1.0 function-table prefix, and the additive
   API 1.1 TextInput, ColorPicker, BuiltinPage, InputBindings, and Storage
   blocks;
@@ -126,8 +129,8 @@ Set `[Logging] EnableLog = 1` for checks that inspect `ERNativeUI.log`; restore
 the shipped default `0` after testing.
 For the shipped showcase, verify:
 
-1. `ERNativeUI.log` reports the expected committed-provider count and
-   `ERNativeUI host ready`.
+1. `ERNativeUI.log` reports the expected `Selected exact native profile` game
+   version, committed-provider count, and `ERNativeUI host ready`.
 2. `Tarnished UI Showcase` rows appear in System -> Game Options.
 3. Its provider name, rows, choices, help, and dialog messages use the active
    Elden Ring language; the `Localized Greeting` example does the same.
@@ -159,7 +162,9 @@ For the shipped showcase, verify:
 11. Manual Back, reopening pages, mouse/controller input, and repeated menu
    visits do not duplicate rows or crash.
 12. Both vanilla six-row and optional patched 13-row Game Options GFX layouts
-   select the expected capacity in the log.
+    select the expected capacity in the log. Repeat with one compatible mod
+    row materialized first and verify the log subtracts that row from the free
+    slots rather than treating it as provider capacity.
 13. Exercise the showcase alert matrix: all seven button layouts in both bottom
    and center placement. Verify controller/mouse page movement, row activation,
    and the page's native Back path remain blocked while popup actions work.
@@ -172,6 +177,55 @@ For the shipped showcase, verify:
    button as a second client. Temporarily enqueue two alerts from one callback
    and verify FIFO dismissal without page input leaking through either dialog;
    do not ship that duplicate-request test in a real mod.
+
+### Elden Ring 2.7.1.0 and Solid Uncapper regression
+
+The 1.1.1 compatibility work was live-validated on both Elden Ring 2.7.0.0
+and 2.7.1.0, with Solid Uncapper 2.3 loaded first and without Solid Uncapper.
+Root pagination was also confirmed with the original six-row Game Options GFX
+and the optional 13-row GFX. Keep the checks below for future release
+regressions; static pattern matches alone do not prove the runtime hook chain.
+
+- [x] On 2.7.1.0 without Solid Uncapper, confirm the exact profile is selected,
+  the host reaches `ERNativeUI host ready`, and ERNativeUI rows and Input
+  Bindings appear.
+- [x] Load Solid Uncapper before ERNativeUI. Confirm Solid Uncapper's row and
+  all ERNativeUI provider rows appear in the same Game Options session.
+- [ ] Confirm the log classifies `clear_key_setting` and
+  `write_binding_value` independently as pristine or as accepted Solid
+  Uncapper-owned detours. A changed entry must use the supported `FF 25`
+  absolute-indirect form and resolve into executable memory owned by
+  `Solid Uncapper.dll`.
+- [ ] Confirm the log independently classifies the ColorPicker Scaleform
+  visibility setter at RVA `0x734190` as pristine or as an accepted Solid
+  Uncapper-owned detour, then revalidates that entry immediately before the
+  ColorPicker backend is published.
+- [ ] Confirm every other exact Input Bindings function remains pristine. Test
+  one deliberately foreign or malformed entry only in an isolated diagnostic
+  build and verify that installation fails closed rather than trusting it.
+- [ ] In Button Settings and Keyboard/Mouse Settings, remap and clear both
+  ERNativeUI and Solid Uncapper actions. Close and reopen each screen, restart
+  the game, and verify presentation and persistence for both mods.
+- [ ] Activate controller, keyboard, and mouse actions in gameplay and an
+  ordinary menu. Verify both mods' behavior remains reachable through the
+  deliberate chain and no action fires twice.
+- [ ] With Solid Uncapper loaded, open both the root and subpage ColorPicker,
+  accept different colors, and verify each bracketed swatch updates
+  immediately and independently. Reopen both editors after accept and cancel.
+- [x] Remove the optional `02_040_optionsetting.gfx`. On the vanilla six-row
+  Game Options page, confirm four Elden Ring rows plus Solid Uncapper leave one
+  free slot. When ERNativeUI content overflows, that slot must contain Next
+  only; no provider row may be appended beyond it. Open Next, then verify
+  Previous restores the root correctly.
+- [x] Restore the optional 13-row `02_040_optionsetting.gfx`. Confirm the same
+  five already-materialized rows leave eight free slots. For overflowing
+  content, the first slice must contain seven provider rows plus Next, with no
+  fourteenth row. Verify Next/Previous and reopen behavior again.
+- [x] Repeat the supported-build startup and pagination regression on Elden
+  Ring 2.7.0.0, both with Solid Uncapper 2.3 loaded first and without it.
+- [ ] Repeat navigation, TextInput, pagination, and one-/two-button dialog
+  checks with Solid Uncapper loaded, then repeat the startup without it to
+  exercise the pristine path for all three known overlap entries.
 
 ### TextInput live validation (API 1.1)
 

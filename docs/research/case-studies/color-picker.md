@@ -22,6 +22,25 @@ Native names below are analytical unless identified otherwise.
 All RVAs, vtables, field offsets, and scheduler values on this page are
 build-locked observations. The public API exposes none of them.
 
+## Elden Ring 2.7.1.0 profile update
+
+Static comparison added an explicit profile for game version `2.7.1.0` (PE
+timestamp `0x6A96B418`, image size `0x5E0DA00`). Three called boundaries moved:
+
+| Boundary | 2.7.0.0 | 2.7.1.0 |
+|---|---:|---:|
+| game allocation dispatch | `0x1EBBCD0` | `0x1EBBD40` |
+| temporary SceneObjProxy destructor | `0xD81590` | `0xD81600` |
+| Scaleform color-transform setter | `0xD85610` | `0xD85680` |
+
+All other feature-local RVAs, the movie-name data, and the inspected object
+identity anchors remain stable. Production still validates every selected
+entry and data anchor. The 2.7.1.0 Solid Uncapper candidate also exposed a
+runtime detour at the unchanged visibility-setter RVA; the narrowly supported
+chain is documented below. See the
+[2.7.1.0 update record](../game-updates/elden-ring-2.7.1.0.md) for comparison
+method and the completed compatibility regression.
+
 ## Questions and layers
 
 The visible color row is not one indivisible feature. The investigation asked:
@@ -172,6 +191,36 @@ with `WindowList/`. Advanced Settings uses the complete
 `GraphicOption/Item_N_0/Widgets/ColorPicker/Color` path. Other supported
 built-in panels have their own exact names in the production host map.
 
+### Solid Uncapper visibility-setter overlap
+
+ColorPicker does not detour the Scaleform visibility setter at `0x734190`; it
+calls that game entry to hide or show validated widget objects. On the first
+2.7.1.0 compatibility candidate that entry had already been replaced by Solid
+Uncapper's property-set detour, so the ordinary pristine-byte check correctly
+rejected ColorPicker and the host's atomic install removed the otherwise ready
+menu hooks.
+
+The compatibility path is intentionally narrower than generic hook chaining:
+
+1. after selecting an exact game profile, capture the pristine entry address
+   and its first 16 bytes before Solid Uncapper's worker installs hooks;
+2. after the shared Solid Uncapper stabilization wait, accept only the
+   unchanged pristine entry or an `FF 25` absolute-indirect jump into
+   executable memory owned by `Solid Uncapper.dll`;
+3. revalidate the approved shape and ownership immediately before publishing
+   the ColorPicker native call table; and
+4. retain the game entry address as `set_visible`, allowing the normal call to
+   traverse Solid Uncapper's detour and its vanilla trampoline.
+
+Static inspection confirmed that the observed Solid Uncapper detour preserves
+the setter arguments and invokes its stored original before post-processing.
+No copied prologue is executed and ERNativeUI never calls the detour
+destination directly. Every other ColorPicker address, pattern, data anchor,
+and modal dependency remains under the ordinary pristine validation policy.
+The 2.7.1.0 chain was subsequently live-validated with Solid Uncapper 2.3
+loaded first, and the pristine path was validated without it. The 2.7.0.0
+profile was regression-tested in both configurations as well.
+
 ## Bounded live sequence and results
 
 Reproduce only offline with Easy Anti-Cheat disabled and the executable hash
@@ -298,12 +347,19 @@ the process lifetime.
 
 ## Production and fail-closed decision
 
-The backend requires the exact PE timestamp and image size above, validates
-every fixed RVA with a long semantic pattern, validates the movie name, and
-preflights the palette, page, widget, and job relationships before use. If a
-registered ColorPicker requires a native backend that cannot be installed,
-host hook installation fails closed rather than silently omitting the rows or
-calling a plausible nearby function.
+The backend requires one exact recognized PE timestamp/image-size pair,
+selects its complete ColorPicker RVA profile, validates every selected entry
+with a long semantic pattern, validates the movie name, and preflights the
+palette, page, widget, and job relationships before use. If a registered
+ColorPicker requires a native backend that cannot be installed, host hook
+installation fails closed rather than silently omitting the rows or calling a
+plausible nearby function.
+
+The sole non-pristine exception is the early-captured Solid Uncapper
+visibility-setter chain described above. It is owner-, encoding-, snapshot-,
+and build-gated, then revalidated at publication. It does not authorize a
+foreign detour on the action producer, path resolver, color-transform setter,
+job poll, modal gates, or any other ColorPicker boundary.
 
 The path override is active only for the exact `Widgets/Button` lookup, exact
 source proxy, and thread-local color-row construction scope. The custom Button
@@ -344,8 +400,10 @@ modal, own the RGB value, or broaden the public API.
 - Terminal kinds 2 and 3 are confirmed only for this captured editor job.
 - Live presentation and focus have not been independently characterized on
   every API 1.1 built-in destination.
-- Hook coexistence with another mod detouring the action producer, Scaleform
-  resolver, job poll, or modal gates requires a separate compatibility test.
+- Apart from the narrowly recognized Solid Uncapper visibility-setter chain,
+  coexistence with a mod detouring the action producer, Scaleform resolver,
+  job poll, modal gates, or another ColorPicker boundary requires a separate
+  compatibility implementation and test.
 - Every game update requires the complete accept/cancel, mouse/controller,
   navigation, repeated-open, physical-row-reuse, and teardown matrix again.
 

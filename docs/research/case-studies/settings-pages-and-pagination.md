@@ -104,13 +104,17 @@ Rows 14 and 15 remained selectable but overflowed the panel artwork. That
 established 13 as the supported expanded presentation, not as a universal
 native object limit.
 
-For ordinary built-in pages, the post-vanilla row count is the bounded
+For ordinary built-in pages, the post-materializer row count is the bounded
 `uint64_t` at `page + 0x1AF0`. Production first checks the expected ordinary
 page identity and reasonable ranges, then computes:
 
 ```text
-remaining first-page slots = visual capacity - native row count
+remaining first-page slots = visual capacity - already-materialized row count
 ```
+
+"Already materialized" deliberately means the count after the complete
+cooperative call chain returns. It includes Elden Ring's own rows and any rows
+added by an earlier supported detour, not only the canonical vanilla count.
 
 Camera Options provided the important negative control: its stock seven rows
 already occupied all seven authored slots. The materializer hook was correct,
@@ -120,6 +124,43 @@ unchanged probe visible and interactive.
 **Confirmed:** the DLL can obtain capacity from live memory and does not need
 to locate or parse a GFX file. **Rejected:** absence of a row on a full panel
 proves that its hook or constructor is wrong.
+
+### Root planning when an earlier hook adds a row
+
+The Game Options planner originally selected an immutable root plan from the
+visual capacity alone. That was correct with Elden Ring's four canonical rows,
+but one row materialized earlier in the cooperative chain reduced the real
+free space by one. The resulting first slice could attempt one row beyond the
+last authored placement.
+
+The 2.7.1.0 Solid Uncapper regression exposed this distinction. The corrected
+implementation reads both fields after the chained original returns and converts
+them into the capacity expected by the precompiled root plans:
+
+```text
+free slots = live visual capacity - live materialized row count
+effective root-plan capacity = four canonical game rows + free slots
+```
+
+The canonical count remains part of the planner's coordinate system; it is
+not used as a substitute for the live materialized count. The implementation rejects
+an unreadable count, a count below the established four-row baseline, and a
+count that leaves no free slot rather than overflowing the native page.
+
+The important boundary cases are:
+
+| Movie | Rows present before ERNativeUI | Free slots | Overflowing first slice |
+|---|---:|---:|---|
+| Vanilla six-row Game Options | 4 Elden Ring rows | 2 | 1 provider row + Next |
+| Vanilla six-row Game Options + one earlier compatible row | 5 | 1 | Next only |
+| Patched 13-row Game Options | 4 Elden Ring rows | 9 | 8 provider rows + Next |
+| Patched 13-row Game Options + one earlier compatible row | 5 | 8 | 7 provider rows + Next |
+
+"Overflowing" means that more logical provider rows remain than can fit in
+the first slice; when all content fits, no Next row is reserved. The table's
+new cooperative cases were live-validated on 2.7.0.0 and 2.7.1.0, with and
+without Solid Uncapper 2.3, and with and without the optional
+`02_040_optionsetting.gfx`.
 
 ## Logical pagination
 

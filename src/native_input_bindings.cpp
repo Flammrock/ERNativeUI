@@ -1,6 +1,7 @@
 #include "native_input_bindings.hpp"
 
 #include "binding_runtime_state.hpp"
+#include "game_build_profiles.hpp"
 #include "input_binding_model.hpp"
 #include "menu_compiler.hpp"
 #include "module.hpp"
@@ -32,37 +33,9 @@
 namespace erui::native {
 namespace {
 
-// Every object offset and vtable in this backend is exact-build evidence. The
-// executable identity gate is therefore mandatory even when all entry
-// prologues still happen to match.
-constexpr std::uint32_t kSupportedTimestamp = 0x69E9C9B9;
-constexpr std::size_t kSupportedImageSize = 0x5E09600;
-
-constexpr std::uintptr_t kBuildKeySettingListRva = 0x869580;
-constexpr std::uintptr_t kConstructSpacerRva = 0x8696B0;
-constexpr std::uintptr_t kAppendKeySettingRva = 0x869FD0;
-constexpr std::uintptr_t kConstructKeySettingRva = 0x868000;
-constexpr std::uintptr_t kPollKeyCaptureRva = 0x868C60;
-constexpr std::uintptr_t kClearKeySettingRva = 0x8687D0;
-constexpr std::uintptr_t kRefreshKeyConflictRva = 0x868810;
-constexpr std::uintptr_t kWriteMenuConfigRva = 0x867C60;
-constexpr std::uintptr_t kWriteBindingValueRva = 0x242960;
-constexpr std::uintptr_t kInputTokenPhysicalIdRva = 0x240220;
-constexpr std::uintptr_t kInputTokenAnalogRva = 0x2403C0;
-constexpr std::uintptr_t kGetPlayerInputRva = 0x2413F0;
-constexpr std::uintptr_t kQueryInputStatesRva = 0x2667AD0;
-constexpr std::uintptr_t kInputManagerUpdateRva = 0x266A480;
-constexpr std::uintptr_t kInputManagerSlotRva = 0x4861D30;
-constexpr std::uintptr_t kSoftwareKeyboardJobConstructRva = 0x81CCB0;
-constexpr std::uintptr_t kSoftwareKeyboardJobDestroyRva = 0x81CE40;
-constexpr std::uintptr_t kTextInputDialogConstructRva = 0x9B9E00;
-constexpr std::uintptr_t kTextInputDialogDestroyRva = 0x9B9FC0;
-constexpr std::uintptr_t kKeyConfigDialogVtableRva = 0x2B0DCC0;
-constexpr std::uintptr_t kKeySettingListVtableRva = 0x2AD6E70;
-constexpr std::uintptr_t kKeyConfigVtableRva = 0x2AD68D0;
-constexpr std::uintptr_t kSoftwareKeyboardJobVtableRva = 0x2AC5AD0;
-constexpr std::uintptr_t kTextInputDialogVtableRva = 0x2B2B908;
-
+// Every object offset and vtable in this backend is exact-build evidence. A
+// recognized executable identity and its matching profile are therefore
+// mandatory even when all entry prologues still happen to match.
 constexpr std::string_view kBuildKeySettingListPattern =
     "44 0F BE 42 08 45 85 C0 74 ?? 41 83 F8 01 75 ?? "
     "E9 ?? ?? ?? ?? E9 ?? ?? ?? ?? C3";
@@ -106,8 +79,9 @@ constexpr std::string_view kGetPlayerInputPattern =
     "48 F7 D8 4E 8D 1C CD 00 00 00 00 83 E0 07 "
     "48 8D 1D 62 0B B2 03";
 constexpr std::string_view kQueryInputStatesPattern =
-    "48 8B 49 10 E9 ?? ?? ?? ?? 90 F3 0F 10 46 0C "
-    "F3 40 53 48 81 EC 80 00 00 00";
+    "48 8B 49 10 E9 ?? ?? ?? ?? 90 ?? ?? ?? ?? ?? ?? "
+    "40 53 48 81 EC 80 00 00 00 8B 84 24 B0 00 00 00 "
+    "48 8B 59 38";
 constexpr std::string_view kInputManagerUpdatePattern =
     "48 89 5C 24 20 55 56 57 41 56 41 57 48 83 EC 20 "
     "45 33 C9 4C 8B F2 4C 8B F9 41 8B E9 44 89 4C 24 50";
@@ -339,6 +313,16 @@ struct NativeInputBindingAddresses {
             text_input_dialog_vtable;
     }
 };
+
+constexpr std::size_t kNativeInputFunctionCount = 17;
+
+struct CapturedFunctionEntry {
+    const void* address{};
+    std::array<std::uint8_t, 16> bytes{};
+};
+
+using CapturedFunctionEntries =
+    std::array<CapturedFunctionEntry, kNativeInputFunctionCount>;
 
 struct VersionedActionInputs {
     ERUI_ActionInputs value{};
@@ -573,6 +557,11 @@ std::atomic<NativeTextEditorDestroyFn>
     g_original_text_input_dialog_destroy{};
 
 NativeInputBindingAddresses g_addresses{};
+NativeInputBindingAddresses g_captured_addresses{};
+CapturedFunctionEntries g_captured_function_entries{};
+HMODULE g_captured_allowed_owner{};
+std::atomic_bool g_captured_addresses_ready{};
+std::atomic_bool g_captured_addresses_approved{};
 std::vector<std::unique_ptr<NativeBindingSection>> g_sections{};
 std::vector<std::unique_ptr<NativeBinding>> g_bindings{};
 std::vector<HandleEntry> g_handles{};
@@ -637,14 +626,71 @@ Function resolve_function(
         : nullptr;
 }
 
+void log_failed_address_validation(
+    const ModuleView& game,
+    const char* name,
+    std::uintptr_t rva) noexcept {
+    std::array<std::uint8_t, 16> entry{};
+    const std::uint8_t* const address = game.at_rva(rva);
+    const bool in_image = address && game.contains(address, entry.size());
+    const bool executable = address && game.is_executable(address);
+    if (in_image) std::memcpy(entry.data(), address, entry.size());
+    erui::detail::logf(
+        erui::LogLevel::error,
+        "Input binding address %-24s failed validation at RVA 0x%llX (inImage=%d executable=%d entry=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X)",
+        name,
+        static_cast<unsigned long long>(rva),
+        in_image ? 1 : 0,
+        executable ? 1 : 0,
+        static_cast<unsigned>(entry[0]),
+        static_cast<unsigned>(entry[1]),
+        static_cast<unsigned>(entry[2]),
+        static_cast<unsigned>(entry[3]),
+        static_cast<unsigned>(entry[4]),
+        static_cast<unsigned>(entry[5]),
+        static_cast<unsigned>(entry[6]),
+        static_cast<unsigned>(entry[7]),
+        static_cast<unsigned>(entry[8]),
+        static_cast<unsigned>(entry[9]),
+        static_cast<unsigned>(entry[10]),
+        static_cast<unsigned>(entry[11]),
+        static_cast<unsigned>(entry[12]),
+        static_cast<unsigned>(entry[13]),
+        static_cast<unsigned>(entry[14]),
+        static_cast<unsigned>(entry[15]));
+}
+
+void log_failed_data_validation(
+    const ModuleView& game,
+    const char* name,
+    const void* address) noexcept {
+    erui::detail::logf(
+        erui::LogLevel::error,
+        "Input binding data %-27s failed validation (address=%p inImage=%d)",
+        name,
+        address,
+        address && game.contains(address, sizeof(void*)) ? 1 : 0);
+}
+
 bool resolve_native_addresses(
     NativeInputBindingAddresses& output,
     bool log_failure) noexcept {
     output = {};
     ModuleView game{};
-    if (!game.initialize(GetModuleHandleW(nullptr)) ||
-        game.timestamp() != kSupportedTimestamp ||
-        game.image_size() != kSupportedImageSize) {
+    if (!game.initialize(GetModuleHandleW(nullptr))) {
+        if (log_failure) {
+            erui::detail::logf(
+                erui::LogLevel::warning,
+                "Input bindings unavailable: game image initialization failed");
+        }
+        return false;
+    }
+
+    const EldenRingBuild build = identify_elden_ring_build(
+        game.timestamp(), game.image_size());
+    const InputBindingsAddressProfile* const profile =
+        find_input_bindings_address_profile(build);
+    if (!profile) {
         if (log_failure) {
             erui::detail::logf(
                 erui::LogLevel::warning,
@@ -655,68 +701,85 @@ bool resolve_native_addresses(
         return false;
     }
 
+    const std::string_view build_name = elden_ring_build_name(build);
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Input bindings native profile: Elden Ring %.*s timestamp=0x%08X size=0x%zX",
+        static_cast<int>(build_name.size()),
+        build_name.data(),
+        static_cast<unsigned>(game.timestamp()),
+        game.image_size());
+
     output.build_key_setting_list =
         resolve_function<BuildKeySettingListFn>(
-            game, kBuildKeySettingListRva, kBuildKeySettingListPattern);
+            game, profile->build_key_setting_list_rva,
+            kBuildKeySettingListPattern);
     output.construct_key_setting =
         resolve_function<ConstructKeySettingFn>(
-            game, kConstructKeySettingRva, kConstructKeySettingPattern);
+            game, profile->construct_key_setting_rva,
+            kConstructKeySettingPattern);
     output.construct_spacer = resolve_function<ConstructSpacerFn>(
-        game, kConstructSpacerRva, kConstructSpacerPattern);
+        game, profile->construct_spacer_rva, kConstructSpacerPattern);
     output.append_key_setting = resolve_function<AppendKeySettingFn>(
-        game, kAppendKeySettingRva, kAppendKeySettingPattern);
+        game, profile->append_key_setting_rva, kAppendKeySettingPattern);
     output.poll_key_capture = resolve_function<PollKeyCaptureFn>(
-        game, kPollKeyCaptureRva, kPollKeyCapturePattern);
+        game, profile->poll_key_capture_rva, kPollKeyCapturePattern);
     output.clear_key_setting = resolve_function<ClearKeySettingFn>(
-        game, kClearKeySettingRva, kClearKeySettingPattern);
+        game, profile->clear_key_setting_rva, kClearKeySettingPattern);
     output.refresh_key_conflict = resolve_function<RefreshKeyConflictFn>(
-        game, kRefreshKeyConflictRva, kRefreshKeyConflictPattern);
+        game, profile->refresh_key_conflict_rva,
+        kRefreshKeyConflictPattern);
     output.write_binding_value = resolve_function<WriteBindingValueFn>(
-        game, kWriteBindingValueRva, kWriteBindingValuePattern);
+        game, profile->write_binding_value_rva,
+        kWriteBindingValuePattern);
     output.input_token_physical_id =
         resolve_function<InputTokenPhysicalIdFn>(
-            game, kInputTokenPhysicalIdRva, kInputTokenPhysicalIdPattern);
+            game, profile->input_token_physical_id_rva,
+            kInputTokenPhysicalIdPattern);
     output.input_token_analog = resolve_function<InputTokenAnalogFn>(
-        game, kInputTokenAnalogRva, kInputTokenAnalogPattern);
+        game, profile->input_token_analog_rva,
+        kInputTokenAnalogPattern);
     output.get_player_input = resolve_function<GetPlayerInputFn>(
-        game, kGetPlayerInputRva, kGetPlayerInputPattern);
+        game, profile->get_player_input_rva, kGetPlayerInputPattern);
     output.query_input_states = resolve_function<QueryInputStatesFn>(
-        game, kQueryInputStatesRva, kQueryInputStatesPattern);
+        game, profile->query_input_states_rva, kQueryInputStatesPattern);
     output.input_manager_update = resolve_function<InputManagerUpdateFn>(
-        game, kInputManagerUpdateRva, kInputManagerUpdatePattern);
+        game, profile->input_manager_update_rva, kInputManagerUpdatePattern);
     output.software_keyboard_construct =
         resolve_function<SoftwareKeyboardJobConstructFn>(
             game,
-            kSoftwareKeyboardJobConstructRva,
+            profile->software_keyboard_job_construct_rva,
             kSoftwareKeyboardJobConstructPattern);
     output.software_keyboard_destroy =
         resolve_function<NativeTextEditorDestroyFn>(
             game,
-            kSoftwareKeyboardJobDestroyRva,
+            profile->software_keyboard_job_destroy_rva,
             kSoftwareKeyboardJobDestroyPattern);
     output.text_input_dialog_construct =
         resolve_function<TextInputDialogConstructFn>(
             game,
-            kTextInputDialogConstructRva,
+            profile->text_input_dialog_construct_rva,
             kTextInputDialogConstructPattern);
     output.text_input_dialog_destroy =
         resolve_function<NativeTextEditorDestroyFn>(
             game,
-            kTextInputDialogDestroyRva,
+            profile->text_input_dialog_destroy_rva,
             kTextInputDialogDestroyPattern);
 
-    auto* const bounded_config_writer = game.at_rva(kWriteMenuConfigRva);
+    auto* const bounded_config_writer =
+        game.at_rva(profile->write_menu_config_rva);
     output.input_manager_slot = reinterpret_cast<void**>(
-        game.at_rva(kInputManagerSlotRva));
+        game.at_rva(profile->input_manager_slot_rva));
     output.key_config_dialog_vtable =
-        game.at_rva(kKeyConfigDialogVtableRva);
+        game.at_rva(profile->key_config_dialog_vtable_rva);
     output.key_setting_list_vtable =
-        game.at_rva(kKeySettingListVtableRva);
-    output.key_config_vtable = game.at_rva(kKeyConfigVtableRva);
+        game.at_rva(profile->key_setting_list_vtable_rva);
+    output.key_config_vtable =
+        game.at_rva(profile->key_config_vtable_rva);
     output.software_keyboard_vtable =
-        game.at_rva(kSoftwareKeyboardJobVtableRva);
+        game.at_rva(profile->software_keyboard_job_vtable_rva);
     output.text_input_dialog_vtable =
-        game.at_rva(kTextInputDialogVtableRva);
+        game.at_rva(profile->text_input_dialog_vtable_rva);
 
     const bool data_ready =
         bounded_config_writer &&
@@ -730,6 +793,117 @@ bool resolve_native_addresses(
         game.contains(output.text_input_dialog_vtable, sizeof(void*));
     if (!output.complete() || !data_ready) {
         if (log_failure) {
+            const auto report_function = [&game](
+                const void* function,
+                const char* name,
+                std::uintptr_t rva) noexcept {
+                if (!function) log_failed_address_validation(game, name, rva);
+            };
+            report_function(
+                reinterpret_cast<const void*>(output.build_key_setting_list),
+                "build key-setting list",
+                profile->build_key_setting_list_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.construct_spacer),
+                "construct spacer",
+                profile->construct_spacer_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.append_key_setting),
+                "append key setting",
+                profile->append_key_setting_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.construct_key_setting),
+                "construct key setting",
+                profile->construct_key_setting_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.poll_key_capture),
+                "poll key capture",
+                profile->poll_key_capture_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.clear_key_setting),
+                "clear key setting",
+                profile->clear_key_setting_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.refresh_key_conflict),
+                "refresh key conflict",
+                profile->refresh_key_conflict_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.write_binding_value),
+                "write binding value",
+                profile->write_binding_value_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.input_token_physical_id),
+                "input token physical ID",
+                profile->input_token_physical_id_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.input_token_analog),
+                "input token analog",
+                profile->input_token_analog_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.get_player_input),
+                "get player input",
+                profile->get_player_input_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.query_input_states),
+                "query input states",
+                profile->query_input_states_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.input_manager_update),
+                "input manager update",
+                profile->input_manager_update_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.software_keyboard_construct),
+                "software keyboard construct",
+                profile->software_keyboard_job_construct_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.software_keyboard_destroy),
+                "software keyboard destroy",
+                profile->software_keyboard_job_destroy_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.text_input_dialog_construct),
+                "text input dialog construct",
+                profile->text_input_dialog_construct_rva);
+            report_function(
+                reinterpret_cast<const void*>(output.text_input_dialog_destroy),
+                "text input dialog destroy",
+                profile->text_input_dialog_destroy_rva);
+            if (!bounded_config_writer ||
+                !game.is_executable(bounded_config_writer) ||
+                !game.matches(
+                    bounded_config_writer, kWriteMenuConfigPattern)) {
+                log_failed_address_validation(
+                    game,
+                    "bounded menu-config writer",
+                    profile->write_menu_config_rva);
+            }
+            if (!game.contains(output.input_manager_slot, sizeof(void*))) {
+                log_failed_data_validation(
+                    game, "input-manager slot", output.input_manager_slot);
+            }
+            if (!game.contains(output.key_config_dialog_vtable, sizeof(void*))) {
+                log_failed_data_validation(
+                    game, "KeyConfig dialog vtable",
+                    output.key_config_dialog_vtable);
+            }
+            if (!game.contains(output.key_setting_list_vtable, sizeof(void*))) {
+                log_failed_data_validation(
+                    game, "key-setting list vtable",
+                    output.key_setting_list_vtable);
+            }
+            if (!game.contains(output.key_config_vtable, sizeof(void*))) {
+                log_failed_data_validation(
+                    game, "KeyConfig vtable", output.key_config_vtable);
+            }
+            if (!game.contains(output.software_keyboard_vtable, sizeof(void*))) {
+                log_failed_data_validation(
+                    game, "software-keyboard vtable",
+                    output.software_keyboard_vtable);
+            }
+            if (!game.contains(output.text_input_dialog_vtable, sizeof(void*))) {
+                log_failed_data_validation(
+                    game, "text-input dialog vtable",
+                    output.text_input_dialog_vtable);
+            }
             erui::detail::logf(
                 erui::LogLevel::error,
                 "Input bindings unavailable: one or more exact native interfaces failed validation");
@@ -738,6 +912,279 @@ bool resolve_native_addresses(
         return false;
     }
     return true;
+}
+
+enum class CapturedEntryState : std::uint8_t {
+    pristine,
+    allowed_detour,
+    invalid,
+};
+
+std::array<const void*, kNativeInputFunctionCount> native_function_entries(
+    const NativeInputBindingAddresses& addresses) noexcept {
+    return {
+        reinterpret_cast<const void*>(addresses.build_key_setting_list),
+        reinterpret_cast<const void*>(addresses.construct_key_setting),
+        reinterpret_cast<const void*>(addresses.construct_spacer),
+        reinterpret_cast<const void*>(addresses.append_key_setting),
+        reinterpret_cast<const void*>(addresses.poll_key_capture),
+        reinterpret_cast<const void*>(addresses.clear_key_setting),
+        reinterpret_cast<const void*>(addresses.refresh_key_conflict),
+        reinterpret_cast<const void*>(addresses.write_binding_value),
+        reinterpret_cast<const void*>(addresses.input_token_physical_id),
+        reinterpret_cast<const void*>(addresses.input_token_analog),
+        reinterpret_cast<const void*>(addresses.get_player_input),
+        reinterpret_cast<const void*>(addresses.query_input_states),
+        reinterpret_cast<const void*>(addresses.input_manager_update),
+        reinterpret_cast<const void*>(addresses.software_keyboard_construct),
+        reinterpret_cast<const void*>(addresses.software_keyboard_destroy),
+        reinterpret_cast<const void*>(addresses.text_input_dialog_construct),
+        reinterpret_cast<const void*>(addresses.text_input_dialog_destroy),
+    };
+}
+
+const void* absolute_indirect_jump_target(
+    const ModuleView& game,
+    const std::uint8_t* entry) noexcept {
+    if (!entry || !game.contains(entry, 6) ||
+        entry[0] != 0xFF || entry[1] != 0x25) {
+        return nullptr;
+    }
+
+    std::int32_t displacement{};
+    std::memcpy(&displacement, entry + 2, sizeof(displacement));
+    const std::uintptr_t instruction_end =
+        reinterpret_cast<std::uintptr_t>(entry) + 6u;
+    std::uintptr_t slot_value{};
+    if (displacement >= 0) {
+        const auto distance = static_cast<std::uintptr_t>(displacement);
+        if (instruction_end >
+            (std::numeric_limits<std::uintptr_t>::max)() - distance) {
+            return nullptr;
+        }
+        slot_value = instruction_end + distance;
+    } else {
+        const auto distance = static_cast<std::uintptr_t>(
+            -static_cast<std::int64_t>(displacement));
+        if (instruction_end < distance) return nullptr;
+        slot_value = instruction_end - distance;
+    }
+    const auto* const slot = reinterpret_cast<const std::uint8_t*>(
+        slot_value);
+    if (!game.contains(slot, sizeof(void*))) return nullptr;
+
+    MEMORY_BASIC_INFORMATION memory{};
+    if (VirtualQuery(slot, &memory, sizeof(memory)) != sizeof(memory) ||
+        memory.State != MEM_COMMIT ||
+        (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
+        return nullptr;
+    }
+    const auto region_end = reinterpret_cast<std::uintptr_t>(
+        memory.BaseAddress) + memory.RegionSize;
+    if (slot_value > region_end ||
+        sizeof(void*) > region_end - slot_value) {
+        return nullptr;
+    }
+
+    const void* target{};
+#if defined(_MSC_VER)
+    __try {
+#endif
+    std::memcpy(&target, slot, sizeof(target));
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+#endif
+    return target;
+}
+
+CapturedEntryState classify_captured_entry(
+    const ModuleView& game,
+    const ModuleView& allowed_owner,
+    const void* captured,
+    const CapturedFunctionEntry& snapshot,
+    std::uintptr_t expected_rva,
+    std::string_view pristine_pattern,
+    bool allow_owned_detour) noexcept {
+    const auto* const expected = game.at_rva(expected_rva);
+    if (!captured || captured != expected || captured != snapshot.address ||
+        !game.contains(expected, snapshot.bytes.size()) ||
+        !game.is_executable(expected)) {
+        return CapturedEntryState::invalid;
+    }
+    if (std::memcmp(
+            expected, snapshot.bytes.data(), snapshot.bytes.size()) == 0 &&
+        game.matches(expected, pristine_pattern)) {
+        return CapturedEntryState::pristine;
+    }
+    if (!allow_owned_detour) return CapturedEntryState::invalid;
+
+    const void* const destination = absolute_indirect_jump_target(
+        game, expected);
+    return destination && allowed_owner.contains(destination) &&
+            allowed_owner.is_executable(destination)
+        ? CapturedEntryState::allowed_detour
+        : CapturedEntryState::invalid;
+}
+
+const char* captured_entry_state_name(CapturedEntryState state) noexcept {
+    switch (state) {
+    case CapturedEntryState::pristine:
+        return "pristine";
+    case CapturedEntryState::allowed_detour:
+        return "owned-detour";
+    case CapturedEntryState::invalid:
+        return "invalid";
+    }
+    return "invalid";
+}
+
+bool validate_captured_native_addresses(
+    const NativeInputBindingAddresses& captured,
+    HMODULE allowed_detour_module) noexcept {
+    ModuleView game{};
+    ModuleView allowed_owner{};
+    if (!captured.complete() ||
+        !game.initialize(GetModuleHandleW(nullptr)) ||
+        !allowed_owner.initialize(allowed_detour_module)) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Solid Uncapper input chaining: captured addresses or module images are unavailable");
+        return false;
+    }
+
+    const EldenRingBuild build = identify_elden_ring_build(
+        game.timestamp(), game.image_size());
+    const InputBindingsAddressProfile* const profile =
+        find_input_bindings_address_profile(build);
+    if (!profile) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Solid Uncapper input chaining: current game build has no exact input profile");
+        return false;
+    }
+
+    const auto entries = native_function_entries(captured);
+    const std::array<std::uintptr_t, kNativeInputFunctionCount> rvas{
+        profile->build_key_setting_list_rva,
+        profile->construct_key_setting_rva,
+        profile->construct_spacer_rva,
+        profile->append_key_setting_rva,
+        profile->poll_key_capture_rva,
+        profile->clear_key_setting_rva,
+        profile->refresh_key_conflict_rva,
+        profile->write_binding_value_rva,
+        profile->input_token_physical_id_rva,
+        profile->input_token_analog_rva,
+        profile->get_player_input_rva,
+        profile->query_input_states_rva,
+        profile->input_manager_update_rva,
+        profile->software_keyboard_job_construct_rva,
+        profile->software_keyboard_job_destroy_rva,
+        profile->text_input_dialog_construct_rva,
+        profile->text_input_dialog_destroy_rva,
+    };
+    const std::array<std::string_view, kNativeInputFunctionCount> patterns{
+        kBuildKeySettingListPattern,
+        kConstructKeySettingPattern,
+        kConstructSpacerPattern,
+        kAppendKeySettingPattern,
+        kPollKeyCapturePattern,
+        kClearKeySettingPattern,
+        kRefreshKeyConflictPattern,
+        kWriteBindingValuePattern,
+        kInputTokenPhysicalIdPattern,
+        kInputTokenAnalogPattern,
+        kGetPlayerInputPattern,
+        kQueryInputStatesPattern,
+        kInputManagerUpdatePattern,
+        kSoftwareKeyboardJobConstructPattern,
+        kSoftwareKeyboardJobDestroyPattern,
+        kTextInputDialogConstructPattern,
+        kTextInputDialogDestroyPattern,
+    };
+    const std::array<const char*, kNativeInputFunctionCount> names{
+        "build key-setting list",
+        "construct key setting",
+        "construct spacer",
+        "append key setting",
+        "poll key capture",
+        "clear key setting",
+        "refresh key conflict",
+        "write binding value",
+        "input token physical ID",
+        "input token analog",
+        "get player input",
+        "query input states",
+        "input manager update",
+        "software keyboard construct",
+        "software keyboard destroy",
+        "text input dialog construct",
+        "text input dialog destroy",
+    };
+    constexpr std::size_t kClearEntry = 5;
+    constexpr std::size_t kWriteEntry = 7;
+    std::array<CapturedEntryState, kNativeInputFunctionCount> states{};
+    bool functions_ready = true;
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        const bool allowed_overlap =
+            index == kClearEntry || index == kWriteEntry;
+        states[index] = classify_captured_entry(
+            game,
+            allowed_owner,
+            entries[index],
+            g_captured_function_entries[index],
+            rvas[index],
+            patterns[index],
+            allowed_overlap);
+        if (states[index] == CapturedEntryState::invalid) {
+            functions_ready = false;
+            erui::detail::logf(
+                erui::LogLevel::error,
+                "Solid Uncapper input chaining: %s entry changed unexpectedly at RVA 0x%llX",
+                names[index],
+                static_cast<unsigned long long>(rvas[index]));
+        }
+    }
+    const CapturedEntryState clear_state = states[kClearEntry];
+    const CapturedEntryState write_state = states[kWriteEntry];
+
+    const auto* const bounded_config_writer =
+        game.at_rva(profile->write_menu_config_rva);
+    const bool data_ready =
+        bounded_config_writer &&
+        game.is_executable(bounded_config_writer) &&
+        game.matches(bounded_config_writer, kWriteMenuConfigPattern) &&
+        captured.input_manager_slot == reinterpret_cast<void**>(
+            game.at_rva(profile->input_manager_slot_rva)) &&
+        captured.key_config_dialog_vtable ==
+            game.at_rva(profile->key_config_dialog_vtable_rva) &&
+        captured.key_setting_list_vtable ==
+            game.at_rva(profile->key_setting_list_vtable_rva) &&
+        captured.key_config_vtable ==
+            game.at_rva(profile->key_config_vtable_rva) &&
+        captured.software_keyboard_vtable ==
+            game.at_rva(profile->software_keyboard_job_vtable_rva) &&
+        captured.text_input_dialog_vtable ==
+            game.at_rva(profile->text_input_dialog_vtable_rva) &&
+        game.contains(captured.input_manager_slot, sizeof(void*)) &&
+        game.contains(captured.key_config_dialog_vtable, sizeof(void*)) &&
+        game.contains(captured.key_setting_list_vtable, sizeof(void*)) &&
+        game.contains(captured.key_config_vtable, sizeof(void*)) &&
+        game.contains(captured.software_keyboard_vtable, sizeof(void*)) &&
+        game.contains(captured.text_input_dialog_vtable, sizeof(void*));
+
+    erui::detail::logf(
+        functions_ready && data_ready
+            ? erui::LogLevel::info
+            : erui::LogLevel::error,
+        "Solid Uncapper input chaining: clear=%s write=%s allFunctions=%s data=%s",
+        captured_entry_state_name(clear_state),
+        captured_entry_state_name(write_state),
+        functions_ready ? "valid" : "invalid",
+        data_ready ? "valid" : "invalid");
+    return functions_ready && data_ready;
 }
 
 std::string binding_identity(
@@ -2100,6 +2547,15 @@ bool enable_hook(
 }
 
 bool create_hooks() noexcept {
+    if (g_captured_addresses_approved.load(std::memory_order_acquire) &&
+        !validate_captured_native_addresses(
+            g_captured_addresses, g_captured_allowed_owner)) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Solid Uncapper input-binding entries changed after chain approval");
+        return false;
+    }
+
     auto capture = SafetyHookInline::create(
         reinterpret_cast<void*>(g_addresses.poll_key_capture),
         reinterpret_cast<void*>(&poll_key_capture_detour),
@@ -2260,6 +2716,52 @@ ERUI_Result validate_live_action(
 
 } // namespace
 
+bool capture_native_input_bindings_before_third_party_hooks() noexcept {
+    g_captured_addresses_approved.store(false, std::memory_order_release);
+    g_captured_addresses_ready.store(false, std::memory_order_release);
+    g_captured_addresses = {};
+    g_captured_function_entries = {};
+    g_captured_allowed_owner = nullptr;
+
+    NativeInputBindingAddresses captured{};
+    if (!resolve_native_addresses(captured, true)) return false;
+    const auto entries = native_function_entries(captured);
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        if (!entries[index]) return false;
+        g_captured_function_entries[index].address = entries[index];
+        std::memcpy(
+            g_captured_function_entries[index].bytes.data(),
+            entries[index],
+            g_captured_function_entries[index].bytes.size());
+    }
+    g_captured_addresses = captured;
+    g_captured_addresses_ready.store(true, std::memory_order_release);
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Captured native input-binding interfaces before third-party hook installation");
+    return true;
+}
+
+bool approve_captured_native_input_bindings(
+    void* allowed_detour_module) noexcept {
+    g_captured_addresses_approved.store(false, std::memory_order_release);
+    if (!allowed_detour_module ||
+        !g_captured_addresses_ready.load(std::memory_order_acquire)) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Solid Uncapper input chaining: no early capture is available");
+        return false;
+    }
+    if (!validate_captured_native_addresses(
+            g_captured_addresses,
+            static_cast<HMODULE>(allowed_detour_module))) {
+        return false;
+    }
+    g_captured_allowed_owner = static_cast<HMODULE>(allowed_detour_module);
+    g_captured_addresses_approved.store(true, std::memory_order_release);
+    return true;
+}
+
 bool prepare_native_input_bindings(
     const erui::detail::CompiledMenu& menu) noexcept {
     if (g_rows_published.load(std::memory_order_acquire) ||
@@ -2294,7 +2796,23 @@ bool prepare_native_input_bindings(
             kMaximumBindingActions);
         return false;
     }
-    if (!resolve_native_addresses(g_addresses, true)) return false;
+    if (g_captured_addresses_approved.load(std::memory_order_acquire)) {
+        if (!validate_captured_native_addresses(
+                g_captured_addresses, g_captured_allowed_owner)) {
+            g_captured_addresses_approved.store(
+                false, std::memory_order_release);
+            erui::detail::logf(
+                erui::LogLevel::error,
+                "Solid Uncapper input-binding entries changed before preparation");
+            return false;
+        }
+        g_addresses = g_captured_addresses;
+        erui::detail::logf(
+            erui::LogLevel::info,
+            "Using verified input-binding interfaces captured before Solid Uncapper hooks");
+    } else if (!resolve_native_addresses(g_addresses, true)) {
+        return false;
+    }
 
     try {
         g_sections.reserve(section_count);

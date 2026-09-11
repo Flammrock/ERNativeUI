@@ -91,6 +91,38 @@ int main() {
     }
 
     {
+        const RootPagePlan plan = paginate_root_page(0, 5, 5);
+        ERUI_TEST_CHECK(plan.custom_capacity == 1);
+        ERUI_TEST_CHECK(plan.pages.slices.size() == 2);
+        assert_slice(plan.pages.slices[0], 0, 0, false, true, 0, 2);
+        assert_slice(plan.pages.slices[1], 0, 5, true, false, 1, 2);
+        assert_plan_is_contiguous(plan.pages, 5, 15);
+    }
+
+    // Live root capacity accounts for rows installed before ERNativeUI.
+    ERUI_TEST_CHECK(derive_root_plan_capacity(13, 4) == 13);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(13, 5) == 12);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(13, 12) == 5);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(13, 13) == 0);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(13, 14) == 0);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(6, 4) == 6);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(6, 5) == 5);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(6, 6) == 0);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(6, 3) == 0);
+    ERUI_TEST_CHECK(derive_root_plan_capacity(5, 4) == 0);
+
+    {
+        // Patched 13-row GFX with five earlier rows leaves eight physical
+        // slots: seven client rows plus Next, never a fourteenth row.
+        const RootPagePlan plan = paginate_root_page(0, 12, 12);
+        ERUI_TEST_CHECK(plan.custom_capacity == 8);
+        ERUI_TEST_CHECK(plan.pages.slices.size() == 2);
+        assert_slice(plan.pages.slices[0], 0, 7, false, true, 0, 2);
+        assert_slice(plan.pages.slices[1], 7, 5, true, false, 1, 2);
+        assert_plan_is_contiguous(plan.pages, 12, 15);
+    }
+
+    {
         const RootPagePlan plan = paginate_root_page(0, 34, 7);
         ERUI_TEST_CHECK(plan.pages.slices.size() == 4);
         assert_slice(plan.pages.slices[0], 0, 2, false, true, 0, 4);

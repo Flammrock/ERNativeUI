@@ -16,8 +16,14 @@ inline constexpr std::uint8_t builtin_page_max_first_capacity = 32;
 inline constexpr std::size_t game_options_vanilla_row_count = 4;
 inline constexpr std::uint8_t game_options_vanilla_capacity = 6;
 inline constexpr std::uint8_t game_options_max_visual_capacity = 13;
+// Root plans are selected from the number of slots that remain after every
+// native/third-party row has materialized. Four is the canonical Elden Ring
+// row count, so an effective capacity of five represents the smallest useful
+// case: one free slot on the live page.
+inline constexpr std::uint8_t game_options_min_plan_capacity =
+    static_cast<std::uint8_t>(game_options_vanilla_row_count + 1);
 inline constexpr std::size_t game_options_capacity_count =
-    game_options_max_visual_capacity - game_options_vanilla_capacity + 1;
+    game_options_max_visual_capacity - game_options_min_plan_capacity + 1;
 
 enum class PageRouteKind : std::uint8_t {
     submenu,
@@ -128,6 +134,8 @@ struct PagePlan {
 };
 
 struct RootPagePlan {
+    // Effective planning capacity: canonical Elden Ring rows plus the slots
+    // that were actually free when the live root page was materialized.
     std::uint8_t native_capacity{game_options_vanilla_capacity};
     std::size_t vanilla_row_count{game_options_vanilla_row_count};
     std::size_t custom_capacity{};
@@ -149,6 +157,13 @@ struct RootPagePlan {
     std::uint8_t native_capacity,
     std::size_t vanilla_row_count = game_options_vanilla_row_count,
     std::size_t continuation_capacity = native_subpage_capacity);
+
+// Converts the live Game Options visual capacity and already-materialized row
+// count into the effective capacity used to select an immutable root plan.
+// Zero means that the observation is invalid or leaves no slot for ERNativeUI.
+[[nodiscard]] std::uint8_t derive_root_plan_capacity(
+    std::uint8_t visual_capacity,
+    std::uint64_t materialized_row_count) noexcept;
 
 // Resolves one slice of a page whose first physical page has a live runtime
 // capacity. This allocation-free form is used by Elden Ring's built-in pages,

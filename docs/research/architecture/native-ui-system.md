@@ -102,8 +102,9 @@ and deterministic removal.
 - **Confirmed:** The current host detours the Game Options materializer and
   independent Camera, Display, Sound, Network, Keyboard/Mouse, and Graphics
   materializers. It calls vanilla exactly once, validates the live page,
-  observes its row count and visual capacity, and then adds only provider rows
-  that fit or a Next row.
+  observes its post-chain materialized row count and visual capacity, and then
+  adds only provider rows that fit or a Next row. The count includes rows from
+  an earlier validated cooperative detour as well as Elden Ring's own rows.
 - **Confirmed:** Toggle, slider, inline choice, popup choice, action, TextInput,
   and ColorPicker features enter through recovered native row/controller
   paths. The host owns stable values, text, and callback adapters for as long
@@ -137,8 +138,10 @@ Bindings model instead.
   required action.
 
 The live visual capacity comes from the constructed native page rather than
-from a loose GFX parse. A full panel can have no room even for Next; that
-destination then fails locally instead of overflowing the native list.
+from a loose GFX parse. Available space is that capacity minus every row
+already materialized when the chained original returns. A full panel can have
+no room even for Next; that destination then fails locally instead of
+overflowing the native list.
 
 ## 5. Existing-object Scaleform bridge
 

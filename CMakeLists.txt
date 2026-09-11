@@ -360,6 +360,11 @@ if(_ernativeui_enable_tests)
     target_compile_features(ERNativeUIRuntimeOptionsTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.RuntimeOptions COMMAND ERNativeUIRuntimeOptionsTests)
 
+    add_executable(ERNativeUIGameBuildTests tests/game_build_test.cpp)
+    target_include_directories(ERNativeUIGameBuildTests PRIVATE src tests)
+    target_compile_features(ERNativeUIGameBuildTests PRIVATE cxx_std_17)
+    add_test(NAME ERNativeUI.GameBuild COMMAND ERNativeUIGameBuildTests)
+
     add_executable(ERNativeUIDialogModalStateTests
         tests/dialog_modal_state_test.cpp)
     target_include_directories(ERNativeUIDialogModalStateTests PRIVATE src)
