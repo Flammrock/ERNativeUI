@@ -1,7 +1,7 @@
 # Native text input
 
 Status: **Confirmed** on the [reference build](../README.md#reference-build)
-and implemented as a current ERUI API 1.1 capability. ERUI API versions and
+and published as an ERUI API 1.1 capability. ERUI API versions and
 ERNativeUI package versions track different contracts; see
 [Versioning](../../versioning.md).
 

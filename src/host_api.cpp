@@ -47,6 +47,14 @@ ERUI_Result ERUI_CALL register_provider_v1_1_entry(
         ERUI_API_VERSION_1_1, description, out_provider, out_root_page);
 }
 
+ERUI_Result ERUI_CALL register_provider_v1_2_entry(
+    const ERUI_ProviderDesc* description,
+    ERUI_ProviderHandle* out_provider,
+    ERUI_PageHandle* out_root_page) {
+    return register_provider_for_version(
+        ERUI_API_VERSION_1_2, description, out_provider, out_root_page);
+}
+
 ERUI_Result ERUI_CALL add_button_entry(
     ERUI_ProviderHandle provider,
     ERUI_PageHandle page,
@@ -72,6 +80,62 @@ ERUI_Result ERUI_CALL add_slider_entry(
     ERUI_RowHandle* out_row) {
     if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
     return erui::host::registry().add_slider(provider, page, description, out_row);
+}
+
+ERUI_Result ERUI_CALL add_numeric_slider_entry(
+    ERUI_ProviderHandle provider,
+    ERUI_PageHandle page,
+    const ERUI_NumericSliderDesc* description,
+    ERUI_RowHandle* out_row) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
+    return erui::host::registry().add_numeric_slider(
+        provider, page, description, out_row);
+}
+
+ERUI_Result ERUI_CALL set_numeric_slider_value_entry(
+    ERUI_ProviderHandle provider,
+    ERUI_RowHandle row,
+    const ERUI_DecimalValue* value) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
+    return erui::host::registry().set_numeric_slider_value(
+        provider, row, value);
+}
+
+ERUI_Result ERUI_CALL get_numeric_slider_value_entry(
+    ERUI_ProviderHandle provider,
+    ERUI_RowHandle row,
+    ERUI_DecimalValue* out_value) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
+    return erui::host::registry().get_numeric_slider_value(
+        provider, row, out_value);
+}
+
+ERUI_Result ERUI_CALL add_custom_slider_entry(
+    ERUI_ProviderHandle provider,
+    ERUI_PageHandle page,
+    const ERUI_CustomSliderDesc* description,
+    ERUI_RowHandle* out_row) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
+    return erui::host::registry().add_custom_slider(
+        provider, page, description, out_row);
+}
+
+ERUI_Result ERUI_CALL set_custom_slider_index_entry(
+    ERUI_ProviderHandle provider,
+    ERUI_RowHandle row,
+    std::uint32_t index) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
+    return erui::host::registry().set_custom_slider_index(
+        provider, row, index);
+}
+
+ERUI_Result ERUI_CALL get_custom_slider_index_entry(
+    ERUI_ProviderHandle provider,
+    ERUI_RowHandle row,
+    std::uint32_t* out_index) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
+    return erui::host::registry().get_custom_slider_index(
+        provider, row, out_index);
 }
 
 ERUI_Result ERUI_CALL add_inline_choice_entry(
@@ -443,6 +507,9 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     case ERUI_API_VERSION_1_1:
         selected_size = ERUI_API_V1_1_SIZE;
         break;
+    case ERUI_API_VERSION_1_2:
+        selected_size = ERUI_API_V1_2_SIZE;
+        break;
     default:
         return ERUI_UNSUPPORTED_VERSION;
     }
@@ -461,8 +528,9 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     // API 1.0 was released before explicit connection readiness existed and
     // remains available as soon as provider registration opens. API 1.1 is
     // the first contract whose successful negotiation guarantees that the
-    // host has settled its effective localization language selection.
-    if (requested_version == ERUI_API_VERSION_1_1) {
+    // host has settled its effective localization language selection; later
+    // versions preserve that guarantee.
+    if (requested_version >= ERUI_API_VERSION_1_1) {
         switch (erui::host::steam_language_readiness()) {
         case erui::host::SteamLanguageReadiness::pending:
             return ERUI_HOST_NOT_READY;
@@ -482,7 +550,9 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
         ERUI_CAP_GAME_LANGUAGE;
     table.register_provider = requested_version == ERUI_API_VERSION_1_0
         ? &register_provider_v1_0_entry
-        : &register_provider_v1_1_entry;
+        : requested_version == ERUI_API_VERSION_1_1
+            ? &register_provider_v1_1_entry
+            : &register_provider_v1_2_entry;
     table.add_button = &add_button_entry;
     table.add_toggle = &add_toggle_entry;
     table.add_slider = &add_slider_entry;
@@ -496,7 +566,7 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     table.get_row_value = &get_row_value_entry;
     table.enqueue_alert = &enqueue_alert_entry;
     table.get_game_language = &get_game_language_entry;
-    if (requested_version == ERUI_API_VERSION_1_1) {
+    if (requested_version >= ERUI_API_VERSION_1_1) {
         table.capabilities |= ERUI_CAP_TEXT_INPUT | ERUI_CAP_COLOR_PICKER |
             ERUI_CAP_BUILTIN_PAGES | ERUI_CAP_INPUT_BINDINGS |
             ERUI_CAP_STORAGE;
@@ -528,6 +598,20 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
         table.storage_apply_assignment_changes =
             &storage_apply_assignment_changes_entry;
         table.storage_get_info = &storage_get_info_entry;
+    }
+    if (requested_version >= ERUI_API_VERSION_1_2) {
+        table.capabilities |= ERUI_CAP_NUMERIC_SLIDER |
+            ERUI_CAP_CUSTOM_SLIDER;
+        table.add_numeric_slider = &add_numeric_slider_entry;
+        table.set_numeric_slider_value =
+            &set_numeric_slider_value_entry;
+        table.get_numeric_slider_value =
+            &get_numeric_slider_value_entry;
+        table.add_custom_slider = &add_custom_slider_entry;
+        table.set_custom_slider_index =
+            &set_custom_slider_index_entry;
+        table.get_custom_slider_index =
+            &get_custom_slider_index_entry;
     }
 
     std::memcpy(out_api, &table, selected_size);

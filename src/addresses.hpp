@@ -53,6 +53,9 @@ using AddSliderFn = void(__fastcall*)(
     void* range,
     std::uint8_t current_value,
     bool enabled);
+// CS::SliderCtrl virtual slot 13. The native implementation refreshes the
+// current/default value text and the two slider-bar positions.
+using SliderRefreshFn = void(__fastcall*)(void* slider);
 // Native inline discrete-choice row. The fourth argument is the owned native
 // option container and the fifth is its dedicated input-context object.
 using AddInlineChoiceFn = void(__fastcall*)(
@@ -174,6 +177,7 @@ struct GameAddresses {
     void** popup_choice_selection_vtable{};
     void** popup_choice_presentation_vtable{};
     AddSliderFn add_slider{};
+    SliderRefreshFn slider_refresh{};
     AddButtonFn add_button{};
     DestroyTextReferencesFn destroy_text_references{};
     TextResolverFn text_resolver{};

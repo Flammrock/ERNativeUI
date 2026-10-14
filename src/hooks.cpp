@@ -4,6 +4,7 @@
 #include "native_dialog.hpp"
 #include "native_menu.hpp"
 #include "native_popup_choice.hpp"
+#include "native_slider_presentation.hpp"
 #include "native_text_input.hpp"
 #include "native_text_result.hpp"
 #include "native_title_bridge.hpp"
@@ -1310,6 +1311,7 @@ TextHookInstallStatus install_text_hook(const GameAddresses& addresses) noexcept
 }
 
 void reset_hooks() noexcept {
+    remove_native_slider_presentation();
     set_color_picker_widget_path_bridge_available(false);
     g_scaleform_path_resolver_hook.reset();
     reset_dialog_input_gates(false);
@@ -1690,6 +1692,14 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         erui::detail::logf(
             erui::LogLevel::warning,
             "Custom text hook disabled; rows use a vanilla fallback message ID");
+    }
+
+    if (!install_native_slider_presentation(addresses)) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Formatted-slider presentation could not be installed");
+        reset_hooks();
+        return HookInstallStatus::hook_failed;
     }
 
     // TextInput state may be changed from a client callback or the host

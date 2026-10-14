@@ -6,13 +6,15 @@ the expected menu or callback behavior. Start by preserving the full C++
 `ERUI_Result`. “The menu did not appear” alone cannot distinguish host loading,
 API negotiation, provider validation, and native hook installation.
 
-ERNativeUI exposes two public API generations:
+ERNativeUI exposes three public API generations:
 
 - **Released API 1.0:** the frozen SDK shipped with ERNativeUI 1.0.0. Any
   client built with it remains supported by later 1.x hosts.
-- **Current API 1.1:** introduced with ERNativeUI 1.1.0. It provides explicit
+- **Released API 1.1:** introduced with ERNativeUI 1.1.0. It provides explicit
   `erui::connect()`, TextInput, ColorPicker, additional built-in pages, input
   bindings, and provider storage.
+- **Current API 1.2:** introduced with ERNativeUI 1.2.0. It appends Numeric
+  Slider and Custom Slider while preserving both earlier contracts.
 
 See [Feature status](../features.md) for the exact boundary and
 [How ERNativeUI works](../how-it-works.md) for the lifecycle and ownership
@@ -22,7 +24,7 @@ model.
 
 **Symptom**
 
-- API 1.1 `erui::connect()` returns `ErrorCode::host_not_loaded` with
+- API 1.1 or later `erui::connect()` returns `ErrorCode::host_not_loaded` with
   `ERUI_HOST_NOT_READY` after its timeout.
 - A released API 1.0 client reports the equivalent missing-host error.
 - The gameplay part of the mod works, but its ERNativeUI menu is absent.
@@ -62,7 +64,7 @@ the remaining asynchronous hook order.
 
 **Symptom**
 
-- `ErrorCode::host_not_ready`: the host was seen, but API 1.1 did not become
+- `ErrorCode::host_not_ready`: the host was seen, but the requested API did not become
   ready before the client-side timeout.
 - `ErrorCode::host_failed`: host initialization failed.
 - `ErrorCode::export_not_found`: the loaded module named `ERNativeUI.dll` has
@@ -70,7 +72,7 @@ the remaining asynchronous hook order.
 
 **Likely cause**
 
-API 1.1 negotiation remains temporarily `ERUI_HOST_NOT_READY` while the host
+API 1.1-or-later negotiation remains temporarily `ERUI_HOST_NOT_READY` while the host
 settles language readiness. In automatic mode this includes Steam startup;
 an explicit valid locale settles immediately. `erui::connect()` already
 retries that state every 25 ms for up to 30 seconds by default. A final timeout
@@ -86,28 +88,28 @@ selected.
 - Confirm the loaded host version and remove duplicate or obsolete copies.
 - Enable the host log as described below, restart the game, and inspect the
   first error—not only the final `HOST_FAILED` result.
-- For raw C API 1.1 clients, retry only `ERUI_HOST_NOT_READY` from a worker.
+- For raw C API 1.1-or-later clients, retry only `ERUI_HOST_NOT_READY` from a worker.
   Treat every other result as terminal. Released API 1.0 clients deliberately
   use their frozen lifecycle and should not be rewritten to imitate API 1.1
   negotiation.
 
-## `find_package(ERNativeUI 1.1.0)` rejects an installed SDK
+## `find_package(ERNativeUI 1.2.0)` rejects an installed SDK
 
 **Symptom**
 
-CMake finds ERNativeUI but says package version 1.1.0 is incompatible or
+CMake finds ERNativeUI but says package version 1.2.0 is incompatible or
 unavailable.
 
 **Likely cause**
 
-The installed ERNativeUI package release is older than 1.1.0, its CMake files
-are missing, or `CMAKE_PREFIX_PATH` points at the wrong prefix. The `1.1.0` in
+The installed ERNativeUI package release is older than 1.2.0, its CMake files
+are missing, or `CMAKE_PREFIX_PATH` points at the wrong prefix. The `1.2.0` in
 `find_package` is a minimum release-package version; it is not public API
 negotiation.
 
 **Fix**
 
-- Install the ERNativeUI 1.1.0 SDK or a later release that documents API 1.1
+- Install the ERNativeUI 1.2.0 SDK or a later release that documents API 1.2
   support, then point `CMAKE_PREFIX_PATH` at the directory containing its
   `include`, `lib`, and `bin` children.
 - Alternatively, set `ERNativeUI_DIR` to the exact
@@ -123,28 +125,29 @@ negotiation.
 
 **Symptom**
 
-- `ERUI_UNSUPPORTED_VERSION`, `ErrorCode::incompatible_api`, or “API 1.1 is
+- `ERUI_UNSUPPORTED_VERSION`, `ErrorCode::incompatible_api`, or “API 1.2 is
   required; update ERNativeUI.dll.”
 - A raw-C function pointer is null or an operation returns
   `ERUI_NOT_SUPPORTED`.
-- A current API 1.1 client works with the current host but not a host exposing
-  only API 1.0.
+- A current API 1.2 client works with the current host but not a host exposing
+  only API 1.0 or 1.1.
 
 **Likely cause**
 
 Version negotiation selects a complete, exact function-table contract. The
-released API 1.0 prefix is 128 bytes. The current API 1.1 table is 320 bytes.
-An API 1.1 client cannot use a host exposing only API 1.0, and the current C++
-wrapper intentionally does not downgrade. Conversely, any client built with
-the API 1.0 SDK is supported by later 1.x hosts through the unchanged API 1.0
-prefix.
+released API 1.0 prefix is 128 bytes, and API 1.1 is frozen at 320 bytes. The
+current API 1.2 table is 368 bytes.
+An API 1.2 client cannot use a host exposing only API 1.0 or 1.1, and the
+current C++ wrapper intentionally does not downgrade. Conversely, any client
+built with an earlier SDK is supported by later compatible 1.x hosts through
+its unchanged function-table contract.
 
 **Fix**
 
 - Choose the SDK/API feature level intentionally and document the first host
   release that provides it. Players may use that host or a later compatible
   release from the same major line.
-- API 1.1 C++ code must establish a valid `Connection` and register through
+- API 1.1-or-later C++ code must establish a valid `Connection` and register through
   `connection.value().register_menu(...)`.
 - Raw-C code must zero the table, set its exact prefix size, request the API
   version compiled into its header, then check the returned version,
@@ -361,7 +364,7 @@ compiled menu can fail the full host installation.
 - Report the ERNativeUI/client/other-mod versions, DLL order, game PE timestamp
   and image size from the log, the first failed address/hook line, and the exact
   page/action that was requested. See
-  [Game and mod compatibility](../compatibility.md).
+  [Game and mod compatibility](../COMPATIBILITY.md).
 
 ## Two host copies or two client copies produce inconsistent behavior
 
@@ -403,7 +406,7 @@ ERNativeUI deliberately uses more than one callback context:
 | Callback or operation | Execution context |
 |---|---|
 | Button action | Elden Ring UI thread, synchronously |
-| Toggle, slider, inline-choice, and popup-choice changes | ERNativeUI host worker |
+| Toggle, Slider, Numeric Slider, Custom Slider, inline-choice, and popup-choice changes | ERNativeUI host worker |
 | API 1.1 TextInput and ColorPicker confirmed changes | ERNativeUI host worker |
 | API 1.1 input-action and assignment-change events | ERNativeUI host worker, after bounded native-input handoff |
 | Alert completion | ERNativeUI host worker, asynchronously after dismissal/failure |

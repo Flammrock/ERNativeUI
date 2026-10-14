@@ -4,7 +4,7 @@
 dialog system. The game owns the visual presentation, button captions, focus,
 and Back behavior; the client mod owns and supplies the message.
 
-This guide describes the current API 1.1 C++17 surface. Alerts first appeared
+This guide describes the current API 1.2 C++17 surface. Alerts first appeared
 in API 1.0 and remain available to any client built with the 1.0 SDK. A client
 that chooses API 1.1 uses its explicit connection lifecycle. API versions and
 ERNativeUI release versions are independent. See the [feature matrix](../features.md)

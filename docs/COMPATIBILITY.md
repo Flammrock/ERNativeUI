@@ -28,16 +28,17 @@ the authority for the exact game builds supported by a packaged host.
 ## Elden Ring executable support
 
 The ERUI API version and the Elden Ring executable version are independent.
-A game compatibility patch can therefore keep API 1.1 unchanged.
+A game compatibility patch can therefore keep the public API unchanged.
 
 | ERNativeUI host | Public APIs | Elden Ring 2.7.0.0 | Elden Ring 2.7.1.0 |
 |---|---|---|---|
 | `1.0.0` | API 1.0 | Supported | No declared support; use the current host |
 | `1.1.0` | APIs 1.0 and 1.1 | Supported | No declared support; use the current host |
 | `1.1.1` | APIs 1.0 and 1.1 | Live-validated | Live-validated |
+| `1.2.0` | APIs 1.0, 1.1, and 1.2 | Live-validated | Live-validated |
 
-Existing client DLLs compiled for ERUI API 1.0 do not need to be rebuilt for
-the 1.1.1 host; players update the single host DLL.
+Existing client DLLs compiled for ERUI API 1.0 or API 1.1 do not need to be
+rebuilt for the 1.2.0 host; players update the single host DLL.
 
 The two exact runtime identities are:
 

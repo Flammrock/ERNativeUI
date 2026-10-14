@@ -37,7 +37,8 @@ extern "C" {
     ((((uint32_t)(major)) << 16u) | ((uint32_t)(minor) & 0xFFFFu))
 #define ERUI_API_VERSION_1_0 ERUI_VERSION_ENCODE(1u, 0u)
 #define ERUI_API_VERSION_1_1 ERUI_VERSION_ENCODE(1u, 1u)
-#define ERUI_API_VERSION_CURRENT ERUI_API_VERSION_1_1
+#define ERUI_API_VERSION_1_2 ERUI_VERSION_ENCODE(1u, 2u)
+#define ERUI_API_VERSION_CURRENT ERUI_API_VERSION_1_2
 
 typedef uint32_t ERUI_Result;
 enum {
@@ -113,7 +114,9 @@ enum {
     ERUI_CAP_COLOR_PICKER = UINT64_C(1) << 12,
     ERUI_CAP_BUILTIN_PAGES = UINT64_C(1) << 13,
     ERUI_CAP_INPUT_BINDINGS = UINT64_C(1) << 14,
-    ERUI_CAP_STORAGE = UINT64_C(1) << 15
+    ERUI_CAP_STORAGE = UINT64_C(1) << 15,
+    ERUI_CAP_NUMERIC_SLIDER = UINT64_C(1) << 16,
+    ERUI_CAP_CUSTOM_SLIDER = UINT64_C(1) << 17
 };
 
 /* Device alternatives belonging to one logical input action. */
@@ -289,11 +292,21 @@ typedef struct ERUI_ActionInputs {
 /*
  * TextInput lengths are counts of UTF-16 code units, matching
  * ERUI_Utf16View.length. They are not byte counts or Unicode grapheme counts.
- * The current 1.1 contract accepts maximum_length values in 1..35; zero
+ * The API 1.1-and-later contract accepts maximum_length values in 1..35; zero
  * selects ERUI_TEXT_INPUT_DEFAULT_MAX_LENGTH.
  */
 #define ERUI_TEXT_INPUT_DEFAULT_MAX_LENGTH 16u
 #define ERUI_TEXT_INPUT_MAX_LENGTH 35u
+
+/*
+ * Numeric and custom sliders are index-backed native sliders. Their logical
+ * position count is therefore bounded independently of the values displayed
+ * to the player. Numeric decimal places describe an exact base-10 scale.
+ */
+#define ERUI_SLIDER_MIN_VALUE_COUNT 2u
+#define ERUI_SLIDER_MAX_VALUE_COUNT 256u
+#define ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES 9u
+#define ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH 64u
 
 /* Counted byte view. Each field documents its own encoding and grammar. */
 typedef struct ERUI_StringView {
@@ -787,6 +800,53 @@ typedef void (ERUI_CALL* ERUI_ColorPickerChangedCallback)(
     const ERUI_ColorPickerChangeContext* context);
 
 /*
+ * Exact base-10 value used by API 1.2 numeric sliders. The represented value
+ * is scaled_value / (10 ^ decimal_places). reserved must be zero.
+ */
+typedef struct ERUI_DecimalValue {
+    int64_t scaled_value;
+    uint32_t decimal_places;
+    uint32_t reserved;
+} ERUI_DecimalValue;
+
+/*
+ * Borrowed callback data that expires when the call ends. index is the
+ * zero-based logical position, not Elden Ring's private backing byte.
+ */
+typedef struct ERUI_NumericSliderChangeContext {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_ProviderHandle provider;
+    ERUI_RowHandle row;
+    ERUI_DecimalValue value;
+    uint32_t index;
+    uint32_t value_count;
+    uint32_t reserved[2];
+} ERUI_NumericSliderChangeContext;
+
+typedef void (ERUI_CALL* ERUI_NumericSliderChangedCallback)(
+    void* user_data,
+    const ERUI_NumericSliderChangeContext* context);
+
+/*
+ * Borrowed callback data for an arbitrary index-to-text slider. The host has
+ * already copied every display value, so no client formatter runs here.
+ */
+typedef struct ERUI_CustomSliderChangeContext {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_ProviderHandle provider;
+    ERUI_RowHandle row;
+    uint32_t index;
+    uint32_t value_count;
+    uint32_t reserved[2];
+} ERUI_CustomSliderChangeContext;
+
+typedef void (ERUI_CALL* ERUI_CustomSliderChangedCallback)(
+    void* user_data,
+    const ERUI_CustomSliderChangeContext* context);
+
+/*
  * Borrowed callback data that expires when the call ends. One logical action
  * owns controller, keyboard, and mouse alternatives. When alternatives become
  * active in the same sampled frame, devices contains their combined bit mask.
@@ -981,6 +1041,52 @@ typedef struct ERUI_SliderDesc {
     uint8_t reserved8[3];
     uint32_t enabled;
 } ERUI_SliderDesc;
+
+/*
+ * API 1.2 exact fixed-point slider. All four scaled fields use the shared
+ * decimal_places scale. The inclusive range must contain 2..256 positions,
+ * and maximum_scaled_value must be reachable from minimum_scaled_value by
+ * repeatedly adding step_scaled_value. Prefix and suffix are copied before
+ * add_numeric_slider returns. An off-step initial value is rounded down to
+ * the preceding position; it must still be inside the inclusive range.
+ */
+typedef struct ERUI_NumericSliderDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_Utf16View label;
+    ERUI_Utf16View help;
+    ERUI_NumericSliderChangedCallback changed_callback;
+    void* user_data;
+    int64_t minimum_scaled_value;
+    int64_t maximum_scaled_value;
+    int64_t step_scaled_value;
+    int64_t initial_scaled_value;
+    uint32_t decimal_places;
+    uint32_t enabled;
+    ERUI_Utf16View prefix;
+    ERUI_Utf16View suffix;
+    uint32_t reserved[2];
+} ERUI_NumericSliderDesc;
+
+/*
+ * API 1.2 arbitrary index-to-text slider. The host copies label, help, and
+ * every values element before add_custom_slider returns. value_count must be
+ * in ERUI_SLIDER_MIN_VALUE_COUNT..ERUI_SLIDER_MAX_VALUE_COUNT; every value
+ * must contain 1..ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH UTF-16 code units.
+ */
+typedef struct ERUI_CustomSliderDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_Utf16View label;
+    ERUI_Utf16View help;
+    ERUI_CustomSliderChangedCallback changed_callback;
+    void* user_data;
+    const ERUI_Utf16View* values;
+    uint32_t value_count;
+    uint32_t initial_index;
+    uint32_t enabled;
+    uint32_t reserved;
+} ERUI_CustomSliderDesc;
 
 typedef struct ERUI_ChoiceDesc {
     uint32_t size;
@@ -1360,6 +1466,42 @@ typedef struct ERUI_Api {
         ERUI_ProviderHandle provider,
         ERUI_StorageHandle storage,
         ERUI_StorageInfo* out_info);
+
+    /* API 1.2 append-only exact numeric-slider block. */
+    ERUI_Result (ERUI_CALL* add_numeric_slider)(
+        ERUI_ProviderHandle provider,
+        ERUI_PageHandle page,
+        const ERUI_NumericSliderDesc* description,
+        ERUI_RowHandle* out_row);
+    /*
+     * Programmatic changes are silent. The supplied DecimalValue may use a
+     * different valid scale; the host converts it exactly to the row's scale,
+     * rejects an inexact conversion, then rounds an off-step value down.
+     */
+    ERUI_Result (ERUI_CALL* set_numeric_slider_value)(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        const ERUI_DecimalValue* value);
+    ERUI_Result (ERUI_CALL* get_numeric_slider_value)(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        ERUI_DecimalValue* out_value);
+
+    /* API 1.2 append-only arbitrary custom-slider block. */
+    ERUI_Result (ERUI_CALL* add_custom_slider)(
+        ERUI_ProviderHandle provider,
+        ERUI_PageHandle page,
+        const ERUI_CustomSliderDesc* description,
+        ERUI_RowHandle* out_row);
+    /* Programmatic changes are silent; an out-of-range index is rejected. */
+    ERUI_Result (ERUI_CALL* set_custom_slider_index)(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        uint32_t index);
+    ERUI_Result (ERUI_CALL* get_custom_slider_index)(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        uint32_t* out_index);
 } ERUI_Api;
 
 /* Complete function-table prefix required by API 1.0 clients. */
@@ -1374,16 +1516,24 @@ typedef struct ERUI_Api {
 #define ERUI_API_V1_1_SIZE ((uint32_t)( \
     offsetof(ERUI_Api, storage_get_info) + \
     sizeof(((ERUI_Api*)0)->storage_get_info)))
-#define ERUI_API_CURRENT_SIZE ERUI_API_V1_1_SIZE
+
+/*
+ * Complete function-table size required by API 1.2 clients. The frozen API
+ * 1.0 and 1.1 prefixes and their size constants remain unchanged.
+ */
+#define ERUI_API_V1_2_SIZE ((uint32_t)( \
+    offsetof(ERUI_Api, get_custom_slider_index) + \
+    sizeof(((ERUI_Api*)0)->get_custom_slider_index)))
+#define ERUI_API_CURRENT_SIZE ERUI_API_V1_2_SIZE
 
 typedef ERUI_Result (ERUI_CALL* ERUI_GetApiFn)(
     uint32_t requested_version,
     ERUI_Api* out_api);
 
 /*
- * ERUI_GetApi is also the explicit API 1.1 connection handshake. Call it from
+ * ERUI_GetApi is also the explicit connection handshake. Call it from
  * a worker and retry ERUI_HOST_NOT_READY without reusing a partially written
- * table. A successful API 1.1 request guarantees that startup language
+ * table. A successful API 1.1 or later request guarantees that startup language
  * selection has settled. In automatic mode, get_game_language may still
  * return ERUI_NOT_SUPPORTED after a definitive Steam incompatibility. API 1.0
  * keeps its released compatibility lifecycle.

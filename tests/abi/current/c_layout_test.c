@@ -44,8 +44,13 @@ _Static_assert(offsetof(ERUI_Api, get_game_language) == 120u,
     "v1.0 final function moved");
 
 #if defined(ERUI_API_VERSION_1_1)
+#if defined(ERUI_API_VERSION_1_2)
+_Static_assert(ERUI_API_VERSION_CURRENT == ERUI_API_VERSION_1_2,
+    "unexpected current API version");
+#else
 _Static_assert(ERUI_API_VERSION_CURRENT == ERUI_API_VERSION_1_1,
     "unexpected current API version");
+#endif
 _Static_assert(ERUI_BUFFER_TOO_SMALL == 14u, "result values were renumbered");
 _Static_assert(ERUI_CAP_TEXT_INPUT == (UINT64_C(1) << 11),
     "TextInput capability bit drift");
@@ -281,6 +286,79 @@ _Static_assert(ERUI_API_V1_1_SIZE == 320u,
     "v1.1 prefix does not contain the complete input/storage blocks");
 _Static_assert(sizeof(ERUI_Api) >= ERUI_API_V1_1_SIZE,
     "current API structure is smaller than its selected prefix");
+#if defined(ERUI_API_VERSION_1_2)
+_Static_assert(ERUI_CAP_NUMERIC_SLIDER == (UINT64_C(1) << 16),
+    "numeric-slider capability bit drift");
+_Static_assert(ERUI_CAP_CUSTOM_SLIDER == (UINT64_C(1) << 17),
+    "custom-slider capability bit drift");
+_Static_assert(ERUI_SLIDER_MIN_VALUE_COUNT == 2u &&
+    ERUI_SLIDER_MAX_VALUE_COUNT == 256u,
+    "logical slider count limits drift");
+_Static_assert(ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES == 9u,
+    "numeric-slider precision limit drift");
+_Static_assert(ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH == 64u,
+    "custom-slider text limit drift");
+_Static_assert(sizeof(ERUI_DecimalValue) == 16u,
+    "decimal value ABI drift");
+_Static_assert(offsetof(ERUI_DecimalValue, scaled_value) == 0u,
+    "decimal scaled-value offset drift");
+_Static_assert(offsetof(ERUI_DecimalValue, decimal_places) == 8u,
+    "decimal precision offset drift");
+_Static_assert(offsetof(ERUI_DecimalValue, reserved) == 12u,
+    "decimal reserved offset drift");
+_Static_assert(sizeof(ERUI_NumericSliderChangeContext) == 56u,
+    "numeric-slider callback context ABI drift");
+_Static_assert(offsetof(ERUI_NumericSliderChangeContext, value) == 24u,
+    "numeric-slider callback value offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderChangeContext, index) == 40u,
+    "numeric-slider callback index offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderChangeContext, value_count) == 44u,
+    "numeric-slider callback count offset drift");
+_Static_assert(sizeof(ERUI_CustomSliderChangeContext) == 40u,
+    "custom-slider callback context ABI drift");
+_Static_assert(offsetof(ERUI_CustomSliderChangeContext, index) == 24u,
+    "custom-slider callback index offset drift");
+_Static_assert(offsetof(ERUI_CustomSliderChangeContext, value_count) == 28u,
+    "custom-slider callback count offset drift");
+_Static_assert(sizeof(ERUI_NumericSliderDesc) == 136u,
+    "numeric-slider descriptor ABI drift");
+_Static_assert(offsetof(ERUI_NumericSliderDesc, minimum_scaled_value) == 56u,
+    "numeric-slider minimum offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderDesc, decimal_places) == 88u,
+    "numeric-slider precision offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderDesc, prefix) == 96u,
+    "numeric-slider prefix offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderDesc, suffix) == 112u,
+    "numeric-slider suffix offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderDesc, reserved) == 128u,
+    "numeric-slider reserved offset drift");
+_Static_assert(sizeof(ERUI_CustomSliderDesc) == 80u,
+    "custom-slider descriptor ABI drift");
+_Static_assert(offsetof(ERUI_CustomSliderDesc, values) == 56u,
+    "custom-slider values offset drift");
+_Static_assert(offsetof(ERUI_CustomSliderDesc, value_count) == 64u,
+    "custom-slider count offset drift");
+_Static_assert(offsetof(ERUI_CustomSliderDesc, initial_index) == 68u,
+    "custom-slider initial-index offset drift");
+_Static_assert(offsetof(ERUI_Api, add_numeric_slider) == 320u,
+    "numeric-slider block is not append-only");
+_Static_assert(offsetof(ERUI_Api, set_numeric_slider_value) == 328u,
+    "numeric-slider setter offset drift");
+_Static_assert(offsetof(ERUI_Api, get_numeric_slider_value) == 336u,
+    "numeric-slider getter offset drift");
+_Static_assert(offsetof(ERUI_Api, add_custom_slider) == 344u,
+    "custom-slider block offset drift");
+_Static_assert(offsetof(ERUI_Api, set_custom_slider_index) == 352u,
+    "custom-slider setter offset drift");
+_Static_assert(offsetof(ERUI_Api, get_custom_slider_index) == 360u,
+    "custom-slider getter offset drift");
+_Static_assert(ERUI_API_V1_2_SIZE == 368u,
+    "API 1.2 prefix size drift");
+_Static_assert(ERUI_API_CURRENT_SIZE == ERUI_API_V1_2_SIZE,
+    "current API size does not select API 1.2");
+_Static_assert(sizeof(ERUI_Api) == ERUI_API_V1_2_SIZE,
+    "current API structure has an unexpected tail");
+#endif
 #else
 _Static_assert(sizeof(ERUI_Api) == 128u,
     "the pre-v1.1 current table unexpectedly changed");

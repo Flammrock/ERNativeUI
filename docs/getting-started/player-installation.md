@@ -164,10 +164,10 @@ content to display.
 ## Compatibility and troubleshooting
 
 - For Solid Uncapper, follow its exact DLL order and tested matrix in
-  [Game and mod compatibility](../compatibility.md#solid-uncapper).
+  [Game and mod compatibility](../COMPATIBILITY.md#solid-uncapper).
 - Seamless Co-op 2.0.1 was live-tested with Elden Ring 2.7.0.0, with no
   incompatibility observed for that exact combination. See
-  [Game and mod compatibility](../compatibility.md#seamless-co-op).
+  [Game and mod compatibility](../COMPATIBILITY.md#seamless-co-op).
 - Shadow of the Erdtree remains explicitly unverified until its live test
   matrix is completed.
 - Host and committed client DLLs must remain loaded until process exit.

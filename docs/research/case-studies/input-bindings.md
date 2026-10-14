@@ -1,7 +1,7 @@
 # Native input bindings
 
 This case study records how ERNativeUI recovered Elden Ring's native binding
-screens and promoted that work into the current API 1.1 input-binding backend.
+screens and promoted that work into the input-binding backend published in API 1.1.
 It is an implementation and evidence record, not a client API tutorial. Mod
 authors should start with [Native input bindings](../../guides/input-bindings.md).
 
@@ -412,7 +412,7 @@ states and never appears in the serialized API representation.
 ### Public semantic boundary
 
 **Confirmed production decision:** native integers are an adapter detail, not
-portable identity. Current API 1.1 exposes 14 controller buttons, 72 keyboard
+portable identity. API 1.1 introduced 14 controller buttons, 72 keyboard
 positions, and 7 mouse inputs. Storage uses stable semantic strings, while
 The current online [`input_binding_model.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/input_binding_model.cpp) performs the
 exact current-build conversion.

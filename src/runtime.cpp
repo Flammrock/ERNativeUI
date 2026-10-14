@@ -58,6 +58,10 @@ const char* row_kind_name(RowKind kind) noexcept {
         return "toggle";
     case RowKind::slider:
         return "slider";
+    case RowKind::numeric_slider:
+        return "numeric-slider";
+    case RowKind::custom_slider:
+        return "custom-slider";
     case RowKind::inline_choice:
         return "inline-choice";
     case RowKind::popup_choice:
@@ -223,7 +227,7 @@ InstallResult install_impl(
 
     detail::logf(
         LogLevel::info,
-        "Compiled menu: pages=%zu rootRows=%zu tabs=%zu modelButtons=%zu modelSubmenus=%zu popupChoices=%zu textInputs=%zu colorPickers=%zu inputBindingSections=%zu inputBindings=%zu customTexts=%zu pagination=%d",
+        "Compiled menu: pages=%zu rootRows=%zu tabs=%zu modelButtons=%zu modelSubmenus=%zu popupChoices=%zu textInputs=%zu colorPickers=%zu numericSliders=%zu customSliders=%zu inputBindingSections=%zu inputBindings=%zu customTexts=%zu pagination=%d",
         runtime.menu->pages.size(),
         runtime.menu->root_page().rows.size(),
         runtime.menu->tab_page_indices.size(),
@@ -232,6 +236,8 @@ InstallResult install_impl(
         runtime.menu->modeled_popup_choice_count,
         runtime.menu->modeled_text_input_count,
         runtime.menu->modeled_color_picker_count,
+        runtime.menu->modeled_numeric_slider_count,
+        runtime.menu->modeled_custom_slider_count,
         runtime.menu->input_binding_sections.size(),
         runtime.menu->modeled_input_binding_count,
         runtime.menu->texts.size(),
@@ -301,6 +307,9 @@ InstallResult install_impl(
         runtime.menu->modeled_text_input_count != 0;
     const bool require_input_bindings =
         runtime.menu->modeled_input_binding_count != 0;
+    const bool require_formatted_sliders =
+        runtime.menu->modeled_numeric_slider_count != 0 ||
+        runtime.menu->modeled_custom_slider_count != 0;
     if (options.enable_row_injection) {
         for (std::size_t page_index = 0;
              page_index < runtime.menu->pages.size(); ++page_index) {
@@ -353,6 +362,14 @@ InstallResult install_impl(
                 options.enable_custom_text)) {
             return fail_install(InstallError::address_resolution_failed);
         }
+    }
+
+    if (require_formatted_sliders &&
+        (!addresses.slider_refresh || !addresses.title_bridge_complete())) {
+        detail::logf(
+            LogLevel::error,
+            "Formatted sliders require SliderCtrl refresh and Scaleform text interfaces");
+        return fail_install(InstallError::address_resolution_failed);
     }
 
     if (require_text_inputs &&
@@ -482,6 +499,15 @@ std::size_t poll_changes() noexcept {
                 current = current == 0 ? 0 : 1;
             } else if (row.kind == RowKind::slider) {
                 current = normalize_slider(current, row.slider);
+            } else if (row.kind == RowKind::numeric_slider ||
+                row.kind == RowKind::custom_slider) {
+                if (row.slider_value_texts.size() <
+                        ERUI_SLIDER_MIN_VALUE_COUNT ||
+                    row.slider_value_texts.size() >
+                        ERUI_SLIDER_MAX_VALUE_COUNT) {
+                    continue;
+                }
+                if (current >= row.slider_value_texts.size()) current = 0;
             } else if (row.kind == RowKind::inline_choice) {
                 if (row.choice_ids.empty()) continue;
                 if (current >= row.choice_ids.size()) current = 0;

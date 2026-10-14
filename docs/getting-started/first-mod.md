@@ -5,10 +5,10 @@ client DLL. When its row is activated in Elden Ring, it opens a native dialog
 saying **Hello, Tarnished!**
 
 Complete [Install the SDK](setup.md) first. The commands below assume the
-ERNativeUI 1.1.0 SDK was extracted to:
+ERNativeUI 1.2.0 SDK was extracted to:
 
 ```text
-C:\SDK\ERNativeUI-1.1.0-windows-x64
+C:\SDK\ERNativeUI-1.2.0-windows-x64
 ```
 
 Replace that path when you installed another compatible release or location.
@@ -31,8 +31,8 @@ cmake_minimum_required(VERSION 3.24)
 project(HelloTarnished LANGUAGES CXX)
 
 # This is a minimum ERNativeUI package-release requirement. It is not the
-# runtime API selector; the API 1.1 wrapper performs that check at runtime.
-find_package(ERNativeUI 1.1.0 CONFIG REQUIRED)
+# runtime API selector; the API 1.2 wrapper performs that check at runtime.
+find_package(ERNativeUI 1.2.0 CONFIG REQUIRED)
 
 add_library(HelloTarnished MODULE src/hello_tarnished.cpp)
 target_link_libraries(HelloTarnished PRIVATE ERNativeUI::SDK)
@@ -75,7 +75,7 @@ void show_greeting() noexcept {
 
 DWORD WINAPI initialize_mod(void*) noexcept {
     // connect() discovers the host already loaded by Mod Engine 2 and asks it
-    // for the API 1.1 function table. It does not load ERNativeUI.dll itself.
+    // for the API 1.2 function table. It does not load ERNativeUI.dll itself.
     const auto connection = erui::connect();
     if (!connection) {
         OutputDebugStringW(L"[HelloTarnished] ERNativeUI connection failed.\n");
@@ -139,7 +139,7 @@ Open **Developer Command Prompt for VS 2022**, change to the
 `HelloTarnished` directory, and run:
 
 ```bat
-cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH="C:\SDK\ERNativeUI-1.1.0-windows-x64"
+cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH="C:\SDK\ERNativeUI-1.2.0-windows-x64"
 ```
 
 What each argument means:

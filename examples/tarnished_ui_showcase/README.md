@@ -3,9 +3,13 @@
 `TarnishedUIShowcase.dll` is the shipped integration example. It demonstrates:
 
 - runtime localization for all 15 language identifiers currently reported by
-  Elden Ring's Steamworks interface, with English fallback;
-- one explicit API 1.1 connection reused for localization and registration;
+  Elden Ring's Steamworks interface, explicit `vietnamese` identifier support,
+  and English fallback for every other future identifier;
+- one explicit API 1.2 connection reused for localization and registration;
 - host-owned toggle and slider values;
+- a dedicated advanced-slider submenu containing `x0.6`, signed `-0.5`, and
+  `3.0s` Numeric Sliders plus a deliberately absurd Custom Slider that moves
+  through `-7`, `3`, `7.8`, `1s`, `hello`, `18`, and `x1.3`;
 - value and button callbacks;
 - a dedicated choice submenu comparing one inline row with independent native
   popup lists containing two, four, and eight options;

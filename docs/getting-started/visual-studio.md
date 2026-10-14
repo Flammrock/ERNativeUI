@@ -6,7 +6,7 @@ or ERNativeUI `.lib`.
 
 Complete [Install the SDK](setup.md) first. You need Visual Studio 2022 with
 the **Desktop development with C++** workload and an extracted ERNativeUI
-1.1.0 or later compatible Windows x64 SDK.
+1.2.0 or later compatible Windows x64 SDK.
 
 ## 1. Create a DLL project
 
@@ -40,7 +40,7 @@ Choose one method.
 3. Add this directory to **Additional Include Directories**:
 
    ```text
-   C:\SDK\ERNativeUI-1.1.0-windows-x64\include
+   C:\SDK\ERNativeUI-1.2.0-windows-x64\include
    ```
 
 4. Keep `%(AdditionalIncludeDirectories)` in the value so inherited paths are

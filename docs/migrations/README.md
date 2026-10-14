@@ -14,11 +14,12 @@ version chain.
 
 | From | To | Status | Guide |
 |---|---|---|---|
-| 1.0 | 1.1 | Current | [Migrate from API 1.0 to API 1.1](1.0-to-1.1.md) |
+| 1.0 | 1.1 | Retained | [Migrate from API 1.0 to API 1.1](1.0-to-1.1.md) |
+| 1.1 | 1.2 | Current | [Migrate from API 1.1 to API 1.2](1.1-to-1.2.md) |
 
-Future API versions add another guide instead of rewriting an earlier one. For
-example, when an ERNativeUI release introduces API 1.2, this directory will
-retain the `1.0 -> 1.1` guide and add a new `1.1 -> 1.2` guide.
+Future API versions add another guide instead of rewriting an earlier one.
+This directory therefore retains both `1.0 -> 1.1` and `1.1 -> 1.2` when the
+next adjacent guide is introduced.
 
 Migration is optional when a mod does not need the newer API surface. A mod
 author may intentionally keep building against an older SDK/API, and every

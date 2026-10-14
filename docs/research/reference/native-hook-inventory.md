@@ -1,6 +1,6 @@
 # Current native hook and call inventory
 
-Status: **source-verified production inventory** for the current ERUI API 1.1
+Status: **source-verified production inventory** for the current ERUI API 1.2
 implementation. This page was reconciled against the current host, runtime,
 resolver, and feature backends; it is not copied from the historical symbol
 CSV or the earlier research notebooks.
@@ -63,6 +63,7 @@ the current online [`host_dllmain.cpp`](https://github.com/Flammrock/ERNativeUI/
 | Button, ColorPicker, pagination, or submenu route | Action-row construction dependencies are required. | Installation fails if a required shared dependency is absent. |
 | Submenu or continuation page | Subpage materializer and native page-open route are required. | Installation fails. Optional title presentation may still degrade separately. |
 | Popup choice | Constructor/callable dependencies and both scoped list hooks are required. | Installation fails and the partial hook set is reset. |
+| Numeric Slider or Custom Slider | The native SliderCtrl refresh and Scaleform text bridge are required. | Installation fails when a formatted-slider row was declared; ordinary byte Sliders do not require this hook. |
 | TextInput | All build-gated TextInput interfaces and the shared page-frame hook are required. | Installation fails. A later row-construction fault disables TextInput for that process. |
 | Native alert | Custom text, page-frame/Back gates, and the semantic dialog transport are attempted. | Alert support is disabled, but ordinary menu rows remain active. |
 | ColorPicker | Native alert transport, exact ColorPicker backend, and preview-producer hook are required. | If a ColorPicker row was declared, installation fails rather than silently omitting it. |
@@ -93,6 +94,7 @@ live in [`hooks.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/hook
 | `PageFrameFn` | Required by TextInput; also reused when native alerts are available. | One exact ERNativeUI physical settings page. Synchronizes pending TextInput values and ColorPicker previews, then suppresses only that page's frame input while an owned alert holds the popup slot. | Direct semantic AOB, then byte-validated fallback. | Hard for a declared TextInput. For alerts alone, alert support degrades locally. |
 | `NativeBackFn` | Resolved when pagination/built-in continuation needs native Back; detoured as part of alert input ownership. | Native page action wrapper. Allows the owned popup's secondary action, blocks underlying Back during an alert, and records parent restoration after a normal Back. | Direct semantic AOB, then byte-validated fallback. | Hard when required for pagination. Missing alert-only gating disables alerts without disabling rows. |
 | `ScaleformPathResolverFn` mid-hook | A complete title bridge or an installed ColorPicker backend. | Only `MenuTitle/Text_0` during an owned page construction, or `Widgets/Button` during an owned ColorPicker row construction. Thread-local identity leaves all unrelated path lookups untouched. | Direct semantic AOB, then byte-validated fallback. | Presentation-only degradation; no row or callback is removed. |
+| `SliderRefreshFn` | At least one Numeric Slider or Custom Slider was compiled. | Calls the original `CS::SliderCtrl` refresh once, then replaces `Text_0` and `Text_1` only for an indexed ERNativeUI-owned formatted row. Construction-time TLS covers the first refresh before the native controller stores its backing pointer; later calls match that exact pointer. | Direct semantic AOB for vtable slot 13, then byte-validated fallback. | Hard installation failure only when the compiled menu needs formatted sliders. |
 
 The six generic built-in destinations intentionally exclude the real
 Controller Settings/Button Settings screen. API 1.1 extends that specialized
@@ -112,7 +114,7 @@ screen only through the Input Bindings backend. See
 | `DestroyTextReferencesFn` | Release temporary row text-reference sources after the native row clones them. | Direct AOB plus validated fallback; required with all row constructors. |
 | `OpenSubPageFn` | Push a real native child page for submenus and Next. | Direct AOB plus validated fallback; required with physical child routes. |
 | `NativeBackFn` direct call | Perform Previous through the game's own fade/task/stack path. | Same resolved wrapper as the Back gate; required when pagination may need Previous. |
-| `ScaleformTextSetterFn` and `ScaleformResultDestructorFn` | Write a captured physical-page title and release a temporary scene-object result. | Optional direct AOBs plus validated fallbacks; incomplete title bridge disables custom titles only. |
+| `ScaleformTextSetterFn` and `ScaleformResultDestructorFn` | Write a captured physical-page title or owned formatted-slider text and release a temporary scene-object result. | Optional direct AOBs plus validated fallbacks. An incomplete bridge disables custom titles, but is a hard failure when a formatted slider was declared. |
 
 ### Game Options action-row text contract
 
@@ -466,7 +468,6 @@ For a game update, use this page as a checklist, not as an address database:
 
 The historical [address map](../address-map/README.md) is a navigation aid for
 one prior analysis snapshot. Current production authority remains the source
-files linked throughout this document. Exploratory API 1.2 targets such as
-Site of Grace integration, reusable built-in page styles, provider-loaded GFX,
-and custom tabs are intentionally absent: none has a production hook boundary
-yet.
+files linked throughout this document. Future targets such as Site of Grace
+integration, reusable built-in page styles, provider-loaded GFX, and custom
+tabs are intentionally absent: none has a production hook boundary yet.

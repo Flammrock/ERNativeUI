@@ -1,7 +1,9 @@
 # Slider
 
 A Slider adds a native left/right control to an `erui::Page`. Use it for a
-bounded whole-number setting such as effect strength, distance, or volume.
+bounded whole-number setting stored as one unsigned byte, such as effect
+strength or volume. API 1.2 adds [Numeric Slider](numeric-slider.md) for signed
+and decimal values and [Custom Slider](custom-slider.md) for arbitrary labels.
 
 ![The Intensity slider set to 50](../../assets/images/controls/slider/slider_row.png)
 
@@ -231,4 +233,4 @@ Setting `20` programmatically therefore stores `16`.
 [Controls index](README.md) |
 [Reverse-engineering reference](../../research/case-studies/settings-pages-and-pagination.md) |
 Previous: [Toggle](toggle.md) |
-Next: [Inline Choice](inline-choice.md)
+Next: [Numeric Slider](numeric-slider.md)

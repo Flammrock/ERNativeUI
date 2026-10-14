@@ -28,6 +28,7 @@ constexpr std::uintptr_t kRootButtonDisplayTextRva = 0x763BA0;
 constexpr std::uintptr_t kAddToggleRva = 0x948FA0;
 constexpr std::uintptr_t kAddChoiceRva = 0x949120;
 constexpr std::uintptr_t kAddSliderRva = 0x9493F0;
+constexpr std::uintptr_t kSliderRefreshRva = 0x74FA20;
 constexpr std::uintptr_t kAddButtonRva = 0x9298A0;
 constexpr std::uintptr_t kDestroyTextReferencesRva = 0x742C90;
 constexpr std::uintptr_t kTextResolverRva = 0x7633D0;
@@ -152,6 +153,11 @@ constexpr std::string_view kAddTogglePrologue =
     "48 81 EC E8 01 00 00";
 constexpr std::string_view kAddSliderPrologue =
     "4C 8B DC 53 55 56 57 41 56 41 57 48 81 EC 98 01 00 00";
+// CS::SliderCtrl virtual slot 13. This refresh is independent from the row
+// constructor and owns the native Text_0/Text_1 value presentation.
+constexpr std::string_view kSliderRefreshPattern =
+    "40 57 48 81 EC 90 00 00 00 48 C7 44 24 20 FE FF FF FF "
+    "48 89 9C 24 A0 00 00 00 48 8B F9 48 8D 15 ?? ?? ?? ??";
 constexpr std::string_view kAddChoicePrologue =
     "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 18 FF FF FF "
     "48 81 EC E8 01 00 00";
@@ -645,6 +651,33 @@ bool resolve_game_addresses(
             erui::detail::logf(
                 erui::LogLevel::info,
                 "Address resolution: no native submenu rows declared");
+
+            // API 1.2 formatted sliders reuse the same narrow Scaleform text
+            // bridge even when every row lives directly on a built-in page.
+            // Resolve these interfaces opportunistically; runtime.cpp makes
+            // them mandatory only when a compiled formatted slider exists.
+            output.scaleform_path_resolver =
+                reinterpret_cast<ScaleformPathResolverFn>(resolve_optional_direct(
+                    game,
+                    "Scaleform path",
+                    kScaleformPathResolverPattern,
+                    kScaleformPathResolverRva,
+                    kScaleformPathResolverPattern));
+            output.scaleform_text_setter =
+                reinterpret_cast<ScaleformTextSetterFn>(resolve_optional_direct(
+                    game,
+                    "Scaleform text setter",
+                    kScaleformTextSetterPattern,
+                    kScaleformTextSetterRva,
+                    kScaleformTextSetterPattern));
+            output.scaleform_result_destructor =
+                reinterpret_cast<ScaleformResultDestructorFn>(
+                    resolve_optional_direct(
+                        game,
+                        "Scaleform result dtor",
+                        kScaleformResultDestructorPattern,
+                        scaleform_result_destructor_fallback_rva,
+                        kScaleformResultDestructorPattern));
         }
         output.on_off_list = reinterpret_cast<BufferConstructorFn>(resolve_direct(
             game,
@@ -713,6 +746,16 @@ bool resolve_game_addresses(
             kAddSliderCallOffset,
             kAddSliderRva,
             kAddSliderPrologue));
+        // Optional until a compiled API 1.2 NumericSlider or CustomSlider
+        // requests formatted presentation. An unresolved formatter must not
+        // disable ordinary API 1.0/1.1 integer sliders.
+        output.slider_refresh = reinterpret_cast<SliderRefreshFn>(
+            resolve_optional_direct(
+                game,
+                "slider value refresh",
+                kSliderRefreshPattern,
+                kSliderRefreshRva,
+                kSliderRefreshPattern));
 
         // Inline and popup selectors both clone their text references during
         // construction, after which the temporary source object is destroyed.

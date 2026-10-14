@@ -23,6 +23,16 @@ _Static_assert(sizeof(ERUI_ColorPickerChangeContext) == 32u,
     "ERUI_ColorPickerChangeContext ABI drift");
 _Static_assert(sizeof(ERUI_ColorPickerDesc) == 64u,
     "ERUI_ColorPickerDesc ABI drift");
+_Static_assert(sizeof(ERUI_DecimalValue) == 16u,
+    "ERUI_DecimalValue ABI drift");
+_Static_assert(sizeof(ERUI_NumericSliderChangeContext) == 56u,
+    "ERUI_NumericSliderChangeContext ABI drift");
+_Static_assert(sizeof(ERUI_CustomSliderChangeContext) == 40u,
+    "ERUI_CustomSliderChangeContext ABI drift");
+_Static_assert(sizeof(ERUI_NumericSliderDesc) == 136u,
+    "ERUI_NumericSliderDesc ABI drift");
+_Static_assert(sizeof(ERUI_CustomSliderDesc) == 80u,
+    "ERUI_CustomSliderDesc ABI drift");
 _Static_assert(sizeof(ERUI_ActionInputs) == 40u,
     "ERUI_ActionInputs ABI drift");
 _Static_assert(sizeof(ERUI_InputActionActivatedContext) == 32u,
@@ -47,7 +57,7 @@ _Static_assert(sizeof(ERUI_PageTitleFormatContext) == 56u,
 _Static_assert(sizeof(ERUI_PagePresentationDesc) == 64u,
     "ERUI_PagePresentationDesc ABI drift");
 _Static_assert(sizeof(ERUI_AlertDesc) == 48u, "ERUI_AlertDesc ABI drift");
-_Static_assert(sizeof(ERUI_Api) == 320u, "ERUI_Api ABI drift");
+_Static_assert(sizeof(ERUI_Api) == 368u, "ERUI_Api ABI drift");
 _Static_assert(_Alignof(ERUI_Api) == 8u, "ERUI_Api alignment drift");
 _Static_assert(offsetof(ERUI_ProviderDesc, owner_module) == 16u,
     "ERUI_ProviderDesc offset drift");
@@ -97,6 +107,13 @@ _Static_assert(offsetof(ERUI_Api, open_storage) == 240u,
 _Static_assert(offsetof(ERUI_Api, storage_get_info) == 312u,
     "ERUI_Api final storage offset drift");
 _Static_assert(ERUI_API_V1_1_SIZE == 320u, "ERUI API 1.1 prefix drift");
+_Static_assert(offsetof(ERUI_Api, add_numeric_slider) == 320u,
+    "ERUI_Api numeric-slider block drift");
+_Static_assert(offsetof(ERUI_Api, add_custom_slider) == 344u,
+    "ERUI_Api custom-slider block drift");
+_Static_assert(offsetof(ERUI_Api, get_custom_slider_index) == 360u,
+    "ERUI_Api final custom-slider offset drift");
+_Static_assert(ERUI_API_V1_2_SIZE == 368u, "ERUI API 1.2 size drift");
 _Static_assert(ERUI_CAP_INPUT_BINDINGS == (UINT64_C(1) << 14),
     "ERUI input bindings capability drift");
 _Static_assert(ERUI_DUPLICATE_ACTION_ID == 15u,
@@ -133,6 +150,20 @@ static void ERUI_CALL value_callback(void* user_data, uint8_t value) {
 static void ERUI_CALL color_callback(
     void* user_data,
     const ERUI_ColorPickerChangeContext* context) {
+    (void)user_data;
+    (void)context;
+}
+
+static void ERUI_CALL numeric_slider_callback(
+    void* user_data,
+    const ERUI_NumericSliderChangeContext* context) {
+    (void)user_data;
+    (void)context;
+}
+
+static void ERUI_CALL custom_slider_callback(
+    void* user_data,
+    const ERUI_CustomSliderChangeContext* context) {
     (void)user_data;
     (void)context;
 }
@@ -174,6 +205,9 @@ int main(void) {
     ERUI_ButtonDesc button = {0};
     ERUI_ToggleDesc toggle = {0};
     ERUI_ColorPickerDesc color_picker = {0};
+    ERUI_NumericSliderDesc numeric_slider = {0};
+    ERUI_CustomSliderDesc custom_slider = {0};
+    ERUI_DecimalValue decimal_value = {0};
     ERUI_InputSectionDesc binding_section = {0};
     ERUI_InputActionDesc binding = {0};
     ERUI_PagePresentationDesc presentation = {0};
@@ -191,6 +225,18 @@ int main(void) {
     color_picker.initial_value.red = 1u;
     color_picker.initial_value.green = 2u;
     color_picker.initial_value.blue = 3u;
+    numeric_slider.size = (uint32_t)sizeof(numeric_slider);
+    numeric_slider.changed_callback = &numeric_slider_callback;
+    numeric_slider.minimum_scaled_value = -10;
+    numeric_slider.maximum_scaled_value = 10;
+    numeric_slider.step_scaled_value = 1;
+    numeric_slider.initial_scaled_value = -5;
+    numeric_slider.decimal_places = 1u;
+    custom_slider.size = (uint32_t)sizeof(custom_slider);
+    custom_slider.changed_callback = &custom_slider_callback;
+    custom_slider.value_count = 2u;
+    decimal_value.scaled_value = 1275;
+    decimal_value.decimal_places = 2u;
     binding_section.size = (uint32_t)sizeof(binding_section);
     binding.size = (uint32_t)sizeof(binding);
     binding.default_inputs.size =
@@ -216,6 +262,9 @@ int main(void) {
     }
     return provider.size == 0u || button.callback == 0 ||
         toggle.changed_callback == 0 || color_picker.changed_callback == 0 ||
+        numeric_slider.changed_callback == 0 ||
+        custom_slider.changed_callback == 0 ||
+        decimal_value.scaled_value != 1275 ||
         binding_section.size == 0u || binding.activated_callback == 0 ||
         color_picker.initial_value.reserved != 0u ||
         presentation.formatter == 0 ||
@@ -228,6 +277,7 @@ int main(void) {
         ERUI_GAME_LANGUAGE_SPANISH_LATIN_AMERICA != 15u ||
         ERUI_CAP_GAME_LANGUAGE == 0u || ERUI_CAP_COLOR_PICKER == 0u ||
         ERUI_CAP_BUILTIN_PAGES == 0u || ERUI_CAP_INPUT_BINDINGS == 0u ||
-        ERUI_CAP_STORAGE == 0u ||
+        ERUI_CAP_STORAGE == 0u || ERUI_CAP_NUMERIC_SLIDER == 0u ||
+        ERUI_CAP_CUSTOM_SLIDER == 0u ||
         ERUI_PAGE_TITLE_BUFFER_CAPACITY < 1u;
 }

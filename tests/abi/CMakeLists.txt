@@ -83,26 +83,26 @@ if(WIN32)
             /EHsc /Zc:__cplusplus)
     endif()
 
-    add_executable(ERNativeUIAbiCurrentConnectionRejectsV1_0
+    add_executable(ERNativeUIAbiCurrentConnectionRejectsOlderApi
         current/connection_rejection_test.cpp
         support/host_loader.c)
     target_include_directories(
-        ERNativeUIAbiCurrentConnectionRejectsV1_0 PRIVATE
+        ERNativeUIAbiCurrentConnectionRejectsOlderApi PRIVATE
         "${ERNATIVEUI_ABI_REPOSITORY_ROOT}/include"
         "${ERNATIVEUI_ABI_SUPPORT_DIR}")
     target_compile_features(
-        ERNativeUIAbiCurrentConnectionRejectsV1_0 PRIVATE
+        ERNativeUIAbiCurrentConnectionRejectsOlderApi PRIVATE
         cxx_std_17)
     set_target_properties(
-        ERNativeUIAbiCurrentConnectionRejectsV1_0 PROPERTIES
+        ERNativeUIAbiCurrentConnectionRejectsOlderApi PROPERTIES
         C_STANDARD 11
         C_STANDARD_REQUIRED YES)
     target_compile_definitions(
-        ERNativeUIAbiCurrentConnectionRejectsV1_0 PRIVATE
+        ERNativeUIAbiCurrentConnectionRejectsOlderApi PRIVATE
         WIN32_LEAN_AND_MEAN NOMINMAX)
     if(MSVC)
         target_compile_options(
-            ERNativeUIAbiCurrentConnectionRejectsV1_0 PRIVATE
+            ERNativeUIAbiCurrentConnectionRejectsOlderApi PRIVATE
             /EHsc /Zc:__cplusplus)
     endif()
 
@@ -289,6 +289,37 @@ if(WIN32)
     target_compile_definitions(ERNativeUIAbiCurrentStorageContract PRIVATE
         WIN32_LEAN_AND_MEAN NOMINMAX)
 
+    add_executable(ERNativeUIAbiCurrentSliderContract
+        current/slider_contract_test.c
+        support/host_loader.c)
+    target_include_directories(ERNativeUIAbiCurrentSliderContract PRIVATE
+        "${ERNATIVEUI_ABI_REPOSITORY_ROOT}/include"
+        "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+    set_target_properties(ERNativeUIAbiCurrentSliderContract PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS NO)
+    target_compile_definitions(ERNativeUIAbiCurrentSliderContract PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX)
+
+    add_executable(ERNativeUIAbiCurrentSliderWrapper
+        current/slider_wrapper_test.cpp
+        support/host_loader.c)
+    target_include_directories(ERNativeUIAbiCurrentSliderWrapper PRIVATE
+        "${ERNATIVEUI_ABI_REPOSITORY_ROOT}/include"
+        "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+    target_compile_features(ERNativeUIAbiCurrentSliderWrapper PRIVATE
+        cxx_std_17)
+    set_target_properties(ERNativeUIAbiCurrentSliderWrapper PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES)
+    target_compile_definitions(ERNativeUIAbiCurrentSliderWrapper PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(ERNativeUIAbiCurrentSliderWrapper PRIVATE
+            /EHsc /Zc:__cplusplus)
+    endif()
+
     if(TARGET ERNativeUIAbiHostCurrent)
         set(_erui_v1_0_include
             "${CMAKE_CURRENT_LIST_DIR}/releases/v1_0/include")
@@ -366,6 +397,48 @@ if(WIN32)
         add_test(NAME ERNativeUI.ABI.Compat.V1_0.CppToCurrent
             COMMAND ERNativeUIAbiV1_0ToCurrentCpp
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+
+        set(_erui_v1_1_include
+            "${CMAKE_CURRENT_LIST_DIR}/releases/v1_1/include")
+
+        add_executable(ERNativeUIAbiV1_1ToCurrentC
+            releases/v1_1/current_host_smoke_test.c
+            support/host_loader.c)
+        target_include_directories(ERNativeUIAbiV1_1ToCurrentC BEFORE PRIVATE
+            "${_erui_v1_1_include}"
+            "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+        set_target_properties(ERNativeUIAbiV1_1ToCurrentC PROPERTIES
+            C_STANDARD 11
+            C_STANDARD_REQUIRED YES
+            C_EXTENSIONS NO)
+        target_compile_definitions(ERNativeUIAbiV1_1ToCurrentC PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX)
+
+        add_executable(ERNativeUIAbiV1_1ToCurrentCpp
+            releases/v1_1/current_host_wrapper_smoke_test.cpp
+            support/host_loader.c)
+        target_include_directories(
+            ERNativeUIAbiV1_1ToCurrentCpp BEFORE PRIVATE
+            "${_erui_v1_1_include}"
+            "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+        target_compile_features(ERNativeUIAbiV1_1ToCurrentCpp PRIVATE
+            cxx_std_17)
+        set_target_properties(ERNativeUIAbiV1_1ToCurrentCpp PROPERTIES
+            C_STANDARD 11
+            C_STANDARD_REQUIRED YES)
+        target_compile_definitions(ERNativeUIAbiV1_1ToCurrentCpp PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX)
+        if(MSVC)
+            target_compile_options(ERNativeUIAbiV1_1ToCurrentCpp PRIVATE
+                /EHsc /Zc:__cplusplus)
+        endif()
+
+        add_test(NAME ERNativeUI.ABI.Compat.V1_1.CToCurrent
+            COMMAND ERNativeUIAbiV1_1ToCurrentC
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+        add_test(NAME ERNativeUI.ABI.Compat.V1_1.CppToCurrent
+            COMMAND ERNativeUIAbiV1_1ToCurrentCpp
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
         add_test(NAME ERNativeUI.ABI.Negotiation.CurrentProduction
             COMMAND ERNativeUIAbiNegotiationCurrent
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>" current)
@@ -392,6 +465,12 @@ if(WIN32)
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
         add_test(NAME ERNativeUI.ABI.Storage.CurrentProductionC
             COMMAND ERNativeUIAbiCurrentStorageContract
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+        add_test(NAME ERNativeUI.ABI.Sliders.CurrentProductionC
+            COMMAND ERNativeUIAbiCurrentSliderContract
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+        add_test(NAME ERNativeUI.ABI.Sliders.CurrentProductionCpp
+            COMMAND ERNativeUIAbiCurrentSliderWrapper
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
     endif()
 endif()

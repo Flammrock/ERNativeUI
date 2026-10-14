@@ -17,7 +17,7 @@ configuration, verification, and troubleshooting.
    integration errors.
 2. Check the [supported features](features.md), including API-version and
    release status.
-3. Check [game and mod compatibility](compatibility.md) for the running game
+3. Check [game and mod compatibility](COMPATIBILITY.md) for the running game
    build, other DLLs, and optional loose assets.
 4. Understand the independent [release and API versions](versioning.md).
 5. Read [how ERNativeUI works](how-it-works.md) for the host/client model,
@@ -72,7 +72,7 @@ and links the reproducible Ghidra workflow and architecture map.
 
 The research library includes reproducible case studies for settings-page
 placement and pagination, dialogs, popup choices, TextInput, ColorPicker,
-input bindings, GFX presentation, and Steam language discovery. Use the
+numeric/custom sliders, input bindings, GFX presentation, and Steam language discovery. Use the
 [supported features](features.md), [mod-author guides](guides/README.md), the
 [reference](reference/README.md), and the public headers for current behavior
 and contracts; use the research library for native implementation evidence and

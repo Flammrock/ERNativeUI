@@ -26,6 +26,8 @@ operation represented by that capability. For example:
 erui::Capability::button
 erui::Capability::text_input
 erui::Capability::color_picker
+erui::Capability::numeric_slider
+erui::Capability::custom_slider
 ```
 
 Check the `ConnectionResult` before reading its `Connection`, then use
@@ -80,8 +82,8 @@ const bool available_after_commit =
 Here, `menu` has type `erui::Menu` and `registration` has type
 `erui::Registration`.
 
-The current C++17 wrapper negotiates API 1.1 as one complete contract, so a
-successful connection normally reports all API 1.1 capabilities. Explicit
+The current C++17 wrapper negotiates API 1.2 as one complete contract, so a
+successful connection normally reports all API 1.2 capabilities. Explicit
 checks still document a mod's requirements and keep call sites understandable
 if capabilities become optional in a later API.
 

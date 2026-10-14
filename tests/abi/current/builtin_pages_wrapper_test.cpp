@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
 
     auto connected = erui::connect();
     CHECK(connected.success());
-    CHECK(connected.value().api_version() == ERUI_API_VERSION_1_1);
+    CHECK(connected.value().api_version() == ERUI_API_VERSION_1_2);
     CHECK(connected.value().supports(erui::Capability::builtin_pages));
 
     constexpr std::array builtin_pages{

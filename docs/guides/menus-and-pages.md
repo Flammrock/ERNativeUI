@@ -5,7 +5,7 @@ copies that declaration, merges it with every other provider, and presents it
 through Elden Ring's native Configuration UI. Client mods never receive a game
 page pointer and do not create their own hooks.
 
-This guide uses the current API 1.1 C++17 wrapper. Begin with the
+This guide uses the current API 1.2 C++17 wrapper. Begin with the
 [setup guide](../getting-started/setup.md) and
 [first client mod](../getting-started/first-mod.md) if the connection and
 registration lifecycle is not yet familiar.

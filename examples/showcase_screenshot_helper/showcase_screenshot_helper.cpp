@@ -19,6 +19,8 @@ enum class ShowcaseMode {
     submenu,
     toggle,
     slider,
+    numeric_slider,
+    custom_slider,
     inline_choice,
     popup_choice,
     text_input,
@@ -31,11 +33,15 @@ struct ModeDefinition {
     const wchar_t* page_title;
 };
 
-constexpr std::array<ModeDefinition, 8> kModes{{
+constexpr std::array<ModeDefinition, 10> kModes{{
     {"button", ShowcaseMode::button, L"Button Showcase"},
     {"submenu", ShowcaseMode::submenu, L"Submenu Showcase"},
     {"toggle", ShowcaseMode::toggle, L"Toggle Showcase"},
     {"slider", ShowcaseMode::slider, L"Slider Showcase"},
+    {"numeric-slider", ShowcaseMode::numeric_slider,
+        L"Numeric Slider Showcase"},
+    {"custom-slider", ShowcaseMode::custom_slider,
+        L"Custom Slider Showcase"},
     {"inline-choice", ShowcaseMode::inline_choice, L"Inline Choice Showcase"},
     {"popup-choice", ShowcaseMode::popup_choice, L"Popup Choice Showcase"},
     {"text-input", ShowcaseMode::text_input, L"TextInput Showcase"},
@@ -44,6 +50,9 @@ constexpr std::array<ModeDefinition, 8> kModes{{
 
 constexpr std::array<std::wstring_view, 4> kQualityValues{
     L"Minimal", L"Balanced", L"Detailed", L"Maximum"};
+
+constexpr std::array<std::wstring_view, 7> kImpossibleValues{
+    L"-7", L"3", L"7.8", L"1s", L"hello", L"18", L"x1.3"};
 
 HMODULE g_module{};
 erui::Registration g_registration{};
@@ -194,6 +203,41 @@ void add_selected_control(
             intensity);
         break;
     }
+
+    case ShowcaseMode::numeric_slider:
+        if (menu.supports(erui::Capability::numeric_slider)) {
+            erui::NumericSliderOptions distance{};
+            distance.minimum = 0.1;
+            distance.maximum = 2.0;
+            distance.step = 0.1;
+            distance.initial_value = 0.6;
+            distance.decimal_places = 1;
+            distance.prefix = L"x";
+            page.add_slider(
+                L"Camera Distance",
+                L"Adjust the camera distance.",
+                distance);
+        }
+        break;
+
+    case ShowcaseMode::custom_slider:
+        if (menu.supports(erui::Capability::custom_slider)) {
+            erui::CustomSliderOptions values{};
+            values.value_count =
+                static_cast<std::uint32_t>(kImpossibleValues.size());
+            values.initial_index = 4;
+            values.format_value =
+                [](std::uint32_t index, std::uint32_t) -> std::wstring {
+                    return index < kImpossibleValues.size()
+                        ? std::wstring(kImpossibleValues[index])
+                        : std::wstring{};
+                };
+            page.add_custom_slider(
+                L"Impossible Values",
+                L"Every position can display unrelated text.",
+                values);
+        }
+        break;
 
     case ShowcaseMode::inline_choice: {
         erui::ChoiceOptions quality{};

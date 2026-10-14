@@ -130,15 +130,15 @@ Do not bundle a private `ERNativeUI.dll` in every mod. Declare the canonical
 host as a dependency. If the host is missing or incompatible, the template
 logs a connection error and the rest of your mod can continue.
 When Solid Uncapper is installed, place it before the host as described in the
-[compatibility instructions](../../docs/compatibility.md#solid-uncapper).
+[compatibility instructions](../../docs/COMPATIBILITY.md#solid-uncapper).
 
 ## State and callback rules
 
 - The host copies all text/options and owns toggle, slider, inline-choice, and
   popup-choice bytes, TextInput strings, and ColorPicker RGB values. Choice
   indices and callbacks are always zero-based.
-- The current C++ wrapper requests the exact API 1.1 table. A host exposing
-  only API 1.0 is rejected with a clear connection error instead of silently
+- The current C++ wrapper requests the exact API 1.2 table. A host exposing
+  only API 1.0 or 1.1 is rejected with a clear connection error instead of silently
   reducing the features available to a newly built client.
 - Gate TextInput's builder with
   `menu.supports(erui::Capability::text_input)` to document the row's feature

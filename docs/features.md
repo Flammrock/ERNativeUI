@@ -13,19 +13,19 @@ contracts.
 
 | Label | Meaning |
 |---|---|
-| **Current API 1.1** | The current client contract. ERNativeUI 1.1.0 is the first release line that packages it. |
-| **Supported API 1.0** | The frozen original contract. Any client built with the API 1.0 SDK remains supported by compatible 1.x hosts. |
+| **Current API 1.2** | The current client contract. ERNativeUI 1.2.0 is the first release line that packages it. |
+| **Supported APIs 1.0 and 1.1** | Frozen earlier contracts. Already-compiled clients remain supported by compatible 1.x hosts. |
 | **Future research** | Not implemented in the public API. Do not design a client around it yet. |
 
 ERNativeUI release versions and public API versions are independent. The
-ERNativeUI 1.1.0 release happens to introduce API 1.1, but that matching number
+ERNativeUI 1.2.0 release happens to introduce API 1.2, but that matching number
 does not couple their future evolution. See [Versioning](versioning.md) and the
 permanent [API migration guides](migrations/README.md).
 
 The “minimum API” column names the C ABI version in which a feature first
-appears. The current `ERNativeUI.hpp` deliberately connects to API 1.1 exactly;
-the wrapper shipped in the API 1.0 SDK continues to use the frozen API 1.0
-table. Choosing either SDK is valid; a client does not silently upgrade its
+appears. The current `ERNativeUI.hpp` deliberately connects to API 1.2 exactly;
+wrappers shipped in the API 1.0 and 1.1 SDKs continue to request their frozen
+tables. Choosing an older SDK is valid; a client does not silently upgrade its
 runtime API when the player installs a newer compatible host.
 
 ## Features introduced in API 1.0
@@ -49,7 +49,7 @@ runtime API when the player installs a newer compatible host.
 
 | Feature | What the player sees | Minimum API and capability | Optional GFX | Important limits and examples |
 |---|---|---|---|---|
-| Explicit connection lifecycle | No new widget; clients wait for host startup and language selection before registering through one negotiated connection. | 1.1; no separate capability bit. | No. | `erui::connect()` runs on a worker after `DllMain`, requests 1.1 exactly, and never silently downgrades. |
+| Explicit connection lifecycle | No new widget; clients wait for host startup and language selection before registering through one negotiated connection. | 1.1; no separate capability bit. | No. | `erui::connect()` runs on a worker after `DllMain`, requests the exact API selected by its SDK header, and never silently downgrades. |
 | [Text input](guides/controls/text-input.md) | A native editable text row with a placeholder and confirmed value. | 1.1; `ERUI_CAP_TEXT_INPUT` | Optional `02_040`/`02_042` character-name presentation adds the red empty state and bracketed frame. Editing still works without it. | Fixed per-row limit of 1–35 UTF-16 code units; default 16. Only a changed confirmation notifies the client. [Template](../examples/template/README.md). |
 | [RGB color picker](guides/controls/color-picker.md) | A row opening Elden Ring's native character-creation color editor. | 1.1; `ERUI_CAP_COLOR_PICKER` | Optional `02_040`/`02_042` standalone widget adds the bracketed live color swatch. Without it, the row remains a functional action-row fallback. | RGB only; no public alpha or packed game value. One editor may be open process-wide. [Showcase](../examples/tarnished_ui_showcase/README.md). |
 | Additional built-in pages | Ordinary ERNativeUI rows can appear in Camera Options, Display, Sound, Network, Keyboard/Mouse Settings, and Graphics as well as Game Options. | 1.1; `ERUI_CAP_BUILTIN_PAGES` | Usually no. On the tested native layout Camera Options is already full, so `02_040` must expand that panel before it has room for an ERNativeUI row or Next row. | Each destination resolves and paginates independently. Controller Settings is intentionally not an ordinary destination. |
@@ -58,7 +58,15 @@ runtime API when the player installs a newer compatible host.
 | [Provider storage](guides/storage.md) | Mods may explicitly load, mutate, and atomically save typed INI data, including semantic input assignments. | 1.1; `ERUI_CAP_STORAGE` | No. | Host-backed: it requires a successful API 1.1 connection and active provider registration to open. Nothing loads or saves automatically. The default directory uses the provider ID when that cannot create a Windows path alias; otherwise it uses an isolated `~<sha256>` name. |
 | Header-only assignment codec | Mods with another configuration backend can parse and format stable controller/keyboard/mouse names without loading the host. | API 1.1 header utility; no runtime capability required for the codec itself. | No. | Preserves the difference between unsupported, supported-unbound, and bound slots. Runtime application still requires Input Bindings. See [Input values and codec](reference/input-values-and-codec.md). |
 
-The API 1.1 C function table is the current public contract. Capability checks
+## Features introduced in API 1.2
+
+| Feature | What the player sees | Minimum API and capability | Optional GFX | Important limits and examples |
+|---|---|---|---|---|
+| [Numeric Slider](guides/controls/numeric-slider.md) | A native slider displaying signed or decimal values with optional prefix and suffix text, such as `x0.6`, `-0.5`, or `3.0s`. | 1.2; `ERUI_CAP_NUMERIC_SLIDER` | No. | Exact base-10 arithmetic, 0–9 decimal places, and 2–256 logical positions. Callbacks expose the friendly number, exact scaled integer, and logical index. |
+| [Custom Slider](guides/controls/custom-slider.md) | A native slider whose positions can display completely unrelated labels. | 1.2; `ERUI_CAP_CUSTOM_SLIDER` | No. | 2–256 copied labels, each at most 64 UTF-16 code units. The C++ formatter runs only during registration; callbacks expose the selected index. |
+
+The API 1.2 C function table is the current public contract. It appends the
+two slider blocks after the frozen API 1.1 prefix. Capability checks
 describe the negotiated host surface; game-version validation can still
 disable an individual built-in destination or make a required compiled feature
 fail safely when its native boundary cannot be proven.
@@ -84,16 +92,16 @@ implementation reference is in the
 
 ## Future API research, not currently supported
 
-The following are API 1.2 investigation targets, not delivery promises. A
+The following are post-1.2 investigation targets, not delivery promises. A
 feature that cannot yet satisfy ERNativeUI's lifetime, input, teardown,
 coexistence, and validation requirements may move to API 1.3 or later.
 
 | Feature | Intended player experience | Current status |
 |---|---|---|
-| Custom top-level Configuration tabs | Provider-defined tab names and icons, navigable by mouse and shoulder buttons without a fixed logical tab limit. | API 1.2 research target. No public descriptor, icon contract, merge policy, or runtime backend exists yet. |
-| Site of Grace integration | Provider actions, dialogs, or pages reachable from the native Site of Grace menu. | API 1.2 research target. No public capability or supported hook path exists yet. |
-| Reusable native page templates | Provider-owned pages styled and structured like other Elden Ring interfaces, such as the Crystal Tears menu. | API 1.2 research target. Safe construction, data binding, input, and teardown have not been proven. |
-| Runtime-loaded provider GFX | A mod authors its own GFX movie and asks ERNativeUI to load and drive it at runtime. | API 1.2 research target. Movie loading, events, focus, resource ownership, paths, and cross-mod conflicts must be investigated first. |
+| Custom top-level Configuration tabs | Provider-defined tab names and icons, navigable by mouse and shoulder buttons without a fixed logical tab limit. | Future research. No public descriptor, icon contract, merge policy, or runtime backend exists yet. |
+| Site of Grace integration | Provider actions, dialogs, or pages reachable from the native Site of Grace menu. | Future research. No public capability or supported hook path exists yet. |
+| Reusable native page templates | Provider-owned pages styled and structured like other Elden Ring interfaces, such as the Crystal Tears menu. | Future research. Safe construction, data binding, input, and teardown have not been proven. |
+| Runtime-loaded provider GFX | A mod authors its own GFX movie and asks ERNativeUI to load and drive it at runtime. | Future research. Movie loading, events, focus, resource ownership, paths, and cross-mod conflicts must be investigated first. |
 | Ordinary rows in Controller Settings | Generic toggles/buttons mixed into the controller remapping page. | Not planned as a generic built-in page. API 1.1 uses the specialized native Input Bindings model there instead. |
 
 ## Platform and compatibility limits
@@ -119,7 +127,7 @@ coexistence, and validation requirements may move to API 1.3 or later.
 - DLC compatibility has not been live-validated; no incompatibility is
   currently claimed or ruled out.
 
-See [Game and mod compatibility](compatibility.md) for tested combinations and
+See [Game and mod compatibility](COMPATIBILITY.md) for tested combinations and
 the reporting checklist. The exact ownership and directional API 1.0
 client/new-host contract are in
 [Lifecycle, errors, and limits](reference/lifecycle-errors-and-limits.md#api-10-binary-compatibility).

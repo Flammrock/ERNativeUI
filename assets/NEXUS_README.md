@@ -67,7 +67,7 @@ for complete setup, runtime configuration, and verification details.
 
 - Only one canonical `ERNativeUI.dll` should be loaded.
 - For Solid Uncapper, list `Solid Uncapper.dll` before `ERNativeUI.dll` and
-  consult the exact tested matrix in [Game and mod compatibility](https://github.com/Flammrock/ERNativeUI/blob/main/docs/compatibility.md).
+  consult the exact tested matrix in [Game and mod compatibility](https://github.com/Flammrock/ERNativeUI/blob/main/docs/COMPATIBILITY.md).
 - Seamless Co-op 2.0.1 was live-tested with Elden Ring 2.7.0.0, with no
   incompatibility observed for that exact combination.
 - Shadow of the Erdtree remains explicitly unverified until its live test

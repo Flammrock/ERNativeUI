@@ -143,6 +143,7 @@ if(_ernativeui_need_native_core)
         src/native_input_bindings.cpp
         src/native_menu.cpp
         src/native_popup_choice.cpp
+        src/native_slider_presentation.cpp
         src/native_text_input.cpp
         src/native_text_result.cpp
         src/pagination.cpp
@@ -568,6 +569,20 @@ if(_ernativeui_enable_tests)
         target_compile_definitions(ERNativeUIRegistryTests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
         target_link_libraries(ERNativeUIRegistryTests PRIVATE ERNativeUI::Core)
         add_test(NAME ERNativeUI.Registry COMMAND ERNativeUIRegistryTests)
+
+        add_executable(ERNativeUISliderRegistryTests
+            tests/slider_registry_test.cpp
+            src/host_registry.cpp src/menu.cpp src/steam_language.cpp)
+        target_include_directories(ERNativeUISliderRegistryTests PRIVATE
+            src include tests)
+        target_compile_features(ERNativeUISliderRegistryTests PRIVATE
+            cxx_std_20)
+        target_compile_definitions(ERNativeUISliderRegistryTests PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX)
+        target_link_libraries(ERNativeUISliderRegistryTests PRIVATE
+            ERNativeUI::Core)
+        add_test(NAME ERNativeUI.SliderRegistry
+            COMMAND ERNativeUISliderRegistryTests)
     endif()
 endif()
 

@@ -10,8 +10,8 @@ use the [documented ERNativeUI features](../features.md) through the public
 [C ABI](https://github.com/Flammrock/ERNativeUI/blob/main/include/ernativeui/erui.h) or
 [C++17 wrapper](https://github.com/Flammrock/ERNativeUI/blob/main/include/ernativeui/ERNativeUI.hpp).
 
-ERUI API 1.1 is the current, finished public contract. A research item tagged
-for API 1.2 is exploratory: it is neither a release promise nor permission to
+ERUI API 1.2 is the current public contract. A research item tagged for a
+later API is exploratory: it is neither a release promise nor permission to
 depend on an unfinished native boundary.
 
 ## Evidence labels
@@ -71,6 +71,7 @@ launch's module base to obtain an RVA.
 | How was editable native text recovered and integrated? | [Text-input case study](case-studies/text-input.md) |
 | How was the character-creation color editor reused safely? | [Color-picker case study](case-studies/color-picker.md) |
 | How were native binding rows, input codes, and activation dispatch recovered? | [Input-bindings case study](case-studies/input-bindings.md) |
+| How were signed, decimal, and arbitrary slider values implemented without replacing the native bar? | [Numeric and custom slider case study](case-studies/formatted-sliders.md) |
 | Why do TextInput and ColorPicker need optional patched GFX assets? | [GFX presentation case study](case-studies/gfx-presentation.md) |
 | How is Steam language discovered without a game hook? | [Steam language case study](case-studies/steam-language.md) |
 

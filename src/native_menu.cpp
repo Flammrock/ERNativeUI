@@ -1,6 +1,7 @@
 #include "native_menu.hpp"
 
 #include "native_dialog.hpp"
+#include "native_slider_presentation.hpp"
 #include "runtime_log.hpp"
 #include "runtime_state.hpp"
 #include "root_button_text_override.hpp"
@@ -275,6 +276,7 @@ bool add_slider(
                 row.enabled ? 1 : 0);
         }
 
+        begin_native_slider_presentation_row(row.byte_value);
         addresses.add_slider(
             page,
             text_references,
@@ -282,9 +284,11 @@ bool add_slider(
             &range,
             current,
             row.enabled);
+        end_native_slider_presentation_row();
         return true;
 #if defined(_MSC_VER)
     } __except (seh_exception_code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        end_native_slider_presentation_row();
         faulted = true;
         erui::detail::logf(
             erui::LogLevel::error,
@@ -873,6 +877,11 @@ bool inject_logical_row(
             add_toggle(page, addresses, row, faulted);
         break;
     case erui::RowKind::slider:
+        constructor_succeeded = row.byte_value &&
+            add_slider(page, addresses, row, faulted);
+        break;
+    case erui::RowKind::numeric_slider:
+    case erui::RowKind::custom_slider:
         constructor_succeeded = row.byte_value &&
             add_slider(page, addresses, row, faulted);
         break;

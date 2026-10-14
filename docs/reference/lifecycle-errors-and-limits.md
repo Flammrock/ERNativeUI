@@ -1,8 +1,8 @@
 # Lifecycle, errors, and limits
 
-This page defines the common contract every ERUI API 1.1 client needs,
-regardless of which controls it uses. API 1.1 is the finished current runtime
-API. ERNativeUI 1.1.0 is the first project release that packages it; those two
+This page defines the common contract every ERUI API 1.2 client needs,
+regardless of which controls it uses. API 1.2 is the finished current runtime
+API. ERNativeUI 1.2.0 is the first project release that packages it; those two
 version numbers are independent.
 
 The strict-C declarations in `<ernativeui/erui.h>` are normative. The C++17
@@ -14,7 +14,7 @@ placing C++ objects across the DLL boundary.
 ```text
 client DllMain
     -> capture HMODULE and start a worker
-        -> connect to exact API 1.1
+        -> connect to exact API 1.2
             -> register a private provider draft
                 -> add pages, rows, bindings, and optional storage
                     -> commit and wait for final native installation
@@ -42,10 +42,10 @@ const erui::LanguageInfo language = connected.value().game_language();
 
 The default overload waits for at most 30 seconds. The duration overload can
 choose another bounded timeout. It polls for the already-loaded canonical
-`ERNativeUI.dll`; it does not call `LoadLibrary`. It requests API 1.1 exactly,
-does not downgrade to API 1.0, and returns immediately when the host is ready.
+`ERNativeUI.dll`; it does not call `LoadLibrary`. It requests API 1.2 exactly,
+does not downgrade to an older API, and returns immediately when the host is ready.
 
-A successful API 1.1 handshake guarantees that process-wide language selection
+A successful API 1.2 handshake guarantees that process-wide language selection
 has settled. With `Language = auto`, lookup can still return
 `ERUI_NOT_SUPPORTED` when Steam is definitively unavailable; this does not
 disable the menu API. An explicit host language is immediately available.
@@ -56,8 +56,8 @@ A strict-C client performs the same sequence explicitly:
 
 1. Call `GetModuleHandleW(L"ERNativeUI.dll")`; never load a private copy.
 2. Resolve `ERUI_GetApi` with `GetProcAddress`.
-3. Zero a fresh `ERUI_Api`, set `size = ERUI_API_V1_1_SIZE`, and request
-   `ERUI_API_VERSION_1_1`.
+3. Zero a fresh `ERUI_Api`, set `size = ERUI_API_V1_2_SIZE`, and request
+   `ERUI_API_VERSION_1_2`.
 4. Retry only `ERUI_HOST_NOT_READY` from a worker. Reinitialize the table for
    each attempt instead of reusing a possibly partial result.
 5. On success, verify the exact returned version, required table size,
@@ -136,18 +136,19 @@ that table; they are not substitutes for checking an operation's
 
 | API | Capability groups |
 |---|---|
-| 1.0 prefix retained by API 1.1 | Toggle, slider, button, submenu, pagination, host-owned row values, page presentation, alerts, inline choice, popup choice, game language |
+| 1.0 prefix retained by API 1.1 and 1.2 | Toggle, slider, button, submenu, pagination, host-owned row values, page presentation, alerts, inline choice, popup choice, game language |
 | Added in 1.1 | TextInput, ColorPicker, built-in pages, input bindings, provider storage |
+| Added in 1.2 | Numeric Slider and Custom Slider |
 
 In C++, query `connection.supports(erui::Capability::text_input)` or
 `menu.supports(...)` before capability-scoped code. The corresponding raw-C
 test checks both the `ERUI_CAP_*` bit and its function-table pointer.
 
-The current C++ wrapper accepts API 1.1 only when the complete appended
-TextInput, ColorPicker, built-in-page, input-binding, and storage blocks are
-present. Checks near individual builders still document their dependency and
-guard bad tables; they are not an automatic downgrade path to a partial API
-1.1 table or a host exposing only API 1.0.
+The current C++ wrapper accepts API 1.2 only when the complete Numeric Slider
+and Custom Slider blocks, as well as the retained API 1.1 surface, are present.
+Checks near individual builders still document their dependency and guard bad
+tables; they are not an automatic downgrade path to a partial table or a host
+exposing only an older API.
 
 A capability says the host implements the public surface. A game-build-
 sensitive operation can still return `ERUI_NOT_SUPPORTED`, or final native
@@ -184,7 +185,7 @@ pairs.
 | `register_menu` builder | Calling client's initialization worker |
 | Page-title formatter | ERNativeUI's startup worker during compilation, before successful commit returns |
 | Button callback | Synchronously on Elden Ring's UI thread |
-| Toggle, slider, inline-choice, and popup-choice change callback | ERNativeUI worker |
+| Toggle, Slider, Numeric Slider, Custom Slider, inline-choice, and popup-choice change callback | ERNativeUI worker |
 | TextInput and ColorPicker confirmed-change callback | ERNativeUI worker |
 | Input-action and assignment-change callback | Serialized on the ERNativeUI worker after input-thread sampling |
 | Alert completion callback | Asynchronously on the ERNativeUI worker; never inside `alert`/`enqueue_alert` |
@@ -333,7 +334,7 @@ creates only an in-memory handle:
   disk write; and
 - nothing is saved automatically at process exit.
 
-## Important API 1.1 limits
+## Important API 1.2 limits
 
 These limits are enforced by the public contract or by the bounded host
 service behind it.
@@ -363,6 +364,10 @@ service behind it.
 | Assignment changes applied in one storage batch | 4,096 |
 | API 1.0 function-table prefix on Windows x64 | `ERUI_API_V1_0_SIZE`, 128 bytes |
 | API 1.1 function-table prefix on Windows x64 | `ERUI_API_V1_1_SIZE`, 320 bytes |
+| API 1.2 function-table prefix on Windows x64 | `ERUI_API_V1_2_SIZE`, 368 bytes |
+| Numeric or Custom Slider logical positions | 2 through 256 per row |
+| Numeric Slider decimal places | 0 through 9 |
+| Custom Slider display value | 64 valid UTF-16 code units per position |
 
 The 4,096-section and 4,096-action values are defensive registration and
 service ceilings, not a demonstrated practical size for Elden Ring's native
@@ -420,6 +425,11 @@ numeric literal.
 | `ERUI_Color` | 4 |
 | `ERUI_ColorPickerChangeContext` | 32 |
 | `ERUI_ColorPickerDesc` | 64 |
+| `ERUI_DecimalValue` | 16 |
+| `ERUI_NumericSliderChangeContext` | 56 |
+| `ERUI_CustomSliderChangeContext` | 40 |
+| `ERUI_NumericSliderDesc` | 136 |
+| `ERUI_CustomSliderDesc` | 80 |
 | `ERUI_ControllerInput`, `ERUI_KeyboardInput`, `ERUI_MouseInput` | 8 |
 | `ERUI_ActionInputs` | 40 |
 | `ERUI_InputActionActivatedContext` | 32 |
@@ -432,45 +442,48 @@ numeric literal.
 | `ERUI_StorageKey` | 48 |
 | API 1.0 function-table prefix | 128 |
 | API 1.1 function-table prefix | 320 |
+| API 1.2 function-table prefix | 368 |
 
 The complete offset and guard-page assertions live in
 [`tests/abi/current/c_layout_test.c`](https://github.com/Flammrock/ERNativeUI/blob/main/tests/abi/current/c_layout_test.c).
-Frozen API 1.0 headers and clients are kept separately under
-[`tests/abi/releases/v1_0`](https://github.com/Flammrock/ERNativeUI/tree/main/tests/abi/releases/v1_0).
+Frozen API 1.0 and 1.1 headers and clients are kept separately under
+[`tests/abi/releases`](https://github.com/Flammrock/ERNativeUI/tree/main/tests/abi/releases).
 
-## API 1.0 binary compatibility
+## Earlier-API binary compatibility
 
 Compatibility is directional:
 
 | Client binary | Loaded host | Result |
 |---|---|---|
-| Built with the released API 1.0 headers, before or after API 1.1 was published | Host exposing API 1.1 | Supported through the unchanged 128-byte API 1.0 prefix and original lifecycle |
-| Compiled with current API 1.1 headers | Host exposing API 1.1 | Supported through explicit connection |
-| Compiled with current API 1.1 headers | Host exposing only API 1.0 | Rejected; there is no silent downgrade |
+| Built with released API 1.0 headers | Host exposing API 1.2 | Supported through the unchanged 128-byte API 1.0 prefix and original lifecycle |
+| Built with released API 1.1 headers | Host exposing API 1.2 | Supported through the unchanged API 1.1 prefix and explicit connection lifecycle |
+| Compiled with current API 1.2 headers | Host exposing API 1.2 | Supported through explicit connection |
+| Compiled with current API 1.2 headers | Host exposing only API 1.0 or 1.1 | Rejected; there is no silent downgrade |
 | Requests an unknown API version | Current host | `ERUI_UNSUPPORTED_VERSION` |
 
-An API 1.0 DLL embeds its selected header-only wrapper and does not need to be
-recompiled merely because a player installs a host release that also supports
-API 1.1. Source intentionally updated to the API 1.1 header must adopt the 1.1
-`connect()` and `Connection::register_menu` flow.
+An earlier client DLL embeds its selected header-only wrapper and does not need
+to be recompiled merely because a player installs a host release that also
+supports API 1.2. Source intentionally rebuilt with the API 1.2 header requests
+the new contract through `connect()`.
 
 Every 1.x host retains each API 1.x contract introduced by it or an earlier
 1.x host release. A future host major may drop APIs from the previous major
 unless its release documentation explicitly retains them. See
 [Versioning](../versioning.md#same-major-host-compatibility-policy).
 
-The API 1.0 prefix remains byte-for-byte frozen at 128 bytes. API 1.1 appends
-new entries through its 320-byte prefix; it does not reorder API 1.0 fields.
+The API 1.0 prefix remains byte-for-byte frozen at 128 bytes. API 1.1 remains
+frozen at its published prefix size. API 1.2 appends its new entries after
+that prefix; it does not reorder any earlier fields.
 The host writes only the selected supported prefix within the caller-declared
 table size. Fixed-width integers, size-prefixed POD structures, `ERUI_CALL`
 (`__cdecl`), and opaque handles keep MSVC, clang-cl, MinGW-w64, C, and C++
 clients on the same public boundary.
 
 This is runtime API compatibility, not release-package selection. CMake's
-`find_package(ERNativeUI 1.1.0)` checks an ERNativeUI project release at build
-time; `ERUI_GetApi(ERUI_API_VERSION_1_1, ...)` negotiates the ERUI contract in
+`find_package(ERNativeUI 1.2.0)` checks an ERNativeUI project release at build
+time; `ERUI_GetApi(ERUI_API_VERSION_1_2, ...)` negotiates the ERUI contract in
 the game process. See [Versioning](../versioning.md) and the permanent
-[API 1.0 to 1.1 migration](../migrations/1.0-to-1.1.md).
+[adjacent migration guides](../migrations/README.md).
 
 ## Client checklist
 

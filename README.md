@@ -127,7 +127,19 @@ options, screenshots, and links to its native implementation research.
     <td width="50%" align="center">
       <a href="docs/guides/controls/slider.md"><img src="docs/assets/images/controls/slider/slider_control.png" alt="ERNativeUI native Slider control"></a><br>
       <strong><a href="docs/guides/controls/slider.md">Slider</a></strong><br>
-      <sub>Adjust a bounded numeric value.</sub>
+      <sub>Adjust a bounded unsigned-byte value.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/numeric-slider.md"><img src="docs/assets/images/controls/numeric-slider/numeric-slider_control.png" alt="ERNativeUI native Numeric Slider displaying x0.6"></a><br>
+      <strong><a href="docs/guides/controls/numeric-slider.md">Numeric slider</a></strong><br>
+      <sub>Adjust signed or decimal values with units.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/controls/custom-slider.md"><img src="docs/assets/images/controls/custom-slider/custom-slider_control.png" alt="ERNativeUI native Custom Slider displaying hello"></a><br>
+      <strong><a href="docs/guides/controls/custom-slider.md">Custom slider</a></strong><br>
+      <sub>Slide through arbitrary client-defined labels.</sub>
     </td>
   </tr>
   <tr>
@@ -221,7 +233,7 @@ MSVC, clang-cl, and MinGW-w64 client mods can use the same stable host ABI.
   is completed.
 - Host and committed client DLLs must remain loaded until process exit.
 
-See [Game and mod compatibility](docs/compatibility.md) for exact tested
+See [Game and mod compatibility](docs/COMPATIBILITY.md) for exact tested
 versions, optional GFX conflicts, Solid Uncapper setup, and useful bug reports.
 
 <p align="center">

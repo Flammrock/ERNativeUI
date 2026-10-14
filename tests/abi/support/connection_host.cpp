@@ -28,7 +28,8 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_PAGE_PRESENTATION | ERUI_CAP_ALERT | ERUI_CAP_INLINE_CHOICE |
     ERUI_CAP_POPUP_CHOICE | ERUI_CAP_GAME_LANGUAGE | ERUI_CAP_TEXT_INPUT |
     ERUI_CAP_COLOR_PICKER | ERUI_CAP_BUILTIN_PAGES |
-    ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE;
+    ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
+    ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
@@ -133,7 +134,7 @@ ERUI_Result ERUI_CALL register_provider(
     g_register_calls.fetch_add(1, std::memory_order_relaxed);
     if (!description || !out_provider || !out_root_page ||
         description->size < sizeof(ERUI_ProviderDesc) ||
-        description->api_version != ERUI_API_VERSION_1_1 ||
+        description->api_version != ERUI_API_VERSION_1_2 ||
         !valid_machine_identifier(description->provider_id)) {
         return ERUI_INVALID_ARGUMENT;
     }
@@ -170,6 +171,54 @@ ERUI_Result ERUI_CALL add_slider(
     const ERUI_SliderDesc*,
     ERUI_RowHandle* out_row) {
     return add_button(0, 0, nullptr, out_row);
+}
+
+ERUI_Result ERUI_CALL add_numeric_slider(
+    ERUI_ProviderHandle,
+    ERUI_PageHandle,
+    const ERUI_NumericSliderDesc*,
+    ERUI_RowHandle* out_row) {
+    return add_button(0, 0, nullptr, out_row);
+}
+
+ERUI_Result ERUI_CALL set_numeric_slider_value(
+    ERUI_ProviderHandle,
+    ERUI_RowHandle,
+    const ERUI_DecimalValue*) {
+    return ERUI_OK;
+}
+
+ERUI_Result ERUI_CALL get_numeric_slider_value(
+    ERUI_ProviderHandle,
+    ERUI_RowHandle,
+    ERUI_DecimalValue* out_value) {
+    if (!out_value) return ERUI_INVALID_ARGUMENT;
+    *out_value = {};
+    return ERUI_OK;
+}
+
+ERUI_Result ERUI_CALL add_custom_slider(
+    ERUI_ProviderHandle,
+    ERUI_PageHandle,
+    const ERUI_CustomSliderDesc*,
+    ERUI_RowHandle* out_row) {
+    return add_button(0, 0, nullptr, out_row);
+}
+
+ERUI_Result ERUI_CALL set_custom_slider_index(
+    ERUI_ProviderHandle,
+    ERUI_RowHandle,
+    std::uint32_t) {
+    return ERUI_OK;
+}
+
+ERUI_Result ERUI_CALL get_custom_slider_index(
+    ERUI_ProviderHandle,
+    ERUI_RowHandle,
+    std::uint32_t* out_index) {
+    if (!out_index) return ERUI_INVALID_ARGUMENT;
+    *out_index = 0;
+    return ERUI_OK;
 }
 
 ERUI_Result ERUI_CALL add_choice(
@@ -673,8 +722,8 @@ ERUI_Result ERUI_CALL storage_get_info(
 
 ERUI_Api make_api() noexcept {
     ERUI_Api api{};
-    api.size = ERUI_API_V1_1_SIZE;
-    api.api_version = ERUI_API_VERSION_1_1;
+    api.size = ERUI_API_V1_2_SIZE;
+    api.api_version = ERUI_API_VERSION_1_2;
     api.capabilities = kCapabilities;
     api.register_provider = &register_provider;
     api.add_button = &add_button;
@@ -715,6 +764,12 @@ ERUI_Api make_api() noexcept {
     api.storage_apply_assignment_changes =
         &storage_apply_assignment_changes;
     api.storage_get_info = &storage_get_info;
+    api.add_numeric_slider = &add_numeric_slider;
+    api.set_numeric_slider_value = &set_numeric_slider_value;
+    api.get_numeric_slider_value = &get_numeric_slider_value;
+    api.add_custom_slider = &add_custom_slider;
+    api.set_custom_slider_index = &set_custom_slider_index;
+    api.get_custom_slider_index = &get_custom_slider_index;
     return api;
 }
 
@@ -854,12 +909,12 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     const ERUI_Result terminal =
         g_terminal_result.load(std::memory_order_relaxed);
     if (terminal != ERUI_OK) return terminal;
-    if (requested_version != ERUI_API_VERSION_1_1) {
+    if (requested_version != ERUI_API_VERSION_1_2) {
         return ERUI_UNSUPPORTED_VERSION;
     }
-    if (out_api->size < ERUI_API_V1_1_SIZE) return ERUI_INVALID_ARGUMENT;
+    if (out_api->size < ERUI_API_V1_2_SIZE) return ERUI_INVALID_ARGUMENT;
     const ERUI_Api api = make_api();
-    std::memcpy(out_api, &api, ERUI_API_V1_1_SIZE);
+    std::memcpy(out_api, &api, ERUI_API_V1_2_SIZE);
     return ERUI_OK;
 }
 

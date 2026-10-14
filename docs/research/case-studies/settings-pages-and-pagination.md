@@ -297,7 +297,7 @@ Appending rows to existing panels does not prove that ERNativeUI can safely
 create a new top-level tab. The stock top dialog owns a fixed native category
 vector, separate GFX tab placements, a selection controller, cached panel
 factories, and paired teardown. Their complete record/icon/factory ownership
-and a scalable tab presentation remain API 1.2 research targets.
+and a scalable tab presentation remain future research targets.
 
 Likewise, these settings-page results do not establish a universal constructor
 for Site of Grace pages or arbitrary game page families. Each family needs its

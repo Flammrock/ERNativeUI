@@ -6,14 +6,33 @@ Generates the row and right-side control crops used by the control guides.
 Path to `docs/assets/images/controls`. Each control's source screenshots and
 generated crops are kept in its own child directory.
 
+.PARAMETER SelectedControls
+Optional control names to process. When omitted, the script visits every
+known control directory. The shorter `-Control` alias is accepted.
+
+.PARAMETER Force
+Overwrite existing `_row.png` and `_control.png` files. Without this switch,
+existing generated crops are left byte-for-byte untouched.
+
 .EXAMPLE
 .\tools\generate-control-crops.ps1 -ControlsRoot .\docs\assets\images\controls
+
+.EXAMPLE
+.\tools\generate-control-crops.ps1 `
+    -ControlsRoot .\docs\assets\images\controls `
+    -Control numeric-slider,custom-slider `
+    -Force
 #>
 
 param(
     [Parameter(Mandatory = $true)]
     [Alias("Root")]
-    [string]$ControlsRoot
+    [string]$ControlsRoot,
+
+    [Alias("Control")]
+    [string[]]$SelectedControls,
+
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,16 +66,33 @@ Write-Host ""
 # ------------------------------------------------------------
 # Controls
 # ------------------------------------------------------------
-$controls = @(
+$knownControls = @(
     "button",
     "submenu",
     "toggle",
     "slider",
+    "numeric-slider",
+    "custom-slider",
     "inline-choice",
     "popup-choice",
     "text-input",
     "color-picker"
 )
+
+if ($SelectedControls) {
+    foreach ($requestedControl in $SelectedControls) {
+        if ($knownControls -notcontains $requestedControl) {
+            Write-Host "Unknown control: $requestedControl" -ForegroundColor Red
+            Write-Host "Known controls: $($knownControls -join ', ')"
+            exit 1
+        }
+    }
+
+    $controlsToProcess = @($SelectedControls | Select-Object -Unique)
+}
+else {
+    $controlsToProcess = $knownControls
+}
 
 # ------------------------------------------------------------
 # Crop definitions
@@ -80,16 +116,16 @@ $crops = @{
 # ------------------------------------------------------------
 # Generate images
 # ------------------------------------------------------------
-foreach ($control in $controls) {
+foreach ($controlName in $controlsToProcess) {
 
-    $controlDirectory = Join-Path $ControlsRoot $control
+    $controlDirectory = Join-Path $ControlsRoot $controlName
     if (-not (Test-Path -LiteralPath $controlDirectory -PathType Container)) {
         Write-Warning "Control image directory does not exist: $controlDirectory"
         continue
     }
 
-    $beforeClick = Join-Path $controlDirectory "${control}_fullscreen_before_click.png"
-    $afterClick  = Join-Path $controlDirectory "${control}_fullscreen_after_click.png"
+    $beforeClick = Join-Path $controlDirectory "${controlName}_fullscreen_before_click.png"
+    $afterClick  = Join-Path $controlDirectory "${controlName}_fullscreen_after_click.png"
 
     # Prefer before_click, fallback to after_click
     if (Test-Path -LiteralPath $beforeClick -PathType Leaf) {
@@ -97,10 +133,10 @@ foreach ($control in $controls) {
     }
     elseif (Test-Path -LiteralPath $afterClick -PathType Leaf) {
         $inputFile = $afterClick
-        Write-Host "Using after_click fallback for: $control" -ForegroundColor Yellow
+        Write-Host "Using after_click fallback for: $controlName" -ForegroundColor Yellow
     }
     else {
-        Write-Warning "No source image found for '$control'. Expected:"
+        Write-Warning "No source image found for '$controlName'. Expected:"
         Write-Warning "  $beforeClick"
         Write-Warning "  $afterClick"
         continue
@@ -109,10 +145,21 @@ foreach ($control in $controls) {
     foreach ($cropName in $crops.Keys) {
         $crop = $crops[$cropName]
 
-        $outputFile = Join-Path $controlDirectory "${control}_${cropName}.png"
+        $outputFile = Join-Path $controlDirectory "${controlName}_${cropName}.png"
         $geometry = "$($crop.Width)x$($crop.Height)+$($crop.X)+$($crop.Y)"
 
-        Write-Host "Generating: $outputFile"
+        if ((Test-Path -LiteralPath $outputFile -PathType Leaf) -and
+            -not $Force) {
+            Write-Host "Skipping existing: $outputFile" -ForegroundColor DarkGray
+            continue
+        }
+
+        if (Test-Path -LiteralPath $outputFile -PathType Leaf) {
+            Write-Host "Overwriting: $outputFile" -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "Generating: $outputFile"
+        }
 
         & magick `
             $inputFile `

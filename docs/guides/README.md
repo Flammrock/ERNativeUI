@@ -1,6 +1,6 @@
 # Mod-author guides
 
-These guides explain the current ERUI API 1.1 from the point of view of a
+These guides explain the current ERUI API 1.2 from the point of view of a
 client-mod author. They complement the buildable examples: each guide starts
 with the player-facing behavior, shows the C++17 API, and then states the
 important lifetime, fallback, and failure rules.
@@ -29,6 +29,6 @@ threading, and error rules, use the [reference](../reference/README.md). The
 established; it is not an additional public API.
 
 API versions and ERNativeUI releases are independent. The current guides cover
-API 1.1 even when a later maintenance release still exposes that same API.
-Source being migrated from API 1.0 should first follow the permanent
-[1.0 to 1.1 guide](../migrations/1.0-to-1.1.md).
+API 1.2 even when a later maintenance release still exposes that same API.
+Source being migrated from an earlier API should follow each permanent
+[adjacent migration guide](../migrations/README.md) in order.

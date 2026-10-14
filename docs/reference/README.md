@@ -1,6 +1,6 @@
-# ERUI API 1.1 reference
+# ERUI API 1.2 reference
 
-This directory is the reference for the finished, current ERUI API 1.1
+This directory is the reference for the finished, current ERUI API 1.2
 contract. It describes what a client mod may rely on rather than how Elden
 Ring's private UI implementation happens to provide it.
 
@@ -8,16 +8,16 @@ ERUI API versions and ERNativeUI project releases are independent:
 
 | Name | Current baseline | Meaning |
 |---|---:|---|
-| ERUI API | **1.1** | The runtime C function-table contract negotiated with `ERUI_GetApi` |
-| ERNativeUI release | **1.1.0** | The first project release that packages API 1.1 |
+| ERUI API | **1.2** | The runtime C function-table contract negotiated with `ERUI_GetApi` |
+| ERNativeUI release | **1.2.0** | The first project release that packages API 1.2 |
 
-A later project release may continue to expose API 1.1 unchanged. Conversely,
+A later project release may continue to expose API 1.2 unchanged. Conversely,
 a future API requires an explicit new contract; matching version numbers are
 not implied. See [Release versions and public API versions](../versioning.md).
 
-Features discussed elsewhere as possible API 1.2 work are research targets,
-not part of API 1.1 and not guaranteed for API 1.2. They may change or move to
-a later API while their native ownership and teardown rules are investigated.
+Features discussed elsewhere as future work are research targets, not part of
+API 1.2. They may change or move between later APIs while their native
+ownership and teardown rules are investigated.
 
 ## Public surfaces
 
@@ -52,7 +52,7 @@ authoritative ABI; the C++ header is an inline convenience layer over it.
 | Load and save provider configuration | [Provider storage](../guides/storage.md) |
 | Customize titles or install optional presentation assets | [Presentation and optional GFX](../guides/presentation-and-gfx.md) |
 | Diagnose a client that does not appear or connect | [Common errors](../getting-started/common-errors.md) |
-| Update API 1.0 source to API 1.1 | [API 1.0 to 1.1 migration](../migrations/1.0-to-1.1.md) |
+| Update source between APIs | [Adjacent API migration guides](../migrations/README.md) |
 
 ## API map
 
@@ -72,7 +72,7 @@ authoritative ABI; the C++ header is an inline convenience layer over it.
 
 1. Mod Engine 2 loads one shared `ERNativeUI.dll` before ordinary clients.
 2. Each client leaves `DllMain` quickly and connects from its own worker.
-3. `erui::connect()` requests API 1.1 exactly and waits only while the host is
+3. `erui::connect()` requests API 1.2 exactly and waits only while the host is
    still starting.
 4. `Connection::register_menu` builds a private provider draft and commits it
    only if every builder operation succeeds.

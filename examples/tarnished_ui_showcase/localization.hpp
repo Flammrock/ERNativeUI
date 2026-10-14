@@ -50,7 +50,24 @@ struct ColorPickerText {
     const wchar_t* subpage_accent;
 };
 
-inline const Text& text(erui::GameLanguage language) noexcept {
+struct SliderText {
+    const wchar_t* showcase;
+    const wchar_t* numeric_multiplier;
+    const wchar_t* numeric_signed;
+    const wchar_t* numeric_seconds;
+    const wchar_t* custom_mapping;
+    const wchar_t* showcase_help;
+    const wchar_t* multiplier_help;
+    const wchar_t* signed_help;
+    const wchar_t* seconds_help;
+    const wchar_t* custom_help;
+};
+
+inline bool is_vietnamese(const erui::LanguageInfo& language) noexcept {
+    return language.identifier == "vietnamese";
+}
+
+inline const Text& text(const erui::LanguageInfo& language) noexcept {
     static constexpr Text english{
         L"Tarnished UI Showcase", L"Showcase Enabled", L"Showcase Intensity",
         L"Choice Rows Showcase", L"Inline Rendering Preset",
@@ -248,7 +265,25 @@ inline const Text& text(erui::GameLanguage language) noexcept {
         L"Demuestra esta disposición y posición de diálogo nativo.",
         L"Este es un diálogo nativo mostrado mediante ERNativeUI."};
 
-    switch (language) {
+    static constexpr Text vietnamese{
+        L"Trình diễn giao diện Tarnished", L"Bật trình diễn",
+        L"Cường độ trình diễn", L"Trình diễn hàng lựa chọn",
+        L"Thiết lập hiển thị nội tuyến", L"Thiết lập hiển thị bật lên",
+        L"Chế độ bật lên nhị phân", L"Thiết lập bật lên mở rộng",
+        L"Chuyển đổi từ mã mod", L"Trình diễn cài đặt lớn",
+        L"Hiện hộp thoại OK gốc", L"Hành động trình diễn",
+        L"Trình diễn các hộp thoại", L"Tắt", L"Bật",
+        L"Tối thiểu", L"Cân bằng", L"Chi tiết", L"Tối đa",
+        L"Thiết lập", L"Phía dưới", L"Chính giữa", L"Chỉ đóng",
+        L"Một cài đặt ERNativeUI do mod trình diễn cung cấp.",
+        L"So sánh giá trị nội tuyến với danh sách lựa chọn gốc.",
+        L"Một trang logic lớn minh họa tính năng phân trang tự động.",
+        L"Thông báo này được trình diễn xếp hàng qua ERNativeUI.",
+        L"Minh họa bố cục và vị trí hộp thoại gốc này.",
+        L"Đây là hộp thoại gốc được hiển thị qua ERNativeUI."};
+
+    if (is_vietnamese(language)) return vietnamese;
+    switch (language.known) {
     case erui::GameLanguage::german: return german;
     case erui::GameLanguage::french: return french;
     case erui::GameLanguage::italian: return italian;
@@ -268,7 +303,7 @@ inline const Text& text(erui::GameLanguage language) noexcept {
 }
 
 inline const TextInputText& text_input_text(
-    erui::GameLanguage language) noexcept {
+    const erui::LanguageInfo& language) noexcept {
     static constexpr TextInputText english{
         L"Text Input Showcase", L"Player Note", L"Enter a note",
         L"Extended Note", L"Enter longer text"};
@@ -321,8 +356,13 @@ inline const TextInputText& text_input_text(
         L"Demostración de entrada de texto", L"Nota del jugador",
         L"Escribe una nota", L"Nota ampliada",
         L"Escribe un texto más largo"};
+    static constexpr TextInputText vietnamese{
+        L"Trình diễn nhập văn bản", L"Ghi chú người chơi",
+        L"Nhập ghi chú", L"Ghi chú mở rộng",
+        L"Nhập văn bản dài hơn"};
 
-    switch (language) {
+    if (is_vietnamese(language)) return vietnamese;
+    switch (language.known) {
     case erui::GameLanguage::german: return german;
     case erui::GameLanguage::french: return french;
     case erui::GameLanguage::italian: return italian;
@@ -342,7 +382,7 @@ inline const TextInputText& text_input_text(
 }
 
 inline const ColorPickerText& color_picker_text(
-    erui::GameLanguage language) noexcept {
+    const erui::LanguageInfo& language) noexcept {
     static constexpr ColorPickerText english{
         L"Color Picker Showcase", L"Root Accent Color",
         L"Subpage Accent Color"};
@@ -385,8 +425,156 @@ inline const ColorPickerText& color_picker_text(
     static constexpr ColorPickerText latam{
         L"Demostración del selector de color", L"Color de acento principal",
         L"Color de acento de la subpágina"};
+    static constexpr ColorPickerText vietnamese{
+        L"Trình diễn bộ chọn màu", L"Màu nhấn trang chính",
+        L"Màu nhấn trang con"};
 
-    switch (language) {
+    if (is_vietnamese(language)) return vietnamese;
+    switch (language.known) {
+    case erui::GameLanguage::german: return german;
+    case erui::GameLanguage::french: return french;
+    case erui::GameLanguage::italian: return italian;
+    case erui::GameLanguage::korean: return korean;
+    case erui::GameLanguage::spanish: return spanish;
+    case erui::GameLanguage::chinese_simplified: return schinese;
+    case erui::GameLanguage::chinese_traditional: return tchinese;
+    case erui::GameLanguage::russian: return russian;
+    case erui::GameLanguage::thai: return thai;
+    case erui::GameLanguage::japanese: return japanese;
+    case erui::GameLanguage::polish: return polish;
+    case erui::GameLanguage::arabic: return arabic;
+    case erui::GameLanguage::portuguese_brazil: return brazilian;
+    case erui::GameLanguage::spanish_latin_america: return latam;
+    default: return english;
+    }
+}
+
+inline const SliderText& slider_text(
+    const erui::LanguageInfo& language) noexcept {
+    static constexpr SliderText english{
+        L"Advanced Slider Showcase", L"Camera Distance",
+        L"Signed Offset", L"Path Time", L"Impossible Values",
+        L"Signed decimals, units, prefixes, and arbitrary value labels.",
+        L"A numeric slider displayed with an x prefix and 0.1 steps.",
+        L"A numeric slider that crosses zero and displays negative values.",
+        L"A numeric slider displayed in seconds.",
+        L"A custom slider whose labels do not need to be numbers."};
+    static constexpr SliderText german{
+        L"Demo erweiterter Schieberegler", L"Kameraabstand",
+        L"Vorzeichenbehafteter Versatz", L"Pfadzeit", L"Unmögliche Werte",
+        L"Vorzeichen, Dezimalstellen, Einheiten, Präfixe und freie Werttexte.",
+        L"Ein numerischer Schieberegler mit x-Präfix und 0,1-Schritten.",
+        L"Ein numerischer Schieberegler mit negativen Werten und Nulldurchgang.",
+        L"Ein numerischer Schieberegler mit Anzeige in Sekunden.",
+        L"Ein freier Schieberegler, dessen Werte keine Zahlen sein müssen."};
+    static constexpr SliderText french{
+        L"Vitrine des curseurs avancés", L"Distance de la caméra",
+        L"Décalage signé", L"Durée du trajet", L"Valeurs impossibles",
+        L"Décimales signées, unités, préfixes et libellés arbitraires.",
+        L"Un curseur numérique avec le préfixe x et des pas de 0,1.",
+        L"Un curseur numérique qui traverse zéro et affiche des valeurs négatives.",
+        L"Un curseur numérique affiché en secondes.",
+        L"Un curseur personnalisé dont les libellés ne sont pas forcément des nombres."};
+    static constexpr SliderText italian{
+        L"Demo cursori avanzati", L"Distanza telecamera",
+        L"Scostamento con segno", L"Durata percorso", L"Valori impossibili",
+        L"Decimali con segno, unità, prefissi ed etichette arbitrarie.",
+        L"Un cursore numerico con prefisso x e incrementi di 0,1.",
+        L"Un cursore numerico che attraversa lo zero e mostra valori negativi.",
+        L"Un cursore numerico visualizzato in secondi.",
+        L"Un cursore personalizzato con etichette che non devono essere numeri."};
+    static constexpr SliderText korean{
+        L"고급 슬라이더 쇼케이스", L"카메라 거리", L"부호 오프셋",
+        L"경로 시간", L"불가능한 값",
+        L"부호 소수, 단위, 접두사 및 임의의 값 표시를 보여 줍니다.",
+        L"x 접두사와 0.1 단위를 사용하는 숫자 슬라이더입니다.",
+        L"0을 지나 음수를 표시하는 숫자 슬라이더입니다.",
+        L"초 단위로 표시되는 숫자 슬라이더입니다.",
+        L"표시 값이 숫자일 필요가 없는 사용자 정의 슬라이더입니다."};
+    static constexpr SliderText spanish{
+        L"Demostración de controles deslizantes avanzados", L"Distancia de cámara",
+        L"Desplazamiento con signo", L"Tiempo de recorrido", L"Valores imposibles",
+        L"Decimales con signo, unidades, prefijos y etiquetas arbitrarias.",
+        L"Un control numérico con prefijo x y pasos de 0,1.",
+        L"Un control numérico que cruza cero y muestra valores negativos.",
+        L"Un control numérico mostrado en segundos.",
+        L"Un control personalizado cuyas etiquetas no tienen que ser números."};
+    static constexpr SliderText schinese{
+        L"高级滑块展示", L"镜头距离", L"有符号偏移", L"路径时间",
+        L"不可能的值", L"展示有符号小数、单位、前缀和任意标签。",
+        L"带 x 前缀、步长为 0.1 的数值滑块。",
+        L"可跨过零并显示负值的数值滑块。",
+        L"以秒显示的数值滑块。", L"标签无需为数字的自定义滑块。"};
+    static constexpr SliderText tchinese{
+        L"進階滑桿展示", L"鏡頭距離", L"帶正負號偏移", L"路徑時間",
+        L"不可能的值", L"展示帶正負號小數、單位、前綴與任意標籤。",
+        L"帶 x 前綴、步進 0.1 的數值滑桿。",
+        L"可跨過零並顯示負值的數值滑桿。",
+        L"以秒數顯示的數值滑桿。", L"標籤不必是數字的自訂滑桿。"};
+    static constexpr SliderText russian{
+        L"Демонстрация расширенных ползунков", L"Расстояние камеры",
+        L"Знаковое смещение", L"Время пути", L"Невозможные значения",
+        L"Знаковые дроби, единицы, префиксы и произвольные подписи.",
+        L"Числовой ползунок с префиксом x и шагом 0,1.",
+        L"Числовой ползунок, проходящий через ноль и показывающий отрицательные значения.",
+        L"Числовой ползунок со значением в секундах.",
+        L"Пользунок с произвольными нечисловыми подписями."};
+    static constexpr SliderText thai{
+        L"ตัวอย่างแถบเลื่อนขั้นสูง", L"ระยะกล้อง", L"ออฟเซ็ตแบบมีเครื่องหมาย",
+        L"เวลาเส้นทาง", L"ค่าที่เป็นไปไม่ได้",
+        L"ทศนิยมมีเครื่องหมาย หน่วย คำนำหน้า และป้ายกำหนดเอง",
+        L"แถบเลื่อนตัวเลขที่มีคำนำหน้า x และขั้นละ 0.1",
+        L"แถบเลื่อนตัวเลขที่ข้ามศูนย์และแสดงค่าลบ",
+        L"แถบเลื่อนตัวเลขที่แสดงเป็นวินาที",
+        L"แถบเลื่อนกำหนดเองที่ป้ายไม่จำเป็นต้องเป็นตัวเลข"};
+    static constexpr SliderText japanese{
+        L"高度なスライダー・ショーケース", L"カメラ距離", L"符号付きオフセット",
+        L"パス時間", L"ありえない値", L"符号付き小数、単位、接頭辞、自由なラベルを示します。",
+        L"x 接頭辞と 0.1 刻みの数値スライダーです。",
+        L"0 を跨いで負の値を表示する数値スライダーです。",
+        L"秒単位で表示する数値スライダーです。",
+        L"ラベルが数値でなくてもよいカスタムスライダーです。"};
+    static constexpr SliderText polish{
+        L"Prezentacja zaawansowanych suwaków", L"Odległość kamery",
+        L"Przesunięcie ze znakiem", L"Czas trasy", L"Niemożliwe wartości",
+        L"Ułamki ze znakiem, jednostki, prefiksy i dowolne etykiety wartości.",
+        L"Suwak liczbowy z prefiksem x i krokiem 0,1.",
+        L"Suwak liczbowy przechodzący przez zero i pokazujący wartości ujemne.",
+        L"Suwak liczbowy wyświetlany w sekundach.",
+        L"Suwak niestandardowy, którego etykiety nie muszą być liczbami."};
+    static constexpr SliderText arabic{
+        L"عرض المنزلقات المتقدمة", L"مسافة الكاميرا", L"إزاحة موقعة",
+        L"زمن المسار", L"قيم مستحيلة", L"كسور موقعة ووحدات وبادئات وتسميات حرة.",
+        L"منزلق رقمي بالبادئة x وخطوات 0.1.",
+        L"منزلق رقمي يعبر الصفر ويعرض قيمًا سالبة.",
+        L"منزلق رقمي معروض بالثواني.", L"منزلق مخصص لا يشترط أن تكون تسمياته أرقامًا."};
+    static constexpr SliderText brazilian{
+        L"Demonstração de controles deslizantes avançados", L"Distância da câmera",
+        L"Deslocamento com sinal", L"Tempo do percurso", L"Valores impossíveis",
+        L"Decimais com sinal, unidades, prefixos e rótulos arbitrários.",
+        L"Um controle numérico com prefixo x e passos de 0,1.",
+        L"Um controle numérico que cruza zero e mostra valores negativos.",
+        L"Um controle numérico exibido em segundos.",
+        L"Um controle personalizado cujos rótulos não precisam ser números."};
+    static constexpr SliderText latam{
+        L"Demostración de controles deslizantes avanzados", L"Distancia de cámara",
+        L"Desplazamiento con signo", L"Tiempo de recorrido", L"Valores imposibles",
+        L"Decimales con signo, unidades, prefijos y etiquetas arbitrarias.",
+        L"Un control numérico con prefijo x y pasos de 0,1.",
+        L"Un control numérico que cruza cero y muestra valores negativos.",
+        L"Un control numérico mostrado en segundos.",
+        L"Un control personalizado cuyas etiquetas no tienen que ser números."};
+    static constexpr SliderText vietnamese{
+        L"Trình diễn thanh trượt nâng cao", L"Khoảng cách camera",
+        L"Độ lệch có dấu", L"Thời gian đường đi", L"Giá trị bất khả thi",
+        L"Số thập phân có dấu, đơn vị, tiền tố và nhãn tùy ý.",
+        L"Thanh trượt số hiển thị với tiền tố x và bước 0.1.",
+        L"Thanh trượt số đi qua 0 và hiển thị giá trị âm.",
+        L"Thanh trượt số hiển thị theo giây.",
+        L"Thanh trượt tùy chỉnh có nhãn không cần là số."};
+
+    if (is_vietnamese(language)) return vietnamese;
+    switch (language.known) {
     case erui::GameLanguage::german: return german;
     case erui::GameLanguage::french: return french;
     case erui::GameLanguage::italian: return italian;

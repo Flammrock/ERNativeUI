@@ -141,6 +141,32 @@ public:
         ERUI_PageHandle page,
         const ERUI_SliderDesc* description,
         ERUI_RowHandle* out_row) noexcept;
+    ERUI_Result add_numeric_slider(
+        ERUI_ProviderHandle provider,
+        ERUI_PageHandle page,
+        const ERUI_NumericSliderDesc* description,
+        ERUI_RowHandle* out_row) noexcept;
+    ERUI_Result set_numeric_slider_value(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        const ERUI_DecimalValue* value) noexcept;
+    ERUI_Result get_numeric_slider_value(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        ERUI_DecimalValue* out_value) noexcept;
+    ERUI_Result add_custom_slider(
+        ERUI_ProviderHandle provider,
+        ERUI_PageHandle page,
+        const ERUI_CustomSliderDesc* description,
+        ERUI_RowHandle* out_row) noexcept;
+    ERUI_Result set_custom_slider_index(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        std::uint32_t index) noexcept;
+    ERUI_Result get_custom_slider_index(
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        std::uint32_t* out_index) noexcept;
     ERUI_Result add_inline_choice(
         ERUI_ProviderHandle provider,
         ERUI_PageHandle page,
@@ -210,6 +236,8 @@ private:
         button,
         toggle,
         slider,
+        numeric_slider,
+        custom_slider,
         inline_choice,
         popup_choice,
         text_input,
@@ -226,6 +254,8 @@ private:
         bool enabled{true};
         ERUI_ButtonCallback button_callback{};
         ERUI_ValueChangedCallback changed_callback{};
+        ERUI_NumericSliderChangedCallback numeric_slider_changed_callback{};
+        ERUI_CustomSliderChangedCallback custom_slider_changed_callback{};
         ERUI_TextInputChangedCallback text_changed_callback{};
         ERUI_ColorPickerChangedCallback color_changed_callback{};
         void* user_data{};
@@ -236,6 +266,14 @@ private:
         std::atomic<std::uint8_t> silent_native_value{};
         std::atomic_bool silent_native_transition{false};
         erui::SliderSpec slider{};
+        struct NumericSliderData {
+            std::int64_t minimum_scaled_value{};
+            std::int64_t maximum_scaled_value{};
+            std::int64_t step_scaled_value{};
+            std::uint32_t decimal_places{};
+            std::uint32_t value_count{};
+        } numeric_slider{};
+        std::vector<std::wstring> slider_value_texts{};
         std::vector<std::wstring> choices{};
         std::unique_ptr<erui::detail::TextInputState> text_input_state{};
         std::unique_ptr<erui::detail::ColorPickerState> color_picker_state{};

@@ -74,6 +74,7 @@ std::array<PopupVariant, 14> g_popup_variants{};
 const showcase::Text* g_text{};
 const showcase::TextInputText* g_text_input{};
 const showcase::ColorPickerText* g_color_picker_text{};
+const showcase::SliderText* g_slider_text{};
 
 void initialize_popup_variants(const showcase::Text& text) {
     constexpr std::array<erui::AlertButtons, 7> buttons{
@@ -138,6 +139,34 @@ void record_binding_activation(
 void ERUI_CALL value_changed(void* context, std::uint8_t value) noexcept {
     static_cast<std::atomic<std::uint8_t>*>(context)->store(
         value, std::memory_order_release);
+}
+
+void numeric_slider_changed(
+    const erui::NumericSliderChange& change) noexcept {
+    wchar_t message[192]{};
+    _snwprintf_s(
+        message,
+        std::size(message),
+        _TRUNCATE,
+        L"Numeric slider changed: value=%g scaled=%lld index=%u/%u.",
+        change.value,
+        static_cast<long long>(change.scaled_value),
+        static_cast<unsigned>(change.index),
+        static_cast<unsigned>(change.value_count));
+    debug(message);
+}
+
+void custom_slider_changed(
+    const erui::CustomSliderChange& change) noexcept {
+    wchar_t message[128]{};
+    _snwprintf_s(
+        message,
+        std::size(message),
+        _TRUNCATE,
+        L"Custom slider changed: index=%u/%u.",
+        static_cast<unsigned>(change.index),
+        static_cast<unsigned>(change.value_count));
+    debug(message);
 }
 
 void text_input_changed(
@@ -375,9 +404,10 @@ DWORD WINAPI initialize(void*) noexcept {
     const erui::LanguageInfo language =
         connection.value().game_language();
 
-    g_text = &showcase::text(language.known);
-    g_text_input = &showcase::text_input_text(language.known);
-    g_color_picker_text = &showcase::color_picker_text(language.known);
+    g_text = &showcase::text(language);
+    g_text_input = &showcase::text_input_text(language);
+    g_color_picker_text = &showcase::color_picker_text(language);
+    g_slider_text = &showcase::slider_text(language);
     initialize_popup_variants(*g_text);
     g_player_note.value = L"Tarnished";
 
@@ -492,6 +522,72 @@ DWORD WINAPI initialize(void*) noexcept {
             &value_changed,
             &g_intensity);
 
+        if (menu.supports(erui::Capability::numeric_slider) ||
+            menu.supports(erui::Capability::custom_slider)) {
+            erui::Page advanced_sliders = root.add_submenu(
+                g_slider_text->showcase,
+                g_slider_text->showcase_help,
+                g_slider_text->showcase,
+                g_slider_text->showcase_help);
+
+            if (menu.supports(erui::Capability::numeric_slider)) {
+                erui::NumericSliderOptions multiplier{};
+                multiplier.minimum = 0.1;
+                multiplier.maximum = 2.0;
+                multiplier.step = 0.1;
+                multiplier.initial_value = 0.6;
+                multiplier.decimal_places = 1;
+                multiplier.prefix = L"x";
+                advanced_sliders.add_slider<&numeric_slider_changed>(
+                    g_slider_text->numeric_multiplier,
+                    g_slider_text->multiplier_help,
+                    multiplier);
+
+                erui::NumericSliderOptions signed_value{};
+                signed_value.minimum = -1.0;
+                signed_value.maximum = 1.0;
+                signed_value.step = 0.1;
+                signed_value.initial_value = -0.5;
+                signed_value.decimal_places = 1;
+                advanced_sliders.add_slider<&numeric_slider_changed>(
+                    g_slider_text->numeric_signed,
+                    g_slider_text->signed_help,
+                    signed_value);
+
+                erui::NumericSliderOptions seconds{};
+                seconds.minimum = 0.1;
+                seconds.maximum = 10.0;
+                seconds.step = 0.1;
+                seconds.initial_value = 3.0;
+                seconds.decimal_places = 1;
+                seconds.suffix = L"s";
+                advanced_sliders.add_slider<&numeric_slider_changed>(
+                    g_slider_text->numeric_seconds,
+                    g_slider_text->seconds_help,
+                    seconds);
+            }
+
+            if (menu.supports(erui::Capability::custom_slider)) {
+                static constexpr std::array<std::wstring_view, 7> values{
+                    L"-7", L"3", L"7.8", L"1s", L"hello", L"18", L"x1.3"};
+
+                erui::CustomSliderOptions impossible_values{};
+                impossible_values.value_count =
+                    static_cast<std::uint32_t>(values.size());
+                impossible_values.initial_index = 4;
+                impossible_values.format_value =
+                    [](std::uint32_t index, std::uint32_t) -> std::wstring {
+                        return index < values.size()
+                            ? std::wstring(values[index])
+                            : std::wstring{};
+                    };
+                advanced_sliders.add_custom_slider<&custom_slider_changed>(
+                    g_slider_text->custom_mapping,
+                    g_slider_text->custom_help,
+                    impossible_values);
+            }
+        }
+
         auto choice_rows = root.add_submenu(
             g_text->choices,
             g_text->choice_help,
@@ -561,8 +657,8 @@ DWORD WINAPI initialize(void*) noexcept {
             g_text->toggle_code,
             g_text->row_help);
 
-        // The current wrapper negotiates API 1.1 explicitly. Keeping the
-        // capability check beside the row documents its native dependency.
+        // TextInput was introduced in API 1.1 and remains part of the current
+        // API 1.2 table. The nearby capability check documents its dependency.
         if (menu.supports(erui::Capability::text_input)) {
             auto text_inputs = root.add_submenu(
                 g_text_input->showcase,

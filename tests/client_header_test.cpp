@@ -47,6 +47,16 @@ void assignments_changed(const erui::AssignmentsChangedEvent& event) noexcept {
 void stateful_assignments_changed(
     unsigned& calls,
     const erui::AssignmentsChangedEvent&) noexcept { ++calls; }
+void numeric_slider_changed(
+    const erui::NumericSliderChange&) noexcept {}
+void stateful_numeric_slider_changed(
+    unsigned& calls,
+    const erui::NumericSliderChange&) noexcept { ++calls; }
+void custom_slider_changed(
+    const erui::CustomSliderChange&) noexcept {}
+void stateful_custom_slider_changed(
+    unsigned& calls,
+    const erui::CustomSliderChange&) noexcept { ++calls; }
 }
 
 int main() {
@@ -64,6 +74,11 @@ int main() {
     static_assert(sizeof(ERUI_Color) == 4);
     static_assert(sizeof(ERUI_ColorPickerChangeContext) == 32);
     static_assert(sizeof(ERUI_ColorPickerDesc) == 64);
+    static_assert(sizeof(ERUI_DecimalValue) == 16);
+    static_assert(sizeof(ERUI_NumericSliderChangeContext) == 56);
+    static_assert(sizeof(ERUI_CustomSliderChangeContext) == 40);
+    static_assert(sizeof(ERUI_NumericSliderDesc) == 136);
+    static_assert(sizeof(ERUI_CustomSliderDesc) == 80);
     static_assert(sizeof(ERUI_ActionInputs) == 40);
     static_assert(sizeof(ERUI_InputActionActivatedContext) == 32);
     static_assert(sizeof(ERUI_InputSectionDesc) == 32);
@@ -78,9 +93,10 @@ int main() {
     static_assert(sizeof(ERUI_PageTitleFormatContext) == 56);
     static_assert(sizeof(ERUI_PagePresentationDesc) == 64);
     static_assert(sizeof(ERUI_AlertDesc) == 48);
-    static_assert(sizeof(ERUI_Api) == 320);
+    static_assert(sizeof(ERUI_Api) == 368);
     static_assert(ERUI_API_V1_0_SIZE == 128);
     static_assert(ERUI_API_V1_1_SIZE == 320);
+    static_assert(ERUI_API_V1_2_SIZE == 368);
     static_assert(std::is_trivially_copyable<ERUI_Api>::value);
     static_assert(std::is_pointer<erui::ButtonCallback>::value);
     static_assert(std::is_pointer<erui::AlertCallback>::value);
@@ -100,6 +116,10 @@ int main() {
         erui::Capability::input_bindings) == ERUI_CAP_INPUT_BINDINGS);
     static_assert(static_cast<ERUI_Capabilities>(
         erui::Capability::storage) == ERUI_CAP_STORAGE);
+    static_assert(static_cast<ERUI_Capabilities>(
+        erui::Capability::numeric_slider) == ERUI_CAP_NUMERIC_SLIDER);
+    static_assert(static_cast<ERUI_Capabilities>(
+        erui::Capability::custom_slider) == ERUI_CAP_CUSTOM_SLIDER);
     static_assert(static_cast<ERUI_ControllerButton>(
         erui::ControllerButton::right_trigger) ==
         ERUI_CONTROLLER_BUTTON_RIGHT_TRIGGER);
@@ -119,6 +139,18 @@ int main() {
     ERUI_TEST_CHECK(!erui::detail::valid_machine_identifier("invalid/id"));
     erui::SliderOptions slider{};
     slider.initial_value = 50;
+    erui::NumericSliderOptions numeric_slider{};
+    numeric_slider.minimum = -1.0;
+    numeric_slider.maximum = 1.0;
+    numeric_slider.step = 0.1;
+    numeric_slider.initial_value = -0.5;
+    numeric_slider.prefix = L"x";
+    erui::CustomSliderOptions custom_slider{};
+    custom_slider.value_count = 3;
+    custom_slider.initial_index = 1;
+    custom_slider.format_value = [](std::uint32_t index, std::uint32_t) {
+        return std::to_wstring(index);
+    };
     erui::ColorPickerOptions color_picker{};
     color_picker.initial_value = erui::Color{10, 20, 30};
     ERUI_TEST_CHECK(slider.maximum == 100);
@@ -136,6 +168,10 @@ int main() {
         L"Popup", L"", choice, &changed) == ERUI_INVALID_ROW);
     ERUI_TEST_CHECK(page.add_color_picker(
         L"Color", L"", color_picker) == ERUI_INVALID_ROW);
+    ERUI_TEST_CHECK(page.add_slider<&numeric_slider_changed>(
+        L"Numeric", L"", numeric_slider) == ERUI_INVALID_ROW);
+    ERUI_TEST_CHECK(page.add_custom_slider<&custom_slider_changed>(
+        L"Custom", L"", custom_slider) == ERUI_INVALID_ROW);
     erui::ActionInputs defaults = erui::inputs::all(
         erui::KeyboardKey::key_q,
         erui::MouseButton::button4,
@@ -153,6 +189,12 @@ int main() {
 
     erui::InputSection input_section{};
     unsigned binding_calls{};
+    ERUI_TEST_CHECK(page.add_slider<&stateful_numeric_slider_changed>(
+        L"Numeric state", L"", numeric_slider, binding_calls) ==
+        ERUI_INVALID_ROW);
+    ERUI_TEST_CHECK(page.add_custom_slider<&stateful_custom_slider_changed>(
+        L"Custom state", L"", custom_slider, binding_calls) ==
+        ERUI_INVALID_ROW);
     ERUI_TEST_CHECK(!input_section.valid());
     ERUI_TEST_CHECK(!input_section.add_action<&input_action_activated>(
         "compile-test", L"Compile test"));
@@ -182,6 +224,16 @@ int main() {
         ERUI_INVALID_HANDLE);
     ERUI_TEST_CHECK(registration.get_color(ERUI_INVALID_ROW, color) ==
         ERUI_INVALID_HANDLE);
+    double numeric_value{};
+    std::uint32_t custom_index{};
+    ERUI_TEST_CHECK(registration.set_numeric_slider_value(
+        ERUI_INVALID_ROW, 0.6) == ERUI_INVALID_HANDLE);
+    ERUI_TEST_CHECK(registration.get_numeric_slider_value(
+        ERUI_INVALID_ROW, numeric_value) == ERUI_INVALID_HANDLE);
+    ERUI_TEST_CHECK(registration.set_custom_slider_index(
+        ERUI_INVALID_ROW, 1) == ERUI_INVALID_HANDLE);
+    ERUI_TEST_CHECK(registration.get_custom_slider_index(
+        ERUI_INVALID_ROW, custom_index) == ERUI_INVALID_HANDLE);
     ERUI_TEST_CHECK(registration.alert(L"Compile test") == ERUI_INVALID_HANDLE);
     ERUI_TEST_CHECK(registration.alert(L"Compile test", &alert_completed) ==
         ERUI_INVALID_HANDLE);
@@ -243,6 +295,20 @@ int main() {
     ERUI_TEST_CHECK(storage_section.set("scale", 1.5) == ERUI_INVALID_HANDLE);
     ERUI_TEST_CHECK(erui::StorageOptions::beside_module(L"config.ini").location ==
         erui::StorageLocation::owner_module_directory);
+
+    erui::detail::PreparedNumericSlider prepared{};
+    ERUI_TEST_CHECK(erui::detail::prepare_numeric_slider(
+        numeric_slider, prepared));
+    ERUI_TEST_CHECK(prepared.minimum == -10);
+    ERUI_TEST_CHECK(prepared.maximum == 10);
+    ERUI_TEST_CHECK(prepared.step == 1);
+    ERUI_TEST_CHECK(prepared.initial_value == -5);
+    ERUI_TEST_CHECK(prepared.decimal_places == 1);
+    ERUI_TEST_CHECK(prepared.value_count == 21);
+    ERUI_DecimalValue decimal{};
+    ERUI_TEST_CHECK(erui::detail::infer_decimal_value(12.75, decimal));
+    ERUI_TEST_CHECK(decimal.scaled_value == 1275);
+    ERUI_TEST_CHECK(decimal.decimal_places == 2);
     (void)&action;
     (void)&changed;
     return 0;

@@ -7,7 +7,7 @@ explicit locale for the host and every client. ERNativeUI does not translate
 provider names, row labels, help text, choice values, or dialog messages for
 the client.
 
-This guide describes the current API 1.1 C++17 surface. Language discovery
+This guide describes the current API 1.2 C++17 surface. Language discovery
 first appeared in API 1.0 and remains available to any client built with the
 1.0 SDK. A client that chooses API 1.1 uses its explicit connection lifecycle.
 API versions and ERNativeUI release versions are independent. See the
@@ -65,6 +65,12 @@ currently produces `GameLanguage::unknown` because the convenience enum
 mirrors the languages advertised for Elden Ring, but the exact
 `"vietnamese"` identifier remains available for a client to match.
 
+The shipped Tarnished UI Showcase demonstrates that forward-compatible path:
+it checks the exact identifier for `vietnamese`, supplies Vietnamese client
+text, and otherwise continues using the convenience enum plus English
+fallback. The host's `assets/locales/vietnamese.ini` independently translates
+host-owned Previous/Next navigation.
+
 Explicit identifiers contain 1–64 ASCII lowercase letters, digits, `_`, or
 `-`. `auto` is reserved. An invalid or empty value logs a warning when logging
 is enabled and safely falls back to automatic detection. Changes take effect
@@ -73,7 +79,7 @@ after a complete game restart.
 ## Connect before selecting text
 
 Call `erui::connect()` from a worker after `DllMain` returns. A successful API
-1.1 connection means startup language selection has settled, either with a
+1.1-or-later connection means startup language selection has settled, either with a
 valid effective language or with a definitive unavailable result in automatic
 mode. Query the language before registration when the provider display name
 also needs translation.

@@ -62,6 +62,7 @@ struct CompiledRow {
     TextId help_id{};
     volatile std::uint8_t* byte_value{};
     SliderSpec slider{};
+    std::vector<std::wstring> slider_value_texts{};
     std::vector<TextId> choice_ids{};
     TextInputState* text_input_state{};
     ColorPickerState* color_picker_state{};
@@ -169,6 +170,8 @@ struct CompiledMenu {
     std::size_t modeled_popup_choice_count{};
     std::size_t modeled_text_input_count{};
     std::size_t modeled_color_picker_count{};
+    std::size_t modeled_numeric_slider_count{};
+    std::size_t modeled_custom_slider_count{};
     std::size_t modeled_input_binding_count{};
     bool pagination_required{};
 

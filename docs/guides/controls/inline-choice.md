@@ -239,5 +239,5 @@ table and check host support.
 
 [Controls index](README.md) |
 [Reverse-engineering reference](../../research/case-studies/popup-choice.md) |
-Previous: [Slider](slider.md) |
+Previous: [Custom Slider](custom-slider.md) |
 Next: [Popup Choice](popup-choice.md)

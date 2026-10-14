@@ -295,6 +295,7 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
                 compiled_row_index);
             compiled_row.byte_value = row.byte_value;
             compiled_row.slider = row.slider;
+            compiled_row.slider_value_texts = row.slider_value_texts;
             for (const auto& choice : row.choices) {
                 compiled_row.choice_ids.push_back(compiled->texts.add(choice));
             }
@@ -310,6 +311,12 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
                     *row.byte_value);
             }
             compiled_row.last_observed_value = row.byte_value ? *row.byte_value : 0;
+
+            if (row.kind == RowKind::numeric_slider) {
+                ++compiled->modeled_numeric_slider_count;
+            } else if (row.kind == RowKind::custom_slider) {
+                ++compiled->modeled_custom_slider_count;
+            }
 
             if (row.target_page) {
                 const auto target_it = page_indices.find(row.target_page);

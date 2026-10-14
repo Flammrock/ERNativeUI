@@ -33,6 +33,8 @@ The accepted values are:
 | `submenu` | **Open Details**, leading to one small child page |
 | `toggle` | **Enabled**, initially **On** |
 | `slider` | **Intensity**, initially `50` in a `0..100` range |
+| `numeric-slider` | **Camera Distance**, initially `x0.6` in a `0.1..2.0` range |
+| `custom-slider` | **Impossible Values**, initially **hello** among seven unrelated labels |
 | `inline-choice` | **Quality**, initially **Balanced** |
 | `popup-choice` | **Quality Preset**, with four named values |
 | `text-input` | Empty **Player Name** with **Enter a name** placeholder |
@@ -43,9 +45,56 @@ during startup, so editing the file while the game is running cannot replace
 the current page. Open **System -> Game Options -> _Control_ Showcase** to see
 the selected control by itself.
 
+Numeric Slider and Custom Slider require an ERNativeUI host exposing API 1.2.
+For matching before/after screenshots, press Right once on **Camera
+Distance** to change `x0.6` to `x0.7`. Press Left once on **Impossible
+Values** to change **hello** to `1s`.
+
 An absent or unreadable mode safely falls back to `button`. If the INI or its
 `mode` key is missing, the example attempts to create the default entry. An
 unknown value is left untouched so a spelling mistake remains visible.
+
+## Capture and generate the slider images
+
+Use the same game resolution, framing, and menu position as the existing
+control screenshots. For Numeric Slider, save the initial `x0.6` page and the
+page after one Right press as:
+
+```text
+docs/assets/images/controls/numeric-slider/
+|-- numeric-slider_fullscreen_before_click.png
+`-- numeric-slider_fullscreen_after_click.png
+```
+
+Then change the INI to `mode=custom-slider`, restart the game, and capture
+**hello** followed by `1s` after one Left press under:
+
+```text
+docs/assets/images/controls/custom-slider/
+|-- custom-slider_fullscreen_before_click.png
+`-- custom-slider_fullscreen_after_click.png
+```
+
+Generate both documentation crops from the repository root:
+
+```powershell
+.\tools\generate-control-crops.ps1 `
+    -ControlsRoot .\docs\assets\images\controls
+```
+
+The script uses each `before_click` image to create the matching `_row.png`
+and `_control.png`. The `after_click` image remains the full-page example of
+the changed value. Existing crops are skipped by default, so this command does
+not re-encode documentation images that are already present.
+
+To intentionally regenerate only these two controls, use:
+
+```powershell
+.\tools\generate-control-crops.ps1 `
+    -ControlsRoot .\docs\assets\images\controls `
+    -Control numeric-slider,custom-slider `
+    -Force
+```
 
 ## How the INI is read
 

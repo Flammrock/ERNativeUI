@@ -21,6 +21,8 @@ using TextId = std::uint32_t;
 enum class RowKind : std::uint8_t {
     toggle,
     slider,
+    numeric_slider,
+    custom_slider,
     inline_choice,
     popup_choice,
     text_input,
@@ -185,6 +187,22 @@ public:
         bool enabled = true,
         ValueAction on_changed = {});
 
+    Page& add_numeric_slider(
+        std::wstring label,
+        std::wstring help,
+        volatile std::uint8_t& selected_index,
+        std::vector<std::wstring> display_values,
+        bool enabled = true,
+        ValueAction on_changed = {});
+
+    Page& add_custom_slider(
+        std::wstring label,
+        std::wstring help,
+        volatile std::uint8_t& selected_index,
+        std::vector<std::wstring> display_values,
+        bool enabled = true,
+        ValueAction on_changed = {});
+
     Page& add_inline_choice(
         std::wstring label,
         std::wstring help,
@@ -248,6 +266,7 @@ private:
         std::wstring help{};
         volatile std::uint8_t* byte_value{};
         SliderSpec slider{};
+        std::vector<std::wstring> slider_value_texts{};
         std::vector<std::wstring> choices{};
         detail::TextInputState* text_input_state{};
         detail::ColorPickerState* color_picker_state{};
@@ -261,6 +280,14 @@ private:
 
     Page(Menu& owner, PageKind kind, std::wstring title, std::wstring help);
     void ensure_mutable() const;
+    Page& add_formatted_slider(
+        RowKind kind,
+        std::wstring label,
+        std::wstring help,
+        volatile std::uint8_t& selected_index,
+        std::vector<std::wstring> display_values,
+        bool enabled,
+        ValueAction on_changed);
 
     Menu* owner_{};
     PageKind kind_{PageKind::root};

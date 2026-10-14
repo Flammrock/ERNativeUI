@@ -22,6 +22,27 @@ function(erui_add_abi_release release_token)
             "ABI release metadata token mismatch for '${release_token}'.")
     endif()
 
+    # Resolve the mutable SDK's selected API from its public macro instead of
+    # hard-coding today's version in this reusable release helper. A frozen
+    # release may equal the current API while its snapshot is first added; it
+    # becomes an older-host rejection fixture only after the SDK advances.
+    file(STRINGS
+        "${ERNATIVEUI_ABI_REPOSITORY_ROOT}/include/ernativeui/erui.h"
+        current_api_selection
+        REGEX "^#define ERUI_API_VERSION_CURRENT ERUI_API_VERSION_[0-9]+_[0-9]+$")
+    if(NOT current_api_selection MATCHES
+       "ERUI_API_VERSION_([0-9]+)_([0-9]+)$")
+        message(FATAL_ERROR
+            "Could not resolve ERUI_API_VERSION_CURRENT from erui.h.")
+    endif()
+    math(EXPR current_api_version
+        "(${CMAKE_MATCH_1} << 16) | ${CMAKE_MATCH_2}")
+    math(EXPR frozen_api_version "${ERUI_ABI_RELEASE_API_VERSION}")
+    if(frozen_api_version GREATER current_api_version)
+        message(FATAL_ERROR
+            "Frozen API '${release_token}' is newer than the current SDK.")
+    endif()
+
     set(release_include "${release_dir}/include")
     set(c_header "${release_include}/ernativeui/erui.h")
     set(cpp_header "${release_include}/ernativeui/ERNativeUI.hpp")
@@ -123,19 +144,25 @@ function(erui_add_abi_release release_token)
     add_test(NAME "ERNativeUI.ABI.Contract.${release_upper}.Cpp"
         COMMAND ${cpp_client} "$<TARGET_FILE:${contract_host}>")
 
-    if(TARGET ERNativeUIAbiNegotiationCurrent)
+    # These two current-client probes were authored specifically around the
+    # v1.0 prefix and its guarded descriptors. Each newer release owns its
+    # exact negotiation/layout checks in its frozen C and C++ clients below.
+    if(frozen_api_version EQUAL 65536 AND
+       TARGET ERNativeUIAbiNegotiationCurrent)
         add_test(NAME
             "ERNativeUI.ABI.Compat.CurrentTo${release_upper}.Negotiation"
             COMMAND ERNativeUIAbiNegotiationCurrent
                 "$<TARGET_FILE:${contract_host}>" old-host)
     endif()
-    if(TARGET ERNativeUIAbiCurrentConnectionRejectsV1_0)
+    if(frozen_api_version LESS current_api_version AND
+       TARGET ERNativeUIAbiCurrentConnectionRejectsOlderApi)
         add_test(NAME
             "ERNativeUI.ABI.Compat.CurrentTo${release_upper}.ConnectionRejects"
-            COMMAND ERNativeUIAbiCurrentConnectionRejectsV1_0
+            COMMAND ERNativeUIAbiCurrentConnectionRejectsOlderApi
                 "$<TARGET_FILE:${contract_host}>")
     endif()
-    if(TARGET ERNativeUIAbiDescriptorGuardCurrent)
+    if(frozen_api_version EQUAL 65536 AND
+       TARGET ERNativeUIAbiDescriptorGuardCurrent)
         add_test(NAME
             "ERNativeUI.ABI.Compat.CurrentTo${release_upper}.GuardedProvider"
             COMMAND ERNativeUIAbiDescriptorGuardCurrent

@@ -43,6 +43,6 @@ directory or copy them into the project.
 - Read [Versioning](../versioning.md) before declaring the SDK and runtime
   requirement for a release.
 
-This documentation describes public API 1.1. API versions and ERNativeUI
+This documentation describes public API 1.2. API versions and ERNativeUI
 release versions are independent, even though the first release containing
-API 1.1 is ERNativeUI 1.1.0.
+API 1.2 is ERNativeUI 1.2.0.

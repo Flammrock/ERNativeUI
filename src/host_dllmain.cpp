@@ -222,6 +222,8 @@ DWORD run_host() noexcept {
         erui::native::GameAddresses early_addresses{};
         std::array<std::array<unsigned char, 16>, 3>
             early_shared_entry_bytes{};
+        std::array<unsigned char, 16> early_slider_refresh_bytes{};
+        bool early_slider_refresh_captured = false;
         if (solid_uncapper_loaded) {
             log::write(
                 "Solid Uncapper detected; capturing native interfaces before its asynchronous hook installation");
@@ -273,6 +275,18 @@ DWORD run_host() noexcept {
                     shared_entries[index],
                     early_shared_entry_bytes[index].size());
             }
+            if (early_addresses.slider_refresh) {
+                const auto* const slider_entry =
+                    reinterpret_cast<const unsigned char*>(
+                        early_addresses.slider_refresh);
+                if (!absolute_indirect_jump_target(slider_entry)) {
+                    std::memcpy(
+                        early_slider_refresh_bytes.data(),
+                        slider_entry,
+                        early_slider_refresh_bytes.size());
+                    early_slider_refresh_captured = true;
+                }
+            }
             log::write(
                 "Solid Uncapper compatibility: native interfaces captured");
         }
@@ -306,11 +320,12 @@ DWORD run_host() noexcept {
 
         // Preserve the released API 1.0 lifecycle: its table and provider
         // registration become available before Steam finishes initializing.
-        // API 1.1 negotiation remains gated by steam_language_readiness().
+        // API 1.1 and later negotiation remains gated by
+        // steam_language_readiness().
         registry().open_registration();
         set_api_state(ApiState::accepting);
         log::write(
-            "Provider registration open for API 1.0; waiting for localization language selection before releasing API 1.1");
+            "Provider registration open for API 1.0; waiting for localization language selection before releasing API 1.1 and later");
 
         const std::uint64_t language_wait_started = GetTickCount64();
         std::uint64_t language_last_log = 0;
@@ -387,7 +402,7 @@ DWORD run_host() noexcept {
         // Start the registration clock at the exact readiness release. The
         // registry also requires a full quiet interval since this point, so
         // an API 1.0 provider committed during Steam startup cannot cause an
-        // immediate freeze before newly released API 1.1 clients register.
+        // immediate freeze before API 1.1-or-later clients register.
         const std::uint64_t opened_at = GetTickCount64();
         const ERUI_Result startup_language_result =
             settle_cached_steam_language(std::move(startup_language));
@@ -523,6 +538,45 @@ DWORD run_host() noexcept {
             } else {
                 log::write(
                     "Solid Uncapper compatibility: no shared hooks appeared; continuing without menu chaining");
+            }
+
+            // Solid Uncapper may also own SliderCtrl's refresh entry for its
+            // multiplier/seconds presentation. API 1.2 formatted sliders can
+            // share that entry, but only through the same narrow policy used
+            // by the other compatibility bridges: an unchanged pristine
+            // function or an FF 25 detour into executable Solid-owned memory.
+            if (early_slider_refresh_captured &&
+                early_addresses.slider_refresh) {
+                const auto* const slider_entry =
+                    reinterpret_cast<const unsigned char*>(
+                        early_addresses.slider_refresh);
+                const bool changed = std::memcmp(
+                    early_slider_refresh_bytes.data(),
+                    slider_entry,
+                    early_slider_refresh_bytes.size()) != 0;
+                if (changed) {
+                    erui::native::ModuleView solid_uncapper{};
+                    const void* const destination =
+                        absolute_indirect_jump_target(slider_entry);
+                    if (!solid_uncapper.initialize(solid_uncapper_module) ||
+                        !destination ||
+                        !solid_uncapper.contains(destination) ||
+                        !solid_uncapper.is_executable(destination)) {
+                        log::write(
+                            "WARN: Solid Uncapper formatted-slider chain was not approved; API 1.2 formatted sliders will be unavailable if requested");
+                        early_addresses.slider_refresh = nullptr;
+                    } else {
+                        log::write(
+                            "Solid Uncapper compatibility: formatted-slider chain approved");
+                    }
+                } else {
+                    log::write(
+                        "Solid Uncapper compatibility: SliderCtrl refresh remained pristine");
+                }
+            } else {
+                early_addresses.slider_refresh = nullptr;
+                log::write(
+                    "WARN: SliderCtrl refresh was not captured early; API 1.2 formatted sliders will be unavailable with Solid Uncapper");
             }
 
             if (!erui::native::approve_captured_native_input_bindings(

@@ -6,7 +6,7 @@ It is an implementation/evidence record, not a client tutorial. Mod authors
 should use the [Popup Choice guide](../../guides/controls/popup-choice.md).
 
 Popup choice was introduced in the frozen API 1.0 prefix and remains part of
-the current API 1.1 contract. Native RVAs, layouts, vtables, and the analytical
+the public contract. Native RVAs, layouts, vtables, and the analytical
 names below are private implementation evidence, not public ABI. Evidence
 labels follow the [research methodology](../methodology.md).
 

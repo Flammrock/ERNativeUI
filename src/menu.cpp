@@ -70,6 +70,87 @@ Page& Page::add_slider(
 
 namespace {
 
+void validate_formatted_slider(
+    volatile std::uint8_t& selected_index,
+    const std::vector<std::wstring>& display_values) {
+    if (display_values.size() < ERUI_SLIDER_MIN_VALUE_COUNT ||
+        display_values.size() > ERUI_SLIDER_MAX_VALUE_COUNT ||
+        static_cast<std::size_t>(selected_index) >= display_values.size()) {
+        throw std::invalid_argument(
+            "formatted slider requires 2..256 values and a valid selected index");
+    }
+    for (const std::wstring& value : display_values) {
+        if (value.empty()) {
+            throw std::invalid_argument(
+                "formatted slider values cannot be empty");
+        }
+    }
+}
+
+} // namespace
+
+Page& Page::add_formatted_slider(
+    RowKind kind,
+    std::wstring label,
+    std::wstring help,
+    volatile std::uint8_t& selected_index,
+    std::vector<std::wstring> display_values,
+    bool enabled,
+    ValueAction on_changed) {
+    validate_formatted_slider(selected_index, display_values);
+    const std::int32_t maximum = static_cast<std::int32_t>(
+        display_values.size() - 1);
+    rows_.push_back(RowDefinition{
+        .kind = kind,
+        .label = std::move(label),
+        .help = std::move(help),
+        .byte_value = &selected_index,
+        .slider = {0, maximum, 1},
+        .slider_value_texts = std::move(display_values),
+        .value_action = on_changed,
+        .enabled = enabled,
+    });
+    return *this;
+}
+
+Page& Page::add_numeric_slider(
+    std::wstring label,
+    std::wstring help,
+    volatile std::uint8_t& selected_index,
+    std::vector<std::wstring> display_values,
+    bool enabled,
+    ValueAction on_changed) {
+    ensure_mutable();
+    return add_formatted_slider(
+        RowKind::numeric_slider,
+        std::move(label),
+        std::move(help),
+        selected_index,
+        std::move(display_values),
+        enabled,
+        on_changed);
+}
+
+Page& Page::add_custom_slider(
+    std::wstring label,
+    std::wstring help,
+    volatile std::uint8_t& selected_index,
+    std::vector<std::wstring> display_values,
+    bool enabled,
+    ValueAction on_changed) {
+    ensure_mutable();
+    return add_formatted_slider(
+        RowKind::custom_slider,
+        std::move(label),
+        std::move(help),
+        selected_index,
+        std::move(display_values),
+        enabled,
+        on_changed);
+}
+
+namespace {
+
 void validate_choice(
     volatile std::uint8_t& selected_index,
     const std::vector<std::wstring>& options) {

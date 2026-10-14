@@ -27,9 +27,11 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -55,6 +57,10 @@ using TextInputChangedCallback = void (ERUI_CALL*)(
     void*, const ERUI_TextInputChangeContext*) noexcept;
 using ColorPickerChangedCallback = void (ERUI_CALL*)(
     void*, const ERUI_ColorPickerChangeContext*) noexcept;
+using NumericSliderChangedCallback = void (ERUI_CALL*)(
+    void*, const ERUI_NumericSliderChangeContext*) noexcept;
+using CustomSliderChangedCallback = void (ERUI_CALL*)(
+    void*, const ERUI_CustomSliderChangeContext*) noexcept;
 using InputActionActivatedCallback = void (ERUI_CALL*)(
     void*, const ERUI_InputActionActivatedContext*) noexcept;
 using AssignmentsChangedCallback = void (ERUI_CALL*)(
@@ -77,6 +83,8 @@ enum class Capability : ERUI_Capabilities {
     builtin_pages = ERUI_CAP_BUILTIN_PAGES,
     input_bindings = ERUI_CAP_INPUT_BINDINGS,
     storage = ERUI_CAP_STORAGE,
+    numeric_slider = ERUI_CAP_NUMERIC_SLIDER,
+    custom_slider = ERUI_CAP_CUSTOM_SLIDER,
 };
 
 enum class InputDevice : ERUI_InputDevices {
@@ -508,6 +516,46 @@ struct SliderOptions {
     bool enabled{true};
 };
 
+struct NumericSliderOptions {
+    double minimum{0.0};
+    double maximum{100.0};
+    double step{1.0};
+    // Off-step values are rounded down to a step measured from minimum before
+    // the menu is published.
+    double initial_value{0.0};
+    // Empty selects the smallest exact decimal precision accepted by the API.
+    std::optional<std::uint32_t> decimal_places{};
+    std::wstring_view prefix{};
+    std::wstring_view suffix{};
+    bool enabled{true};
+};
+
+struct NumericSliderChange {
+    ERUI_ProviderHandle provider{};
+    RowHandle row{};
+    double value{};
+    std::int64_t scaled_value{};
+    std::uint32_t decimal_places{};
+    std::uint32_t index{};
+    std::uint32_t value_count{};
+};
+
+struct CustomSliderOptions {
+    std::uint32_t value_count{};
+    std::uint32_t initial_index{};
+    bool enabled{true};
+    // Invoked synchronously once per index by add_custom_slider. The returned
+    // strings are copied by the host before registration continues.
+    std::function<std::wstring(std::uint32_t, std::uint32_t)> format_value{};
+};
+
+struct CustomSliderChange {
+    ERUI_ProviderHandle provider{};
+    RowHandle row{};
+    std::uint32_t index{};
+    std::uint32_t value_count{};
+};
+
 struct ChoiceOptions {
     const std::wstring_view* values{};
     std::size_t count{};
@@ -731,6 +779,205 @@ inline bool make_color_picker_change(
     return true;
 }
 
+inline std::uint64_t decimal_scale(std::uint32_t decimal_places) noexcept {
+    static constexpr std::uint64_t scales[] = {
+        UINT64_C(1),
+        UINT64_C(10),
+        UINT64_C(100),
+        UINT64_C(1000),
+        UINT64_C(10000),
+        UINT64_C(100000),
+        UINT64_C(1000000),
+        UINT64_C(10000000),
+        UINT64_C(100000000),
+        UINT64_C(1000000000),
+    };
+    return decimal_places <= ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES
+        ? scales[decimal_places]
+        : 0;
+}
+
+inline bool scale_decimal_value(
+    double value,
+    std::uint32_t decimal_places,
+    std::int64_t& output) noexcept {
+    const std::uint64_t integer_scale = decimal_scale(decimal_places);
+    if (integer_scale == 0 || !std::isfinite(value)) return false;
+
+    // Perform the conversion with binary64 on every supported compiler. In
+    // particular, MSVC treats long double as double while MinGW may not; the
+    // public wrapper must accept or reject the same input on both toolchains.
+    const double scaled = value * static_cast<double>(integer_scale);
+    if (!std::isfinite(scaled)) return false;
+    const double rounded = std::round(scaled);
+
+    // INT64_MAX rounds to +2^63 when represented as a double. Comparing with
+    // a converted INT64_MAX would therefore permit an out-of-range cast.
+    // Use the exact binary powers that bound the signed 64-bit interval.
+    constexpr double signed_minimum = -9223372036854775808.0; // -2^63
+    constexpr double signed_upper_bound = 9223372036854775808.0; // +2^63
+    if (rounded < signed_minimum || rounded >= signed_upper_bound) {
+        return false;
+    }
+
+    // Decimal inputs such as 0.29 can land one representable binary value
+    // beside the expected integer after multiplication by 100. Accept at
+    // most two local ULPs of that unavoidable conversion noise; do not use a
+    // broad absolute epsilon that would silently accept a genuinely
+    // off-precision value.
+    if (scaled != rounded) {
+        const double adjacent = std::nextafter(scaled, rounded);
+        const double ulp = std::fabs(adjacent - scaled);
+        if (ulp == 0.0 || std::fabs(scaled - rounded) > ulp * 2.0) {
+            return false;
+        }
+    }
+    output = static_cast<std::int64_t>(rounded);
+    return true;
+}
+
+inline bool infer_decimal_value(
+    double value,
+    ERUI_DecimalValue& output) noexcept {
+    for (std::uint32_t decimal_places = 0;
+         decimal_places <= ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES;
+         ++decimal_places) {
+        std::int64_t scaled{};
+        if (!scale_decimal_value(value, decimal_places, scaled)) continue;
+        output.scaled_value = scaled;
+        output.decimal_places = decimal_places;
+        output.reserved = 0;
+        return true;
+    }
+    return false;
+}
+
+inline double unscale_decimal_value(
+    std::int64_t scaled_value,
+    std::uint32_t decimal_places) noexcept {
+    const std::uint64_t scale = decimal_scale(decimal_places);
+    return scale == 0
+        ? 0.0
+        : static_cast<double>(scaled_value) / static_cast<double>(scale);
+}
+
+struct PreparedNumericSlider {
+    std::int64_t minimum{};
+    std::int64_t maximum{};
+    std::int64_t step{};
+    std::int64_t initial_value{};
+    std::uint32_t decimal_places{};
+    std::uint32_t value_count{};
+};
+
+inline bool prepare_numeric_slider(
+    const NumericSliderOptions& options,
+    PreparedNumericSlider& output) noexcept {
+    std::uint32_t decimal_places{};
+    if (options.decimal_places.has_value()) {
+        decimal_places = *options.decimal_places;
+        if (decimal_places > ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES) {
+            return false;
+        }
+        if (!scale_decimal_value(
+                options.minimum, decimal_places, output.minimum) ||
+            !scale_decimal_value(
+                options.maximum, decimal_places, output.maximum) ||
+            !scale_decimal_value(options.step, decimal_places, output.step) ||
+            !scale_decimal_value(
+                options.initial_value, decimal_places, output.initial_value)) {
+            return false;
+        }
+    } else {
+        bool found = false;
+        for (decimal_places = 0;
+             decimal_places <= ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES;
+             ++decimal_places) {
+            if (scale_decimal_value(
+                    options.minimum, decimal_places, output.minimum) &&
+                scale_decimal_value(
+                    options.maximum, decimal_places, output.maximum) &&
+                scale_decimal_value(
+                    options.step, decimal_places, output.step) &&
+                scale_decimal_value(
+                    options.initial_value,
+                    decimal_places,
+                    output.initial_value)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+
+    if (output.minimum >= output.maximum || output.step <= 0 ||
+        output.initial_value < output.minimum ||
+        output.initial_value > output.maximum) {
+        return false;
+    }
+    const std::uint64_t range =
+        static_cast<std::uint64_t>(output.maximum) -
+        static_cast<std::uint64_t>(output.minimum);
+    const std::uint64_t step = static_cast<std::uint64_t>(output.step);
+    if (range % step != 0) return false;
+    const std::uint64_t intervals = range / step;
+    if (intervals < ERUI_SLIDER_MIN_VALUE_COUNT - 1u ||
+        intervals > ERUI_SLIDER_MAX_VALUE_COUNT - 1u) {
+        return false;
+    }
+    output.decimal_places = decimal_places;
+    output.value_count = static_cast<std::uint32_t>(intervals + 1u);
+    return true;
+}
+
+inline bool make_numeric_slider_change(
+    const ERUI_NumericSliderChangeContext* context,
+    NumericSliderChange& output) noexcept {
+    if (!context ||
+        context->size < sizeof(ERUI_NumericSliderChangeContext) ||
+        context->flags != 0 || context->value.reserved != 0 ||
+        context->value.decimal_places >
+            ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES ||
+        context->provider == ERUI_INVALID_PROVIDER ||
+        context->row == ERUI_INVALID_ROW ||
+        context->value_count < ERUI_SLIDER_MIN_VALUE_COUNT ||
+        context->value_count > ERUI_SLIDER_MAX_VALUE_COUNT ||
+        context->index >= context->value_count ||
+        context->reserved[0] != 0 || context->reserved[1] != 0) {
+        return false;
+    }
+    output.provider = context->provider;
+    output.row = context->row;
+    output.value = unscale_decimal_value(
+        context->value.scaled_value, context->value.decimal_places);
+    output.scaled_value = context->value.scaled_value;
+    output.decimal_places = context->value.decimal_places;
+    output.index = context->index;
+    output.value_count = context->value_count;
+    return true;
+}
+
+inline bool make_custom_slider_change(
+    const ERUI_CustomSliderChangeContext* context,
+    CustomSliderChange& output) noexcept {
+    if (!context ||
+        context->size < sizeof(ERUI_CustomSliderChangeContext) ||
+        context->flags != 0 ||
+        context->provider == ERUI_INVALID_PROVIDER ||
+        context->row == ERUI_INVALID_ROW ||
+        context->value_count < ERUI_SLIDER_MIN_VALUE_COUNT ||
+        context->value_count > ERUI_SLIDER_MAX_VALUE_COUNT ||
+        context->index >= context->value_count ||
+        context->reserved[0] != 0 || context->reserved[1] != 0) {
+        return false;
+    }
+    output.provider = context->provider;
+    output.row = context->row;
+    output.index = context->index;
+    output.value_count = context->value_count;
+    return true;
+}
+
 inline bool make_action_activation(
     const ERUI_InputActionActivatedContext* context,
     ActionActivation& output) noexcept {
@@ -881,7 +1128,9 @@ inline bool api_complete_for_version(
             (api.capabilities &
                 (ERUI_CAP_TEXT_INPUT | ERUI_CAP_COLOR_PICKER |
                     ERUI_CAP_BUILTIN_PAGES |
-                    ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE)) == 0;
+                    ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
+                    ERUI_CAP_NUMERIC_SLIDER |
+                    ERUI_CAP_CUSTOM_SLIDER)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -900,7 +1149,33 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_COLOR_PICKER) != 0 &&
             (api.capabilities & ERUI_CAP_BUILTIN_PAGES) != 0 &&
             (api.capabilities & ERUI_CAP_INPUT_BINDINGS) != 0 &&
-            (api.capabilities & ERUI_CAP_STORAGE) != 0;
+            (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
+            (api.capabilities &
+                (ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER)) == 0;
+    }
+    if (version == ERUI_API_VERSION_1_2) {
+        return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
+            api.set_text_input_value && api.get_text_input_value &&
+            api.add_color_picker && api.set_color_picker_value &&
+            api.get_color_picker_value && api.get_builtin_page &&
+            api.add_input_section && api.add_input_action &&
+            api.set_assignments_changed_handler && api.set_action_inputs &&
+            api.get_action_inputs && api.get_action_default_inputs &&
+            api.reset_action_inputs && api.open_storage &&
+            api.storage_load && api.storage_save && api.storage_get_utf8 &&
+            api.storage_set_utf8 && api.storage_erase &&
+            api.storage_get_action_inputs && api.storage_set_action_inputs &&
+            api.storage_apply_assignment_changes && api.storage_get_info &&
+            api.add_numeric_slider && api.set_numeric_slider_value &&
+            api.get_numeric_slider_value && api.add_custom_slider &&
+            api.set_custom_slider_index && api.get_custom_slider_index &&
+            (api.capabilities & ERUI_CAP_TEXT_INPUT) != 0 &&
+            (api.capabilities & ERUI_CAP_COLOR_PICKER) != 0 &&
+            (api.capabilities & ERUI_CAP_BUILTIN_PAGES) != 0 &&
+            (api.capabilities & ERUI_CAP_INPUT_BINDINGS) != 0 &&
+            (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
+            (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
+            (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0;
     }
     return false;
 }
@@ -935,15 +1210,15 @@ inline ApiConnectionResult connect_api(std::chrono::milliseconds timeout) {
             std::memcpy(&get_api, &symbol, sizeof(get_api));
             ERUI_Result status = request_api(
                 get_api,
-                ERUI_API_VERSION_1_1,
-                ERUI_API_V1_1_SIZE,
+                ERUI_API_VERSION_1_2,
+                ERUI_API_V1_2_SIZE,
                 result.api);
             if (status == ERUI_OK) {
                 if (!api_complete_for_version(
-                        result.api, ERUI_API_VERSION_1_1)) {
+                        result.api, ERUI_API_VERSION_1_2)) {
                     result.error = Error(ErrorCode::incompatible_api,
                         ERUI_UNSUPPORTED_VERSION,
-                        L"ERNativeUI returned an incomplete or incompatible API 1.1 table.");
+                        L"ERNativeUI returned an incomplete or incompatible API 1.2 table.");
                     return result;
                 }
                 result.connected = true;
@@ -957,8 +1232,8 @@ inline ApiConnectionResult connect_api(std::chrono::milliseconds timeout) {
             if (status != ERUI_HOST_NOT_READY) {
                 result.error = Error(ErrorCode::incompatible_api, status,
                     status == ERUI_UNSUPPORTED_VERSION
-                        ? L"ERNativeUI API 1.1 is required; update ERNativeUI.dll."
-                        : std::wstring(L"ERNativeUI API 1.1 negotiation failed: ") +
+                        ? L"ERNativeUI API 1.2 is required; update ERNativeUI.dll."
+                        : std::wstring(L"ERNativeUI API 1.2 negotiation failed: ") +
                             result_name(status));
                 return result;
             }
@@ -1087,8 +1362,8 @@ class ConnectionResult;
 class Connection {
 public:
     [[nodiscard]] bool valid() const noexcept {
-        return api_.api_version == ERUI_API_VERSION_1_1 &&
-            api_.size == ERUI_API_V1_1_SIZE;
+        return api_.api_version == ERUI_API_VERSION_1_2 &&
+            api_.size == ERUI_API_V1_2_SIZE;
     }
     explicit operator bool() const noexcept { return valid(); }
     [[nodiscard]] bool supports(Capability capability) const noexcept {
@@ -1254,6 +1529,192 @@ public:
         draft_->record(draft_->api_.add_slider(
             draft_->provider_, page_, &desc, &row), L"add_slider");
         return row;
+    }
+
+    RowHandle add_slider(
+        std::wstring_view label,
+        std::wstring_view help,
+        const NumericSliderOptions& options,
+        NumericSliderChangedCallback callback = nullptr,
+        void* user_data = nullptr) noexcept {
+        if (!draft_ || !draft_->open() || draft_->failed_) {
+            return ERUI_INVALID_ROW;
+        }
+        if (!draft_->api_.add_numeric_slider ||
+            (draft_->api_.capabilities & ERUI_CAP_NUMERIC_SLIDER) == 0) {
+            draft_->record(ERUI_NOT_SUPPORTED, L"add_numeric_slider");
+            return ERUI_INVALID_ROW;
+        }
+        detail::PreparedNumericSlider prepared{};
+        if (!detail::view_size_fits(label.size()) ||
+            !detail::view_size_fits(help.size()) ||
+            !detail::view_size_fits(options.prefix.size()) ||
+            !detail::view_size_fits(options.suffix.size()) ||
+            (!callback && user_data) ||
+            !detail::prepare_numeric_slider(options, prepared)) {
+            draft_->record(ERUI_INVALID_ARGUMENT, L"add_numeric_slider");
+            return ERUI_INVALID_ROW;
+        }
+
+        ERUI_NumericSliderDesc description{};
+        description.size = sizeof(description);
+        description.label = detail::utf16_view(label);
+        description.help = detail::utf16_view(help);
+        description.changed_callback =
+            reinterpret_cast<ERUI_NumericSliderChangedCallback>(callback);
+        description.user_data = user_data;
+        description.minimum_scaled_value = prepared.minimum;
+        description.maximum_scaled_value = prepared.maximum;
+        description.step_scaled_value = prepared.step;
+        description.initial_scaled_value = prepared.initial_value;
+        description.decimal_places = prepared.decimal_places;
+        description.enabled = options.enabled ? 1u : 0u;
+        description.prefix = detail::utf16_view(options.prefix);
+        description.suffix = detail::utf16_view(options.suffix);
+        ERUI_RowHandle row{};
+        draft_->record(draft_->api_.add_numeric_slider(
+            draft_->provider_, page_, &description, &row),
+            L"add_numeric_slider");
+        return row;
+    }
+
+    template <auto Function>
+    RowHandle add_slider(
+        std::wstring_view label,
+        std::wstring_view help,
+        const NumericSliderOptions& options) noexcept {
+        using Expected = void (*)(const NumericSliderChange&) noexcept;
+        static_assert(std::is_same<decltype(Function), Expected>::value,
+            "NumericSlider callback must be void(const NumericSliderChange&) noexcept");
+        return add_slider(
+            label,
+            help,
+            options,
+            &numeric_slider_thunk<Function>);
+    }
+
+    template <auto Function, typename State>
+    RowHandle add_slider(
+        std::wstring_view label,
+        std::wstring_view help,
+        const NumericSliderOptions& options,
+        State& state) noexcept {
+        using Expected = void (*)(
+            State&, const NumericSliderChange&) noexcept;
+        static_assert(std::is_same<decltype(Function), Expected>::value,
+            "Stateful NumericSlider callback must be void(State&, const NumericSliderChange&) noexcept");
+        return add_slider(
+            label,
+            help,
+            options,
+            &stateful_numeric_slider_thunk<Function, State>,
+            &state);
+    }
+
+    RowHandle add_custom_slider(
+        std::wstring_view label,
+        std::wstring_view help,
+        const CustomSliderOptions& options,
+        CustomSliderChangedCallback callback = nullptr,
+        void* user_data = nullptr) noexcept {
+        if (!draft_ || !draft_->open() || draft_->failed_) {
+            return ERUI_INVALID_ROW;
+        }
+        if (!draft_->api_.add_custom_slider ||
+            (draft_->api_.capabilities & ERUI_CAP_CUSTOM_SLIDER) == 0) {
+            draft_->record(ERUI_NOT_SUPPORTED, L"add_custom_slider");
+            return ERUI_INVALID_ROW;
+        }
+        if (!detail::view_size_fits(label.size()) ||
+            !detail::view_size_fits(help.size()) ||
+            options.value_count < ERUI_SLIDER_MIN_VALUE_COUNT ||
+            options.value_count > ERUI_SLIDER_MAX_VALUE_COUNT ||
+            options.initial_index >= options.value_count ||
+            !options.format_value || (!callback && user_data)) {
+            draft_->record(ERUI_INVALID_ARGUMENT, L"add_custom_slider");
+            return ERUI_INVALID_ROW;
+        }
+
+        try {
+            std::vector<std::wstring> values;
+            values.reserve(options.value_count);
+            for (std::uint32_t index = 0;
+                 index < options.value_count;
+                 ++index) {
+                std::wstring value = options.format_value(
+                    index, options.value_count);
+                if (value.empty() ||
+                    value.size() > ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH ||
+                    !detail::view_size_fits(value.size())) {
+                    draft_->record(
+                        ERUI_INVALID_ARGUMENT, L"add_custom_slider value");
+                    return ERUI_INVALID_ROW;
+                }
+                values.push_back(std::move(value));
+            }
+
+            std::vector<ERUI_Utf16View> native_values;
+            native_values.reserve(values.size());
+            for (const std::wstring& value : values) {
+                native_values.push_back(detail::utf16_view(value));
+            }
+
+            ERUI_CustomSliderDesc description{};
+            description.size = sizeof(description);
+            description.label = detail::utf16_view(label);
+            description.help = detail::utf16_view(help);
+            description.changed_callback =
+                reinterpret_cast<ERUI_CustomSliderChangedCallback>(callback);
+            description.user_data = user_data;
+            description.values = native_values.data();
+            description.value_count = options.value_count;
+            description.initial_index = options.initial_index;
+            description.enabled = options.enabled ? 1u : 0u;
+            ERUI_RowHandle row{};
+            draft_->record(draft_->api_.add_custom_slider(
+                draft_->provider_, page_, &description, &row),
+                L"add_custom_slider");
+            return row;
+        } catch (const std::bad_alloc&) {
+            draft_->record(ERUI_OUT_OF_MEMORY, L"add_custom_slider");
+            return ERUI_INVALID_ROW;
+        } catch (...) {
+            draft_->record(ERUI_CALLBACK_REJECTED, L"add_custom_slider formatter");
+            return ERUI_INVALID_ROW;
+        }
+    }
+
+    template <auto Function>
+    RowHandle add_custom_slider(
+        std::wstring_view label,
+        std::wstring_view help,
+        const CustomSliderOptions& options) noexcept {
+        using Expected = void (*)(const CustomSliderChange&) noexcept;
+        static_assert(std::is_same<decltype(Function), Expected>::value,
+            "CustomSlider callback must be void(const CustomSliderChange&) noexcept");
+        return add_custom_slider(
+            label,
+            help,
+            options,
+            &custom_slider_thunk<Function>);
+    }
+
+    template <auto Function, typename State>
+    RowHandle add_custom_slider(
+        std::wstring_view label,
+        std::wstring_view help,
+        const CustomSliderOptions& options,
+        State& state) noexcept {
+        using Expected = void (*)(
+            State&, const CustomSliderChange&) noexcept;
+        static_assert(std::is_same<decltype(Function), Expected>::value,
+            "Stateful CustomSlider callback must be void(State&, const CustomSliderChange&) noexcept");
+        return add_custom_slider(
+            label,
+            help,
+            options,
+            &stateful_custom_slider_thunk<Function, State>,
+            &state);
     }
 
     RowHandle add_inline_choice(
@@ -1545,6 +2006,48 @@ private:
         auto* state = static_cast<State*>(user_data);
         ColorPickerChange change{};
         if (state && detail::make_color_picker_change(context, change)) {
+            Function(*state, change);
+        }
+    }
+
+    template <auto Function>
+    static void ERUI_CALL numeric_slider_thunk(
+        void*,
+        const ERUI_NumericSliderChangeContext* context) noexcept {
+        NumericSliderChange change{};
+        if (detail::make_numeric_slider_change(context, change)) {
+            Function(change);
+        }
+    }
+
+    template <auto Function, typename State>
+    static void ERUI_CALL stateful_numeric_slider_thunk(
+        void* user_data,
+        const ERUI_NumericSliderChangeContext* context) noexcept {
+        auto* state = static_cast<State*>(user_data);
+        NumericSliderChange change{};
+        if (state && detail::make_numeric_slider_change(context, change)) {
+            Function(*state, change);
+        }
+    }
+
+    template <auto Function>
+    static void ERUI_CALL custom_slider_thunk(
+        void*,
+        const ERUI_CustomSliderChangeContext* context) noexcept {
+        CustomSliderChange change{};
+        if (detail::make_custom_slider_change(context, change)) {
+            Function(change);
+        }
+    }
+
+    template <auto Function, typename State>
+    static void ERUI_CALL stateful_custom_slider_thunk(
+        void* user_data,
+        const ERUI_CustomSliderChangeContext* context) noexcept {
+        auto* state = static_cast<State*>(user_data);
+        CustomSliderChange change{};
+        if (state && detail::make_custom_slider_change(context, change)) {
             Function(*state, change);
         }
     }
@@ -2704,6 +3207,62 @@ public:
         return valid() ? api_.get_row_value(provider_, row, &value)
             : static_cast<ERUI_Result>(ERUI_INVALID_HANDLE);
     }
+    ERUI_Result set_numeric_slider_value(
+        RowHandle row,
+        double value) const noexcept {
+        if (!valid()) return ERUI_INVALID_HANDLE;
+        if (!supports(Capability::numeric_slider) ||
+            !api_.set_numeric_slider_value) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        ERUI_DecimalValue native_value{};
+        if (!detail::infer_decimal_value(value, native_value)) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+        return api_.set_numeric_slider_value(
+            provider_, row, &native_value);
+    }
+    ERUI_Result get_numeric_slider_value(
+        RowHandle row,
+        double& output) const noexcept {
+        if (!valid()) return ERUI_INVALID_HANDLE;
+        if (!supports(Capability::numeric_slider) ||
+            !api_.get_numeric_slider_value) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        ERUI_DecimalValue native_value{};
+        const ERUI_Result result = api_.get_numeric_slider_value(
+            provider_, row, &native_value);
+        if (result != ERUI_OK) return result;
+        if (native_value.reserved != 0 ||
+            native_value.decimal_places >
+                ERUI_NUMERIC_SLIDER_MAX_DECIMAL_PLACES) {
+            return ERUI_INTERNAL_ERROR;
+        }
+        output = detail::unscale_decimal_value(
+            native_value.scaled_value, native_value.decimal_places);
+        return ERUI_OK;
+    }
+    ERUI_Result set_custom_slider_index(
+        RowHandle row,
+        std::uint32_t index) const noexcept {
+        if (!valid()) return ERUI_INVALID_HANDLE;
+        if (!supports(Capability::custom_slider) ||
+            !api_.set_custom_slider_index) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        return api_.set_custom_slider_index(provider_, row, index);
+    }
+    ERUI_Result get_custom_slider_index(
+        RowHandle row,
+        std::uint32_t& output) const noexcept {
+        if (!valid()) return ERUI_INVALID_HANDLE;
+        if (!supports(Capability::custom_slider) ||
+            !api_.get_custom_slider_index) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        return api_.get_custom_slider_index(provider_, row, &output);
+    }
     ERUI_Result set_text(
         RowHandle row,
         std::wstring_view value) const noexcept {
@@ -2879,10 +3438,10 @@ RegistrationResult Connection::register_menu(
     RegistrationResult output{};
     try {
         if (!detail::api_complete_for_version(
-                api_, ERUI_API_VERSION_1_1)) {
+                api_, ERUI_API_VERSION_1_2)) {
             output.error_ = Error(ErrorCode::incompatible_api,
                 ERUI_UNSUPPORTED_VERSION,
-                L"A valid ERNativeUI API 1.1 connection is required.");
+                L"A valid ERNativeUI API 1.2 connection is required.");
             return output;
         }
         if (!detail::valid_machine_identifier(options.provider_id)) {

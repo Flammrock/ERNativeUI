@@ -20,7 +20,7 @@ import library, call `LoadLibrary` for the host, or bundle a private host copy.
 
 ## Connect, then register
 
-An API 1.1 C++ client starts from a worker thread after `DllMain` has returned:
+An API 1.2 C++ client starts from a worker thread after `DllMain` has returned:
 
 ```cpp
 const auto connection = erui::connect();
@@ -45,21 +45,19 @@ const auto registration = connection.value().register_menu(
     });
 ```
 
-`connect()` requests the exact API 1.1 contract and waits for the host's
-bounded startup-readiness process. It does not silently downgrade to API 1.0.
+`connect()` requests the exact API 1.2 contract and waits for the host's
+bounded startup-readiness process. It does not silently downgrade to an older API.
 A successful `Connection` owns a copy of the negotiated function table, so it
 is safe for normal value semantics inside the client.
 
-Clients built with the API 1.0 SDK—whether they were compiled before API 1.1
-existed or deliberately target 1.0 today—use the frozen 1.0 function-table
-prefix and original registration lifecycle. Clients built with the API 1.1
-SDK use the explicit `connect()` flow. Neither wrapper silently changes the
-API selected by its headers.
+Clients built with the API 1.0 or 1.1 SDK continue to request their frozen
+function-table contract. Clients built with the API 1.2 SDK use the current
+table. No wrapper silently changes the API selected by its headers.
 
 ## Registration is declarative
 
 The builder callback creates a private provider draft. Calls such as
-`add_toggle`, `add_slider`, and `add_submenu` describe a logical menu; they do
+`add_toggle`, the three slider forms, and `add_submenu` describe a logical menu; they do
 not immediately manipulate a visible Elden Ring screen. The host copies the
 provider ID, text, option lists, initial values, and other descriptors while
 building the draft.

@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <chrono>
 #include <cstdint>
+#include <limits>
+#include <string>
 #include <type_traits>
 
 namespace {
@@ -21,6 +23,20 @@ void stateful_input_action_activated(
     const erui::ActionActivation&) noexcept {
     ++calls;
 }
+#if defined(ERUI_API_VERSION_1_2)
+void numeric_slider_changed(const erui::NumericSliderChange&) noexcept {}
+void stateful_numeric_slider_changed(
+    unsigned& calls,
+    const erui::NumericSliderChange&) noexcept {
+    ++calls;
+}
+void custom_slider_changed(const erui::CustomSliderChange&) noexcept {}
+void stateful_custom_slider_changed(
+    unsigned& calls,
+    const erui::CustomSliderChange&) noexcept {
+    ++calls;
+}
+#endif
 
 static_assert(sizeof(ERUI_TextInputDesc) == 96);
 static_assert(offsetof(ERUI_TextInputDesc, maximum_length) == 88);
@@ -86,6 +102,24 @@ static_assert(!std::is_default_constructible<erui::Connection>::value);
 static_assert(std::is_same<
     decltype(erui::connect(std::chrono::milliseconds{0})),
     erui::ConnectionResult>::value);
+#if defined(ERUI_API_VERSION_1_2)
+static_assert(sizeof(ERUI_DecimalValue) == 16);
+static_assert(sizeof(ERUI_NumericSliderChangeContext) == 56);
+static_assert(sizeof(ERUI_CustomSliderChangeContext) == 40);
+static_assert(sizeof(ERUI_NumericSliderDesc) == 136);
+static_assert(sizeof(ERUI_CustomSliderDesc) == 80);
+static_assert(std::is_trivially_copyable<ERUI_DecimalValue>::value);
+static_assert(std::is_trivially_copyable<ERUI_NumericSliderDesc>::value);
+static_assert(std::is_trivially_copyable<ERUI_CustomSliderDesc>::value);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::numeric_slider) == ERUI_CAP_NUMERIC_SLIDER);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::custom_slider) == ERUI_CAP_CUSTOM_SLIDER);
+static_assert(noexcept(numeric_slider_changed(
+    std::declval<const erui::NumericSliderChange&>())));
+static_assert(noexcept(custom_slider_changed(
+    std::declval<const erui::CustomSliderChange&>())));
+#endif
 #endif
 
 } // namespace
@@ -161,6 +195,80 @@ int main() {
     if (erui::detail::make_action_activation(
             &binding_context, activation)) return 18;
     if (ERUI_API_V1_1_SIZE != 320u) return 19;
+#if defined(ERUI_API_VERSION_1_2)
+    erui::NumericSliderOptions numeric_options{};
+    numeric_options.minimum = -1.0;
+    numeric_options.maximum = 1.0;
+    numeric_options.step = 0.1;
+    numeric_options.initial_value = -0.5;
+    numeric_options.prefix = L"x";
+    if (page.add_slider<&numeric_slider_changed>(
+            L"Numeric", L"Static callback", numeric_options) !=
+        ERUI_INVALID_ROW) return 20;
+    if (page.add_slider<&stateful_numeric_slider_changed>(
+            L"Numeric", L"Stateful callback", numeric_options, calls) !=
+        ERUI_INVALID_ROW) return 21;
+
+    erui::CustomSliderOptions custom_options{};
+    custom_options.value_count = 3;
+    custom_options.initial_index = 1;
+    custom_options.format_value = [](
+        std::uint32_t index, std::uint32_t count) {
+        return std::to_wstring(index) + L"/" + std::to_wstring(count);
+    };
+    if (page.add_custom_slider<&custom_slider_changed>(
+            L"Custom", L"Static callback", custom_options) !=
+        ERUI_INVALID_ROW) return 22;
+    if (page.add_custom_slider<&stateful_custom_slider_changed>(
+            L"Custom", L"Stateful callback", custom_options, calls) !=
+        ERUI_INVALID_ROW) return 23;
+
+    erui::detail::PreparedNumericSlider prepared{};
+    if (!erui::detail::prepare_numeric_slider(
+            numeric_options, prepared)) return 24;
+    if (prepared.minimum != -10 || prepared.maximum != 10 ||
+        prepared.step != 1 || prepared.initial_value != -5 ||
+        prepared.decimal_places != 1 || prepared.value_count != 21) return 25;
+
+    std::int64_t scaled_boundary{};
+    if (!erui::detail::scale_decimal_value(
+            -9223372036854775808.0, 0, scaled_boundary) ||
+        scaled_boundary != (std::numeric_limits<std::int64_t>::min)()) {
+        return 26;
+    }
+    if (erui::detail::scale_decimal_value(
+            9223372036854775808.0, 0, scaled_boundary)) return 27;
+    if (erui::detail::scale_decimal_value(
+            0.1000000001, 1, scaled_boundary)) return 28;
+
+    ERUI_NumericSliderChangeContext numeric_context{};
+    numeric_context.size = sizeof(numeric_context);
+    numeric_context.provider = 31;
+    numeric_context.row = 41;
+    numeric_context.value = {-6, 1, 0};
+    numeric_context.index = 2;
+    numeric_context.value_count = 11;
+    erui::NumericSliderChange numeric_change{};
+    if (!erui::detail::make_numeric_slider_change(
+            &numeric_context, numeric_change)) return 29;
+    if (numeric_change.provider != 31 || numeric_change.row != 41 ||
+        numeric_change.value != -0.6 || numeric_change.scaled_value != -6 ||
+        numeric_change.decimal_places != 1 || numeric_change.index != 2 ||
+        numeric_change.value_count != 11) return 30;
+
+    ERUI_CustomSliderChangeContext custom_context{};
+    custom_context.size = sizeof(custom_context);
+    custom_context.provider = 31;
+    custom_context.row = 43;
+    custom_context.index = 6;
+    custom_context.value_count = 7;
+    erui::CustomSliderChange custom_change{};
+    if (!erui::detail::make_custom_slider_change(
+            &custom_context, custom_change)) return 31;
+    if (custom_change.provider != 31 || custom_change.row != 43 ||
+        custom_change.index != 6 || custom_change.value_count != 7) return 32;
+    if (ERUI_API_V1_2_SIZE != 368u) return 33;
+#endif
 #endif
     return 0;
 }

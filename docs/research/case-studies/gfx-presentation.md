@@ -484,13 +484,13 @@ hash requires renewed structural and live evidence.
 
 ## Scope of the result
 
-ERUI API 1.1 is current and finished; TextInput and ColorPicker are supported
-native controls with optional enhanced presentation. This work proves offline
+TextInput and ColorPicker were completed and published in ERUI API 1.1; they
+remain supported native controls with optional enhanced presentation. This work proves offline
 extension of two existing host movies and runtime binding to known named
 widgets.
 
 It does not prove a general runtime `AttachMovie`, arbitrary ActionScript
 method invocation, custom movie loader, resource owner, event subscription
 bridge, or teardown contract. Loading a provider-authored GFX at runtime and
-building wholly custom interfaces remain future research, not an API 1.1
+building wholly custom interfaces remain future research, not a current public
 capability or promise.

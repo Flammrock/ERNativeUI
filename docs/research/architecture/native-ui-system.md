@@ -226,14 +226,14 @@ Use the highest layer that already owns the behavior:
 
 | Need | Preferred layer | Status |
 |---|---|---|
-| Rows in supported settings panels | Native page materializer and row constructors | **Confirmed**, current API 1.1 |
-| Subpages and pagination | Native child-page push and Back/task path | **Confirmed**, current API 1.1 |
+| Rows in supported settings panels | Native page materializer and row constructors | **Confirmed**, public API |
+| Subpages and pagination | Native child-page push and Back/task path | **Confirmed**, public API |
 | Existing title text | Scoped SceneObjProxy/TextField bridge | **Confirmed**, narrow current use |
 | Optional capacity or widget artwork | Offline structural GFX patch | **Confirmed**, optional presentation |
-| Alerts and selection dialogs | Exact native descriptor/job lifecycle | **Confirmed**, current API 1.1/1.0 features |
-| Custom top-level Configuration tabs | Native category records plus a virtualized presentation window | **Hypothesis**, exploratory API 1.2 work |
-| Site of Grace entries | Independently recover that menu family | **Hypothesis**, exploratory API 1.2 work |
-| Provider-loaded custom GFX | Full resource/movie/render/input owner | **Hypothesis**, exploratory API 1.2 work |
+| Alerts and selection dialogs | Exact native descriptor/job lifecycle | **Confirmed**, public since API 1.0 |
+| Custom top-level Configuration tabs | Native category records plus a virtualized presentation window | **Hypothesis**, future research |
+| Site of Grace entries | Independently recover that menu family | **Hypothesis**, future research |
+| Provider-loaded custom GFX | Full resource/movie/render/input owner | **Hypothesis**, future research |
 | Generic raw Scaleform API | Typed value, invocation, callback, and lifetime abstraction | **Hypothesis**, not a public feature |
 
 The [methodology](../methodology.md) defines when a hypothesis may move into

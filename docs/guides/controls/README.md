@@ -46,10 +46,12 @@ page like this larger integration showcase.*
 | 2 | [Submenu](submenu.md) | Opens a provider-owned child page | None; returns a `Page` | 1.0 |
 | 3 | [Toggle](toggle.md) | Chooses off or on | `0` or `1` | 1.0 |
 | 4 | [Slider](slider.md) | Adjusts a bounded integer | `std::uint8_t` | 1.0 |
-| 5 | [Inline Choice](inline-choice.md) | Cycles labels with left/right | Zero-based index | 1.0 |
-| 6 | [Popup Choice](popup-choice.md) | Selects from a native list | Zero-based index | 1.0 |
-| 7 | [TextInput](text-input.md) | Opens native text editing | UTF-16 string | 1.1 |
-| 8 | [ColorPicker](color-picker.md) | Opens the native RGB editor | Three byte channels | 1.1 |
+| 5 | [Numeric Slider](numeric-slider.md) | Adjusts a signed or decimal sequence | Exact base-10 value and logical index | 1.2 |
+| 6 | [Custom Slider](custom-slider.md) | Slides through arbitrary display labels | Zero-based index | 1.2 |
+| 7 | [Inline Choice](inline-choice.md) | Cycles labels with left/right | Zero-based index | 1.0 |
+| 8 | [Popup Choice](popup-choice.md) | Selects from a native list | Zero-based index | 1.0 |
+| 9 | [TextInput](text-input.md) | Opens native text editing | UTF-16 string | 1.1 |
+| 10 | [ColorPicker](color-picker.md) | Opens the native RGB editor | Three byte channels | 1.1 |
 
 Use an inline choice for a short list that is comfortable to cycle through.
 Use a popup choice when seeing all labels before confirming is more useful.
@@ -105,16 +107,29 @@ erui::Color color{};
 const ERUI_Result color_read = registration.get_color(color_row, color);
 const ERUI_Result color_write =
     registration.set_color(color_row, {90, 120, 180});
+
+double decimal{};
+const ERUI_Result numeric_read =
+    registration.get_numeric_slider_value(numeric_row, decimal);
+const ERUI_Result numeric_write =
+    registration.set_numeric_slider_value(numeric_row, -0.5);
+
+std::uint32_t custom_index{};
+const ERUI_Result custom_read =
+    registration.get_custom_slider_index(custom_row, custom_index);
+const ERUI_Result custom_write =
+    registration.set_custom_slider_index(custom_row, 4);
 ```
 
 Check each `ERUI_Result` against `ERUI_OK` before using a read value or
 assuming that a write was accepted. The distinct names above make every
 operation visible; real code may return early after the first error.
 
-`get_value` and `set_value` support Toggle, Slider, Inline Choice, and Popup
-Choice. TextInput and ColorPicker use their typed methods. Programmatic writes
-are silent: they update canonical state and presentation but do not pretend the
-player made a change or invoke a change callback.
+`get_value` and `set_value` support Toggle, byte Slider, Inline Choice, and
+Popup Choice. Numeric Slider, Custom Slider, TextInput, and ColorPicker use
+their typed methods. Programmatic writes are silent: they update canonical
+state and presentation but do not pretend the player made a change or invoke
+a change callback.
 
 Destroying the C++ `Registration` value only discards this client-side access
 handle. It does not unregister the committed provider.
