@@ -176,6 +176,12 @@ enum class BindingBuilderStage : std::uint32_t {
     tail_validation = 5,
 };
 
+enum class DefinitionInitializationResult : std::uint8_t {
+    canonical,
+    foreign_custom,
+    invalid,
+};
+
 struct DefinitionScanTelemetry {
     std::uint32_t pairs_total{};
     std::uint32_t kind_pairs{};
@@ -577,6 +583,8 @@ EventQueue<AssignmentEvent> g_assignment_events{};
 std::array<std::atomic<void*>, kMaximumTrackedTextEditors>
     g_active_text_editors{};
 std::array<std::atomic_bool, kConfigModeCount> g_mode_initialized{};
+std::array<std::atomic_bool, kConfigModeCount>
+    g_foreign_list_reported{};
 std::atomic_flag g_builder_busy = ATOMIC_FLAG_INIT;
 std::atomic_bool g_prepared{};
 std::atomic_bool g_installed{};
@@ -1599,20 +1607,19 @@ bool clear_input_slot(
     }
 }
 
-bool initialize_mode_definitions(
+DefinitionInitializationResult initialize_mode_definitions(
     void* list,
     std::uint8_t mode,
     DefinitionScanTelemetry* telemetry) noexcept {
-    if (mode >= kConfigModeCount) return false;
-    if (g_mode_initialized[mode].load(std::memory_order_acquire)) {
-        return true;
+    if (mode >= kConfigModeCount) {
+        return DefinitionInitializationResult::invalid;
     }
 
     auto* const begin = field<std::byte*>(list, kListBeginOffset);
     auto* const end = field<std::byte*>(list, kListEndOffset);
     if (!begin || !end || end < begin ||
         static_cast<std::size_t>(end - begin) % kKeySettingSize != 0) {
-        return false;
+        return DefinitionInitializationResult::invalid;
     }
     const std::size_t cell_count =
         static_cast<std::size_t>(end - begin) / kKeySettingSize;
@@ -1775,7 +1782,22 @@ bool initialize_mode_definitions(
         }
         if (category_template && action_template) break;
     }
-    if (!category_template || !action_template) return false;
+    if (!category_template) {
+        return DefinitionInitializationResult::invalid;
+    }
+    if (!action_template) {
+        return DefinitionInitializationResult::foreign_custom;
+    }
+
+    // A cached template only answers how ERNativeUI should construct its
+    // rows. It does not prove that the current KeyConfig dialog is one of
+    // Elden Ring's canonical binding screens. Third-party dialogs can reuse
+    // the same native list/config classes while intentionally presenting a
+    // private action catalog. Require a canonical category/action pair on
+    // every invocation so host rows never leak into such private screens.
+    if (g_mode_initialized[mode].load(std::memory_order_acquire)) {
+        return DefinitionInitializationResult::canonical;
+    }
 
     for (const auto& section : g_sections) {
         KeyBindingDefinition& definition = section->definitions[mode];
@@ -1811,7 +1833,7 @@ bool initialize_mode_definitions(
         }
     }
     g_mode_initialized[mode].store(true, std::memory_order_release);
-    return true;
+    return DefinitionInitializationResult::canonical;
 }
 
 bool validate_constructed_cell(
@@ -1983,8 +2005,11 @@ void append_compiled_bindings(void* list, void* config) noexcept {
             } else {
                 failure_stage = static_cast<std::uint32_t>(
                     BindingBuilderStage::definitions);
-                if (initialize_mode_definitions(
-                        list, mode, &definition_scan)) {
+                const DefinitionInitializationResult definition_result =
+                    initialize_mode_definitions(
+                        list, mode, &definition_scan);
+                if (definition_result ==
+                    DefinitionInitializationResult::canonical) {
                     failure_stage = static_cast<std::uint32_t>(
                         BindingBuilderStage::scratch);
                     if (build_scratch_cells(mode)) {
@@ -2037,6 +2062,25 @@ void append_compiled_bindings(void* list, void* config) noexcept {
                                 (final_capacity_pointer - final_begin) /
                                     kKeySettingSize);
                         }
+                    }
+                } else if (definition_result ==
+                    DefinitionInitializationResult::foreign_custom) {
+                    // The exact KeyConfig classes are also used by
+                    // third-party, custom-only binding screens. No host
+                    // pointer has been published at this stage, so a list
+                    // without a canonical native action template is a safe
+                    // non-target rather than a process-wide backend failure.
+                    accepted = true;
+                    if (!g_foreign_list_reported[mode].exchange(
+                            true, std::memory_order_acq_rel)) {
+                        erui::detail::logf(
+                            erui::LogLevel::info,
+                            "Input binding row injection skipped a non-canonical KeyConfig list: mode=%u pairs=%u canonicalActions=%u",
+                            static_cast<unsigned>(mode),
+                            static_cast<unsigned>(
+                                definition_scan.pairs_total),
+                            static_cast<unsigned>(
+                                definition_scan.action_flags));
                     }
                 }
             }
@@ -2675,6 +2719,9 @@ bool initialize_install_state() noexcept {
     }
     for (auto& initialized : g_mode_initialized) {
         initialized.store(false, std::memory_order_release);
+    }
+    for (auto& reported : g_foreign_list_reported) {
+        reported.store(false, std::memory_order_release);
     }
     for (const auto& binding : g_bindings) {
         binding->edge_tracker.reset();
