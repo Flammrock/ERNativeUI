@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.1.1...ERNativeUI-v1.2.0) (2026-10-14)
+
+
+### Features
+
+* add configurable localization language override ([#8](https://github.com/Flammrock/ERNativeUI/issues/8)) ([a7baad7](https://github.com/Flammrock/ERNativeUI/commit/a7baad7b6f3fc68113527687e9881c59459c08e0))
+* add numeric and custom sliders with ERUI API 1.2 ([#10](https://github.com/Flammrock/ERNativeUI/issues/10)) ([0566e29](https://github.com/Flammrock/ERNativeUI/commit/0566e294143a5d7ec73d834b2a3c202a58556a8c))
+* add Vietnamese host locale ([#6](https://github.com/Flammrock/ERNativeUI/issues/6)) ([f5977ba](https://github.com/Flammrock/ERNativeUI/commit/f5977baf4accbe04572c0a3e5de9bd6fc44cd47a))
+
 ## [1.1.1](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.1.0...ERNativeUI-v1.1.1) (2026-09-11)
 
 
