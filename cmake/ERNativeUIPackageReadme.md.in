@@ -1,0 +1,20 @@
+# ERNativeUI @PROJECT_VERSION@ Windows x64 package
+
+This archive contains the ERNativeUI host, public C and C++ headers, CMake
+package files, buildable examples, optional presentation assets, and tools.
+
+The complete documentation remains online to avoid duplicating its large
+screenshot library in every binary release:
+
+[Open the documentation for ERNativeUI @PROJECT_VERSION@](https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v@PROJECT_VERSION@/docs/README.md)
+
+The URL is pinned to the `ERNativeUI-v@PROJECT_VERSION@` tag and therefore
+matches the files in this archive.
+
+Package layout:
+
+- `bin` contains the runtime host, configuration, locales, optional GFX, tools,
+  and built example DLLs.
+- `include` contains the public header-only client API.
+- `lib/cmake/ERNativeUI` contains the CMake package configuration.
+- `share/ERNativeUI` contains source examples, notices, and licenses.

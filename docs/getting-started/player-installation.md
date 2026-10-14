@@ -24,7 +24,7 @@ Choose one source:
   compact player package.
 - [GitHub Releases](https://github.com/Flammrock/ERNativeUI/releases/latest)
   provides `ERNativeUI-X.Y.Z-windows-x64.zip`, which also contains the SDK,
-  documentation, examples, and tools.
+  examples, tools, and a version-pinned link to the online documentation.
 
 When using the GitHub package, the runtime files are inside its `bin`
 directory. Mod authors should keep the complete extracted SDK in a stable

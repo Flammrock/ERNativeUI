@@ -96,10 +96,14 @@ C:\SDK\ERNativeUI-1.1.0-windows-x64\
 |           `-- ERNativeUITargets.cmake
 `-- share\
     `-- ERNativeUI\
-        |-- docs\
+        |-- DOCUMENTATION.md
         |-- examples\
         `-- licenses\
 ```
+
+`DOCUMENTATION.md` links to the documentation stored under this SDK's exact
+GitHub release tag. The screenshot-heavy documentation tree is not duplicated
+inside the binary archive.
 
 If extracting the ZIP creates one additional outer directory, open it and use
 the inner directory that actually contains those four children.

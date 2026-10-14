@@ -215,8 +215,9 @@ dist/release/
 ```
 
 The Windows archive includes the runtime, public C and C++ headers, examples,
-documentation, GFX patcher, CMake package files, configuration/assets, license,
-and third-party notices.
+GFX patcher, CMake package files, configuration/assets, license, third-party
+notices, and a version-pinned link to the online documentation. It deliberately
+does not duplicate the repository's screenshot-heavy documentation tree.
 
 The script removes and recreates the complete `dist/release` directory on each
 run. Move any files you need to preserve before invoking it. Its `-Version`
@@ -254,8 +255,8 @@ DLL and default INI, locales, optional `menu` GFX assets, example DLLs, license
 and third-party notices. Its `README.md` comes from
 [`assets/NEXUS_README.md`](https://github.com/Flammrock/ERNativeUI/blob/main/assets/NEXUS_README.md): this is a concise, standalone player guide whose
 documentation and support links are absolute. It does not contain the SDK
-headers, CMake package, patcher executable, full documentation library, or
-source examples found in the Windows archive.
+headers, CMake package, patcher executable, version-pinned SDK documentation
+link, or source examples found in the Windows archive.
 
 The public Nexus description is maintained separately in
 [`assets/NEXUS_PRESENTATION.bbcode`](https://github.com/Flammrock/ERNativeUI/blob/main/assets/NEXUS_PRESENTATION.bbcode).

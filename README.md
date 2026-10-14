@@ -196,8 +196,9 @@ Install one canonical host and load it before ordinary ERNativeUI client mods.
 ### Mod authors
 
 The GitHub Windows package contains the host, public headers, CMake package,
-examples, tools, and documentation. Client mods need only `erui.h`, or
-`erui.h` plus `ERNativeUI.hpp`; they do not link an ERNativeUI import library.
+examples, tools, and a link to the documentation for that exact release tag.
+Client mods need only `erui.h`, or `erui.h` plus `ERNativeUI.hpp`; they do not
+link an ERNativeUI import library.
 
 1. [Install the SDK](docs/getting-started/setup.md).
 2. [Build “Hello, Tarnished!”](docs/getting-started/first-mod.md).

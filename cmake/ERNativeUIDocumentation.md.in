@@ -1,0 +1,9 @@
+# ERNativeUI documentation
+
+The complete documentation is maintained online so this binary SDK archive
+does not duplicate its large screenshot library.
+
+[Open the documentation for ERNativeUI @PROJECT_VERSION@](https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v@PROJECT_VERSION@/docs/README.md)
+
+This link is pinned to the `ERNativeUI-v@PROJECT_VERSION@` release tag. It
+therefore describes this SDK even after development continues on `main`.

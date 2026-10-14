@@ -39,6 +39,17 @@ endif()
 set(ERNATIVEUI_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy" CACHE PATH
     "Directory in which runtime-ready artifacts are staged")
 
+# Release/install trees carry a version-pinned documentation link instead of
+# duplicating the repository's screenshot-heavy documentation library.
+set(_ernativeui_documentation_file
+    "${CMAKE_CURRENT_BINARY_DIR}/DOCUMENTATION.md")
+configure_file(cmake/ERNativeUIDocumentation.md.in
+    "${_ernativeui_documentation_file}" @ONLY)
+set(_ernativeui_package_readme_file
+    "${CMAKE_CURRENT_BINARY_DIR}/PACKAGE-README.md")
+configure_file(cmake/ERNativeUIPackageReadme.md.in
+    "${_ernativeui_package_readme_file}" @ONLY)
+
 # Public headers are split into a language-neutral C ABI target and a C++17
 # convenience target. Neither carries a binary link dependency.
 add_library(ERNativeUICABI INTERFACE)
@@ -208,8 +219,6 @@ if(TARGET ERNativeUIHost)
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>"
         COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/docs"
-        COMMAND ${CMAKE_COMMAND} -E make_directory
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses"
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win"
@@ -229,7 +238,7 @@ if(TARGET ERNativeUIHost)
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_042_pc_graphicsetting.gfx"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+            "${_ernativeui_package_readme_file}"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/README.md"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG.md"
@@ -243,9 +252,9 @@ if(TARGET ERNativeUIHost)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/THIRD_PARTY_NOTICES.txt"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/docs"
-            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/docs"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_ernativeui_documentation_file}"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/DOCUMENTATION.md"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/examples"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/examples"
@@ -593,9 +602,12 @@ endif()
 install(DIRECTORY examples/ DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI/examples
     FILES_MATCHING PATTERN "*.cpp" PATTERN "*.hpp" PATTERN "*.md"
     PATTERN "*.ini" PATTERN "*.cmake" PATTERN "CMakeLists.txt")
-install(DIRECTORY docs/ DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI/docs
-    PATTERN "old" EXCLUDE)
-install(FILES README.md CHANGELOG.md VALIDATION.md LICENSE.txt THIRD_PARTY_NOTICES.txt
+install(FILES "${_ernativeui_documentation_file}"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI)
+install(FILES "${_ernativeui_package_readme_file}"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI
+    RENAME README.md)
+install(FILES CHANGELOG.md VALIDATION.md LICENSE.txt THIRD_PARTY_NOTICES.txt
     DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI)
 if(TARGET ERNativeUIHost)
     install(FILES "${safetyhook_SOURCE_DIR}/LICENSE"
