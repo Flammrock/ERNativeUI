@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.2.0...ERNativeUI-v1.2.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* avoid injecting bindings into Solid Uncapper menus ([#12](https://github.com/Flammrock/ERNativeUI/issues/12)) ([4daf17e](https://github.com/Flammrock/ERNativeUI/commit/4daf17e62341d997400a507ef143c2763ddf4b61))
+
 ## [1.2.0](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.1.1...ERNativeUI-v1.2.0) (2026-10-14)
 
 
