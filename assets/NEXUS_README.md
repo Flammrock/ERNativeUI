@@ -79,5 +79,9 @@ then report the ERNativeUI release, Elden Ring executable version, DLL order,
 and first failed address or hook line through [GitHub Issues](https://github.com/Flammrock/ERNativeUI/issues)
 or the [Nexus Mods page](https://www.nexusmods.com/eldenring/mods/10767).
 
+## Credits
+
+- **[An Thanh Le](https://github.com/AnThanhLe)** — contributed the Vietnamese translation.
+
 The complete mod-author SDK, examples, documentation, source, and license are
 available in the [ERNativeUI repository](https://github.com/Flammrock/ERNativeUI).

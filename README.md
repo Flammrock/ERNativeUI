@@ -271,6 +271,10 @@ before declaring a client dependency.
   <img src="assets/ernativeui-separator-2.png" alt="">
 </p>
 
+## Credits
+
+- **[An Thanh Le](https://github.com/AnThanhLe)** — contributed the Vietnamese translation.
+
 ## License and contributions
 
 ERNativeUI is my first mod. It is released under the
