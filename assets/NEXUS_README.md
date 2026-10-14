@@ -56,7 +56,9 @@ before combining such mods.
 `ERNativeUI.ini` belongs beside `ERNativeUI.dll`. The host creates its embedded
 default when the file is missing and never overwrites an existing file.
 Logging is disabled by default; enable it only while troubleshooting. Locale
-INI files belong in `locales/` beside the host.
+INI files belong in `locales/` beside the host. By default ERNativeUI follows
+Elden Ring's Steam game language; `[Localization] Language` can select an
+explicit host-wide locale for ERNativeUI and connected client mods.
 
 See the [player installation guide](https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/player-installation.md)
 for complete setup, runtime configuration, and verification details.

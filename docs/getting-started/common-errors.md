@@ -71,12 +71,14 @@ the remaining asynchronous hook order.
 **Likely cause**
 
 API 1.1 negotiation remains temporarily `ERUI_HOST_NOT_READY` while the host
-settles Steam language readiness. `erui::connect()` already retries that state
-every 25 ms for up to 30 seconds by default. A final timeout therefore usually
-means the wrong DLL was loaded or host startup did not settle; adding an
-arbitrary sleep in the client is not the normal fix. `host_failed` means the
-host reached a terminal initialization error. A missing export almost always
-means a renamed/unrelated/obsolete binary was selected.
+settles language readiness. In automatic mode this includes Steam startup;
+an explicit valid locale settles immediately. `erui::connect()` already
+retries that state every 25 ms for up to 30 seconds by default. A final timeout
+therefore usually means the wrong DLL was loaded or host startup did not
+settle; adding an arbitrary sleep in the client is not the normal fix.
+`host_failed` means the host reached a terminal initialization error. A
+missing export almost always means a renamed/unrelated/obsolete binary was
+selected.
 
 **Fix**
 
@@ -301,6 +303,34 @@ If the INI is missing, the host normally creates it from an embedded default
 without overwriting an existing file. A failure to create it is sent to the
 Windows debug output instead. The reference defaults are in
 the [default `ERNativeUI.ini`](https://github.com/Flammrock/ERNativeUI/blob/main/assets/ERNativeUI.ini).
+
+## ERNativeUI or a client mod uses the wrong language
+
+**Symptom**
+
+Host-owned Previous/Next text or a localized client remains in another
+language after editing `ERNativeUI.ini`.
+
+**Likely cause**
+
+The wrong host copy was edited, the game was not fully restarted, the explicit
+identifier is invalid, the matching host locale file is absent, or the client
+mod does not provide text for that identifier. A host locale file never
+translates Elden Ring or client-owned text by itself.
+
+**Fix**
+
+1. Edit the INI beside the exact loaded `ERNativeUI.dll`.
+2. Use `Language = auto` or an exact lowercase identifier containing only
+   ASCII letters, digits, `_`, or `-`, such as `french` or `vietnamese`.
+3. For host navigation text, verify
+   `locales/<identifier>.ini` exists beside the DLL.
+4. Fully restart the game. With logging temporarily enabled, confirm
+   `Localization language` reports the expected effective identifier and
+   source.
+5. If host text changes but a client remains in English, that client needs a
+   translation for `LanguageInfo::identifier`; an unknown convenience enum is
+   not an error.
 
 ## A game update causes address or hook installation failure
 

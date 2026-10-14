@@ -117,6 +117,9 @@ Important defaults are:
 [Logging]
 EnableLog = 0
 
+[Localization]
+Language = auto
+
 [Runtime]
 RegistrationQuietMs = 750
 RegistrationMaxWaitMs = 5000
@@ -132,8 +135,19 @@ Logging is disabled for normal play. When `EnableLog = 1`, the host writes
 bounded troubleshooting session; with logging disabled, the host does not
 create, truncate, append to, or flush a log file.
 
-Locale files use Steam's game-language identifiers and belong in `locales`
-beside the host. Missing files and missing keys fall back to embedded English.
+Locale files use effective language identifiers and belong in `locales` beside
+the host. `Language = auto` follows Elden Ring's current Steam game language.
+To force one locale for ERNativeUI and every connected client mod, replace
+`auto` with an exact lowercase identifier such as `french` or `vietnamese`,
+then restart the game. Explicit identifiers may contain only ASCII lowercase
+letters, digits, `_`, or `-`, with a maximum length of 64.
+
+An override selects ERNativeUI's effective language; it does not translate
+Elden Ring itself. A matching `locales/<identifier>.ini` translates host-owned
+navigation text. Client mods receive the same exact identifier and remain
+responsible for translations they provide. A missing locale file, missing
+key, or invalid UTF-8 value falls back to embedded English for the affected
+host text. An invalid `Language` value safely falls back to `auto`.
 
 ## 6. Verify the installation
 

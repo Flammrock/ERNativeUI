@@ -664,9 +664,10 @@ typedef struct ERUI_Utf16View {
 } ERUI_Utf16View;
 
 /*
- * Convenience classification for the exact Steam language identifier.
- * UNKNOWN means Steam returned a valid identifier not known to this host;
- * it does not mean that language discovery failed.
+ * Convenience classification for the effective language identifier. In
+ * automatic mode the identifier comes from Steam; a host configuration may
+ * explicitly override it. UNKNOWN means a valid identifier is not known to
+ * this host; it does not mean that language selection failed.
  */
 typedef uint32_t ERUI_GameLanguage;
 enum {
@@ -689,10 +690,11 @@ enum {
 };
 
 /*
- * identifier is the exact UTF-8 token returned by Steam (for example
- * "french", "koreana", or an identifier unknown to ERNativeUI). Its memory
- * is host-owned and remains valid until process exit. The caller initializes
- * size before calling get_game_language.
+ * identifier is the exact effective UTF-8 token (for example "french",
+ * "koreana", or an identifier unknown to ERNativeUI). It normally comes from
+ * Steam and may instead be selected by the host's localization setting. Its
+ * memory is host-owned and remains valid until process exit. The caller
+ * initializes size before calling get_game_language.
  */
 typedef struct ERUI_GameLanguageInfo {
     uint32_t size;
@@ -1382,9 +1384,9 @@ typedef ERUI_Result (ERUI_CALL* ERUI_GetApiFn)(
  * ERUI_GetApi is also the explicit API 1.1 connection handshake. Call it from
  * a worker and retry ERUI_HOST_NOT_READY without reusing a partially written
  * table. A successful API 1.1 request guarantees that startup language
- * discovery has settled; get_game_language may still return
- * ERUI_NOT_SUPPORTED after a definitive Steam incompatibility. API 1.0 keeps
- * its released compatibility lifecycle.
+ * selection has settled. In automatic mode, get_game_language may still
+ * return ERUI_NOT_SUPPORTED after a definitive Steam incompatibility. API 1.0
+ * keeps its released compatibility lifecycle.
  */
 ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     uint32_t requested_version,

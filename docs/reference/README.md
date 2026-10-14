@@ -63,7 +63,7 @@ authoritative ABI; the C++ header is an inline convenience layer over it.
 | Select a destination | `Menu::root`, `Menu::page` | root handle, `get_builtin_page` |
 | Build pages and rows | `Page::add_*` | `add_*` function-table entries |
 | Read or update row state | `Registration` | provider/row handles and typed getters/setters |
-| Read the game language | `Connection::game_language` | `get_game_language` |
+| Read the effective game/localization language | `Connection::game_language` | `get_game_language` |
 | Queue a native alert | `Registration::alert` | `enqueue_alert` |
 | Declare and update bindings | `Menu::input_bindings`, `InputAction` | input-section/action entries and `ERUI_ActionInputs` |
 | Persist provider data | `Menu::storage`, `Storage`, `StorageSection` | `open_storage` and `storage_*` entries |

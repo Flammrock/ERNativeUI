@@ -17,7 +17,7 @@ reference.
 | Choose and configure a settings control | [Settings controls](controls/README.md) |
 | Check whether the connected host supports a feature | [Availability and capabilities](availability.md) |
 | Show a native message or confirmation dialog | [Native dialogs](native-dialogs.md) |
-| Translate client text using Elden Ring's selected language | [Game language and localization](localization.md) |
+| Translate client text using the selected or configured language | [Game language and localization](localization.md) |
 | Declare controller, keyboard, or mouse actions | [Native input bindings](input-bindings.md) |
 | Load and save provider configuration | [Provider storage](storage.md) |
 | Install optional GFX, customize titles, or reproduce the presentation patch | [Presentation and optional GFX assets](presentation-and-gfx.md) |

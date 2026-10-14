@@ -50,11 +50,12 @@ enum class SteamLanguageProbeDecision : std::uint8_t {
     std::string_view identifier) noexcept;
 
 /*
- * Publishes exactly one process-wide language result. A successful probe
- * releases API 1.1 clients with a stable language snapshot. A terminal
- * failure releases language callers with ERUI_NOT_SUPPORTED while leaving
- * both menu API versions usable. Retryable failures leave the state pending
- * and return ERUI_HOST_NOT_READY.
+ * Publishes exactly one process-wide effective language result. A successful
+ * Steam probe or explicit configuration releases API 1.1 clients with a
+ * stable language snapshot. A terminal automatic-discovery failure releases
+ * language callers with ERUI_NOT_SUPPORTED while leaving both menu API
+ * versions usable. Retryable failures leave the state pending and return
+ * ERUI_HOST_NOT_READY.
  */
 ERUI_Result settle_cached_steam_language(
     SteamLanguageProbe discovered) noexcept;

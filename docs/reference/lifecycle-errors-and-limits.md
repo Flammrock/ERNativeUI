@@ -45,11 +45,12 @@ choose another bounded timeout. It polls for the already-loaded canonical
 `ERNativeUI.dll`; it does not call `LoadLibrary`. It requests API 1.1 exactly,
 does not downgrade to API 1.0, and returns immediately when the host is ready.
 
-A successful API 1.1 handshake guarantees that Steam language discovery has
-settled. Language lookup can still return `ERUI_NOT_SUPPORTED` when Steam is
-definitively unavailable; this does not disable the menu API. `LanguageInfo`
-copies the exact Steam identifier into client-owned storage and separately
-classifies identifiers known to ERNativeUI.
+A successful API 1.1 handshake guarantees that process-wide language selection
+has settled. With `Language = auto`, lookup can still return
+`ERUI_NOT_SUPPORTED` when Steam is definitively unavailable; this does not
+disable the menu API. An explicit host language is immediately available.
+`LanguageInfo` copies the exact effective identifier into client-owned storage
+and separately classifies identifiers known to ERNativeUI.
 
 A strict-C client performs the same sequence explicitly:
 

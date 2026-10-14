@@ -14,6 +14,6 @@ struct HostLocale {
 
 [[nodiscard]] HostLocale load_host_locale(
     const std::filesystem::path& dll_directory,
-    std::string_view steam_identifier) noexcept;
+    std::string_view language_identifier) noexcept;
 
 } // namespace erui::host

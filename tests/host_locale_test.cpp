@@ -13,6 +13,16 @@ int main() {
     ERUI_TEST_CHECK(french.pagination.previous_label == L"Page précédente");
     ERUI_TEST_CHECK(french.pagination.next_label == L"Page suivante");
 
+    const erui::host::HostLocale vietnamese =
+        erui::host::load_host_locale(assets, "vietnamese");
+    ERUI_TEST_CHECK(vietnamese.loaded);
+    ERUI_TEST_CHECK(vietnamese.pagination.previous_label == L"Trang trước");
+    ERUI_TEST_CHECK(vietnamese.pagination.previous_help ==
+        L"Quay lại trang cài đặt trước đó.");
+    ERUI_TEST_CHECK(vietnamese.pagination.next_label == L"Trang sau");
+    ERUI_TEST_CHECK(vietnamese.pagination.next_help ==
+        L"Mở trang cài đặt tiếp theo.");
+
     const erui::host::HostLocale missing =
         erui::host::load_host_locale(assets, "community-locale");
     ERUI_TEST_CHECK(!missing.loaded);

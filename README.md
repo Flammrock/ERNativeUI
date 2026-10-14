@@ -167,8 +167,9 @@ options, screenshots, and links to its native implementation research.
   or centered placement. [Learn about dialogs](docs/guides/native-dialogs.md).
 - Register controller, keyboard, and mouse actions that players can reassign
   in Elden Ring's binding screens. [Learn about input bindings](docs/guides/input-bindings.md).
-- Follow the selected game language while preserving unknown Steam language
-  identifiers for future locales. [Learn about localization](docs/guides/localization.md).
+- Follow the selected game language or a player-configured locale while
+  preserving unknown identifiers for future and community translations.
+  [Learn about localization](docs/guides/localization.md).
 - Load, mutate, and explicitly save provider-owned configuration, or use the
   header-only input-assignment codec with another storage system.
   [Learn about storage](docs/guides/storage.md).

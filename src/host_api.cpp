@@ -461,7 +461,7 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     // API 1.0 was released before explicit connection readiness existed and
     // remains available as soon as provider registration opens. API 1.1 is
     // the first contract whose successful negotiation guarantees that the
-    // host has settled Steam language discovery.
+    // host has settled its effective localization language selection.
     if (requested_version == ERUI_API_VERSION_1_1) {
         switch (erui::host::steam_language_readiness()) {
         case erui::host::SteamLanguageReadiness::pending:

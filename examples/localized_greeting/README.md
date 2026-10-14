@@ -9,6 +9,7 @@ This deliberately small client demonstrates the complete localization flow:
 5. localize the provider name, row label, help text, and native alert;
 6. register through that same connection without rediscovering the host.
 
-`LanguageInfo::identifier` also retains Steam's exact UTF-8 token. A mod may
-recognize a community locale there even when `known` is
+`LanguageInfo::identifier` retains the exact effective UTF-8 token. It normally
+comes from Steam and may be overridden process-wide in `ERNativeUI.ini`. A mod
+may recognize a community locale there even when `known` is
 `GameLanguage::unknown`.

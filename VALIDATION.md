@@ -22,9 +22,9 @@ The suite covers:
 - C ABI layout, the frozen API 1.0 function-table prefix, and the additive
   API 1.1 TextInput, ColorPicker, BuiltinPage, InputBindings, and Storage
   blocks;
-- Steam language-token classification, transient/terminal readiness
-  settlement, guarded Steam initialization, bounded fail-open behavior, and
-  unknown-locale preservation;
+- localization-setting grammar and traversal rejection, Steam language-token
+  classification, transient/terminal readiness settlement, guarded Steam
+  initialization, bounded fail-open behavior, and unknown-locale preservation;
 - C++17 wrapper compilation;
 - explicit API 1.1 connection polling, clean API 1.0-only host rejection,
   canary-bounded API writes, and failed-host results;
@@ -134,6 +134,11 @@ For the shipped showcase, verify:
 2. `Tarnished UI Showcase` rows appear in System -> Game Options.
 3. Its provider name, rows, choices, help, and dialog messages use the active
    Elden Ring language; the `Localized Greeting` example does the same.
+   Repeat once with `[Localization] Language = french` against a different
+   game language and confirm both host pagination and clients use French.
+   Repeat with `Language = vietnamese`: host pagination uses the Vietnamese
+   locale and the public result preserves `vietnamese` with the unknown enum.
+   Restore `Language = auto`, restart, and confirm Steam detection resumes.
 4. Toggle and slider callbacks update, and `Toggle From Client Code` changes
    the host-owned toggle.
 5. Visit Camera Options, Display, Sound, Network, Keyboard/Mouse Settings, and

@@ -79,7 +79,9 @@ int main() {
 
     erui::host::SteamLanguageProbe ready{};
     ready.available = true;
-    ready.current = "french";
+    // Explicit localization overrides use this same stable cache. An unknown
+    // but safe future/community identifier must remain available verbatim.
+    ready.current = "vietnamese";
     ERUI_TEST_CHECK(erui::host::settle_cached_steam_language(
         std::move(ready)) == ERUI_OK);
     ERUI_TEST_CHECK(erui::host::steam_language_readiness() ==
@@ -89,10 +91,10 @@ int main() {
     language.size = sizeof(language);
     ERUI_TEST_CHECK(erui::host::get_cached_steam_language(&language) ==
         ERUI_OK);
-    ERUI_TEST_CHECK(language.known_language == ERUI_GAME_LANGUAGE_FRENCH);
-    ERUI_TEST_CHECK(language.identifier.length == 6);
+    ERUI_TEST_CHECK(language.known_language == ERUI_GAME_LANGUAGE_UNKNOWN);
+    ERUI_TEST_CHECK(language.identifier.length == 10);
     ERUI_TEST_CHECK(std::string_view(
-        language.identifier.data, language.identifier.length) == "french");
+        language.identifier.data, language.identifier.length) == "vietnamese");
 
     // Settlement is immutable. A later terminal observation cannot replace
     // the language snapshot already published to clients.
@@ -103,6 +105,6 @@ int main() {
         std::move(too_late)) == ERUI_OK);
     ERUI_TEST_CHECK(erui::host::get_cached_steam_language(&language) ==
         ERUI_OK);
-    ERUI_TEST_CHECK(language.known_language == ERUI_GAME_LANGUAGE_FRENCH);
+    ERUI_TEST_CHECK(language.known_language == ERUI_GAME_LANGUAGE_UNKNOWN);
     return 0;
 }

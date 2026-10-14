@@ -1,8 +1,11 @@
 # Game language and localization
 
-ERNativeUI reports Elden Ring's selected Steam language so a client mod can
-choose its own translated text. ERNativeUI does not translate provider names,
-row labels, help text, choice values, or dialog messages for the client.
+ERNativeUI reports one process-wide effective language so a client mod can
+choose its own translated text. It follows Elden Ring's selected Steam game
+language by default, while an optional `ERNativeUI.ini` setting can select an
+explicit locale for the host and every client. ERNativeUI does not translate
+provider names, row labels, help text, choice values, or dialog messages for
+the client.
 
 This guide describes the current API 1.1 C++17 surface. Language discovery
 first appeared in API 1.0 and remains available to any client built with the
@@ -16,8 +19,8 @@ The language API returns both:
 
 - a known-language enum for every language currently advertised for Elden
   Ring on Steam; and
-- Steam's exact UTF-8 language identifier, including a future identifier that
-  the current enum does not recognize yet.
+- the exact effective UTF-8 identifier, including a configured, future, or
+  community identifier that the current enum does not recognize yet.
 
 The known C++ values are `english`, `german`, `french`, `italian`, `korean`,
 `spanish`, `chinese_simplified`, `chinese_traditional`, `russian`, `thai`,
@@ -25,16 +28,55 @@ The known C++ values are `english`, `german`, `french`, `italian`, `korean`,
 `spanish_latin_america`. `GameLanguage::unknown` is a valid forward-compatible
 classification, not necessarily an error.
 
-ERNativeUI reads only the current Steam UI-language identifier. It does not
-infer a language from the Windows locale, report the audio language, enumerate
-available languages, or change the language while the game is running.
+In automatic mode ERNativeUI reads only Steam's current game-language
+identifier. It does not infer a language from the Windows locale, report the
+audio language, enumerate available languages, or change the language while
+the game is running.
+
+## Choose automatic detection or an explicit locale
+
+The default file beside `ERNativeUI.dll` contains:
+
+```ini
+[Localization]
+Language = auto
+```
+
+`auto` waits only as long as necessary for Elden Ring's Steam service, then
+uses the exact identifier returned by
+`SteamAPI_ISteamApps_GetCurrentGameLanguage`.
+
+To test or force another installed locale, use its exact lowercase identifier:
+
+```ini
+[Localization]
+Language = vietnamese
+```
+
+An explicit identifier:
+
+- is selected immediately, without waiting for Steam language discovery;
+- chooses `locales/vietnamese.ini` for ERNativeUI-owned navigation text; and
+- is returned as `LanguageInfo::identifier` to every connected client mod.
+
+This does not change Elden Ring's own language. Every client still decides
+whether it has translations for that identifier. For example, `vietnamese`
+currently produces `GameLanguage::unknown` because the convenience enum
+mirrors the languages advertised for Elden Ring, but the exact
+`"vietnamese"` identifier remains available for a client to match.
+
+Explicit identifiers contain 1–64 ASCII lowercase letters, digits, `_`, or
+`-`. `auto` is reserved. An invalid or empty value logs a warning when logging
+is enabled and safely falls back to automatic detection. Changes take effect
+after a complete game restart.
 
 ## Connect before selecting text
 
 Call `erui::connect()` from a worker after `DllMain` returns. A successful API
-1.1 connection means startup language discovery has settled, either with a
-valid language or with a definitive unavailable result. Query the language
-before registration when the provider display name also needs translation.
+1.1 connection means startup language selection has settled, either with a
+valid effective language or with a definitive unavailable result in automatic
+mode. Query the language before registration when the provider display name
+also needs translation.
 
 This example selects English or French text and retains English as its
 fallback:
@@ -114,13 +156,13 @@ Use `available()`, `known`, and `identifier` together:
 
 | Result | Meaning | Recommended behavior |
 |---|---|---|
-| `available()` is false | Steam language discovery was definitively unavailable | Use the mod's English fallback |
-| `available()` is true and `known` is recognized | ERNativeUI knows the Steam identifier | Select the matching translation |
-| `available()` is true and `known` is `unknown` | Steam returned a valid identifier newer than the enum | Inspect `identifier`, then fall back if the mod does not recognize it |
+| `available()` is false | Automatic Steam discovery was definitively unavailable | Use the mod's English fallback |
+| `available()` is true and `known` is recognized | ERNativeUI knows the effective identifier | Select the matching translation |
+| `available()` is true and `known` is `unknown` | A configured, future, or community identifier is valid but not in the enum | Inspect `identifier`, then fall back if the mod does not recognize it |
 
 Useful exact Steam tokens include `french`, `koreana`, `brazilian`, and
 `latam`. Do not manufacture these tokens from the known enum or from the
-Windows locale.
+Windows locale. Treat `identifier` as the authority.
 
 The C++ `LanguageInfo` owns its `identifier` string, so the returned object can
 be retained by the client. In the strict C surface,
@@ -154,14 +196,15 @@ ERNativeUI connection.*
 
 ## Steam integration and failure behavior
 
-ERNativeUI reads the already initialized Steamworks service with ordinary
-read-only flat-C calls. It does not initialize Steam, hook Steam functions, or
-use a game RVA for language discovery.
+In automatic mode ERNativeUI reads the already initialized Steamworks service
+with ordinary read-only flat-C calls. It does not initialize Steam, hook Steam
+functions, or use a game RVA for language discovery. An explicit language
+override bypasses that lookup and the configured `SteamLanguageWaitMs`.
 
-Failure to discover a language does not disable menus or unrelated ERNativeUI
-features. Treat it as a request to use the client mod's fallback language.
-The language result is fixed for the game process; changing Steam's language
-requires the normal game restart.
+Failure to discover a language in automatic mode does not disable menus or
+unrelated ERNativeUI features. Treat it as a request to use the client mod's
+fallback language. The effective result is fixed for the game process;
+changing Steam's language or `Localization.Language` requires a restart.
 
 ## Research trail
 

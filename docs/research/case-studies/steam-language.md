@@ -15,8 +15,10 @@ The research question was:
 > without racing Steam initialization, discarding an unknown future token, or
 > making menu registration depend on an arbitrary sleep?
 
-The scope is the current game language reported by the already initialized
-Steam client. It does not include translation, Windows locale inference,
+The native-discovery scope is the current game language reported by the
+already initialized Steam client. A later configuration layer may explicitly
+select another effective ERNativeUI locale; it does not alter this Steamworks
+observation. The scope does not include translation, Windows locale inference,
 Steam's available-language list, audio language, or changing language during
 one process lifetime.
 
@@ -59,7 +61,7 @@ fell back to English even though a later host log reported French.
   Steam had reported it. An unavailable query and an unknown valid token are
   distinct states.
 
-The resulting host sequence is:
+The resulting automatic-mode host sequence is:
 
 ```text
 API 1.0 compatibility registration opens
@@ -71,11 +73,17 @@ host worker probes loaded Steam service every 25 ms
         `-- terminal failure/timeout ---> unavailable; API 1.1 still ready
 ```
 
+Before this sequence, the host reads `[Localization] Language`. The reserved
+value `auto` takes the confirmed Steam path above. A safe explicit identifier
+instead becomes the effective process-wide language immediately, skips Steam
+probing, and is published through the same immutable cache. Host-owned locale
+loading and client language queries therefore cannot disagree.
+
 Before acquiring `SteamApps008`, the probe requires positive Steam user and
 pipe handles. A missing module, uninitialized handles/interface, or invalid
 current token is retryable. Missing required exports and exceptions are
 terminal. The configured `SteamLanguageWaitMs` deadline is 5,000 ms by
-default and is bounded to 0–30,000 ms.
+default and is bounded to 0–30,000 ms. It is ignored for an explicit locale.
 
 ## Bounded live procedure
 
@@ -98,6 +106,11 @@ No executable instrumentation is required.
 6. Disable the temporary log after the test; no hook or game-file cleanup is
    needed.
 
+To validate the configuration layer separately, set `Language = vietnamese`,
+restart, and confirm the effective identifier is `vietnamese`, its convenience
+enum is `unknown`, and host pagination uses `locales/vietnamese.ini`. Then
+restore `Language = auto` and restart before validating Steam detection again.
+
 ## Results
 
 - **Confirmed:** With the game set to French, the live host reported
@@ -112,7 +125,8 @@ No executable instrumentation is required.
   `ERUI_GAME_LANGUAGE_UNKNOWN` while preserving the exact token.
 - **Confirmed:** API 1.1 negotiation returns `ERUI_HOST_NOT_READY` while the
   language state is pending. A successful `erui::connect()` therefore means
-  the state has settled to either ready or unavailable.
+  the state has settled to either ready or unavailable. An explicit valid
+  configuration settles it without the Steam wait.
 - **Confirmed:** Terminal unavailability does not fail the menu host. The
   language getter returns `ERUI_NOT_SUPPORTED`, allowing the client to choose
   its own English or other fallback.
@@ -124,9 +138,10 @@ the copied identifier is the forward-compatible authority.
 
 ## Ownership, threading, and compatibility
 
-The host worker alone performs the readiness probe. On first valid result or
-terminal failure it settles one process-wide state under a mutex, wakes
-waiters, and never mutates that state again.
+The host worker alone selects an explicit configured identifier or performs
+the automatic readiness probe. On the selected identifier or a terminal
+automatic-discovery failure it settles one process-wide state under a mutex,
+wakes waiters, and never mutates that state again.
 
 - **Confirmed:** The host owns the copied token for process lifetime. In C,
   `ERUI_GameLanguageInfo.identifier` is a borrowed immutable view with that
@@ -137,10 +152,11 @@ waiters, and never mutates that state again.
 - **Confirmed:** New API 1.1 clients use explicit connection. Their own
   connection timeout does not alter host state; a later connection may
   succeed.
-- **Confirmed:** Host locale files and client localization are separate. The
-  host may use its internal English fallback for ERNativeUI-owned labels, but
-  the public getter still reports `ERUI_NOT_SUPPORTED` when Steam discovery is
-  unavailable.
+- **Confirmed:** Host locale files and client translations are separate. The
+  host may use its internal English fallback for ERNativeUI-owned labels. In
+  automatic mode the public getter still reports `ERUI_NOT_SUPPORTED` when
+  Steam discovery is unavailable; an explicit valid identifier remains
+  available even when no matching host locale file exists.
 
 This is fail-closed: invalid or overlong text is not exposed, a transient
 failure is not cached as a language, an unavailable service is not guessed,
@@ -151,7 +167,8 @@ and a late probe cannot overwrite an already published result.
 - Only `GetCurrentGameLanguage` is queried. Available UI languages and audio
   language are intentionally not inferred.
 - The cache is immutable for one process. Runtime language switching is not a
-  supported contract; restart before validating another selection.
+  supported contract; restart after changing Steam's language or the host
+  language setting.
 - The implementation currently depends on the named flat exports and
   `SteamApps008`. If Steam changes that interface, language discovery should
   become unavailable while the rest of ERNativeUI remains usable.
@@ -166,6 +183,8 @@ and a late probe cannot overwrite an already published result.
   [`src/steam_language.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/steam_language.cpp)
 - Internal readiness and failure model:
   [`src/steam_language.hpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/steam_language.hpp)
+- Localization-setting grammar and safe identifier validation:
+  [`src/localization_config.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/localization_config.cpp)
 - Bounded startup probe and API 1.0/1.1 release ordering:
   [`src/host_dllmain.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/host_dllmain.cpp)
 - Negotiation gate and public getter entry:
@@ -174,6 +193,8 @@ and a late probe cannot overwrite an already published result.
   [`tests/steam_language_test.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/tests/steam_language_test.cpp)
   and
   [`tests/steam_language_unavailable_test.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/tests/steam_language_unavailable_test.cpp)
+- Localization-setting grammar tests:
+  [`tests/localization_config_test.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/tests/localization_config_test.cpp)
 - Frozen API 1.0 pending-readiness test:
   [`tests/abi/releases/v1_0/pending_readiness_lifecycle_test.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/tests/abi/releases/v1_0/pending_readiness_lifecycle_test.cpp)
 - Normative public types and lifetime:

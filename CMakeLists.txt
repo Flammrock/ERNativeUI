@@ -162,6 +162,7 @@ if(_ernativeui_need_native_core)
             src/host_dllmain.cpp
             src/host_locale.cpp
             src/host_registry.cpp
+            src/localization_config.cpp
             src/logger.cpp
             src/steam_language.cpp
             src/ernativeui.rc)
@@ -492,7 +493,9 @@ if(_ernativeui_enable_tests)
             COMMAND ERNativeUISteamLanguageUnavailableTests)
 
         add_executable(ERNativeUIHostLocaleTests
-            tests/host_locale_test.cpp src/host_locale.cpp)
+            tests/host_locale_test.cpp
+            src/host_locale.cpp
+            src/localization_config.cpp)
         target_include_directories(ERNativeUIHostLocaleTests PRIVATE src include)
         target_compile_features(ERNativeUIHostLocaleTests PRIVATE cxx_std_20)
         target_compile_definitions(ERNativeUIHostLocaleTests PRIVATE
@@ -502,6 +505,15 @@ if(_ernativeui_enable_tests)
             target_compile_options(ERNativeUIHostLocaleTests PRIVATE /utf-8)
         endif()
         add_test(NAME ERNativeUI.HostLocale COMMAND ERNativeUIHostLocaleTests)
+
+        add_executable(ERNativeUILocalizationConfigTests
+            tests/localization_config_test.cpp src/localization_config.cpp)
+        target_include_directories(
+            ERNativeUILocalizationConfigTests PRIVATE src include)
+        target_compile_features(
+            ERNativeUILocalizationConfigTests PRIVATE cxx_std_20)
+        add_test(NAME ERNativeUI.LocalizationConfig
+            COMMAND ERNativeUILocalizationConfigTests)
 
         add_executable(ERNativeUIStorageDocumentTests
             tests/storage_document_test.cpp src/storage_document.cpp)

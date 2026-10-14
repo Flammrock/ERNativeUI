@@ -2,6 +2,7 @@
 #include "host_locale.hpp"
 #include "addresses.hpp"
 #include "hooks.hpp"
+#include "localization_config.hpp"
 #include "logger.hpp"
 #include "module.hpp"
 #include "native_dialog.hpp"
@@ -43,7 +44,8 @@ void fail_pending_startup_for_stop() noexcept {
     if (steam_language_readiness() == SteamLanguageReadiness::pending) {
         SteamLanguageProbe unavailable{};
         unavailable.failure_code = SteamLanguageFailure::exception;
-        unavailable.failure = "host stopped before Steam language settled";
+        unavailable.failure =
+            "host stopped before localization language selection settled";
         (void)settle_cached_steam_language(std::move(unavailable));
     }
 }
@@ -62,6 +64,21 @@ std::filesystem::path module_directory(HMODULE module) {
 int read_ini(const std::filesystem::path& path, const wchar_t* section,
     const wchar_t* key, int fallback) noexcept {
     return static_cast<int>(GetPrivateProfileIntW(section, key, fallback, path.c_str()));
+}
+
+std::wstring read_ini_text(
+    const std::filesystem::path& path,
+    const wchar_t* section,
+    const wchar_t* key,
+    const wchar_t* fallback) {
+    // Language identifiers are limited to 64 characters. A larger buffer
+    // ensures an overlong setting remains overlong and is rejected instead of
+    // being mistaken for a valid truncated identifier.
+    std::array<wchar_t, 256> buffer{};
+    const DWORD length = GetPrivateProfileStringW(
+        section, key, fallback, buffer.data(),
+        static_cast<DWORD>(buffer.size()), path.c_str());
+    return std::wstring(buffer.data(), static_cast<std::size_t>(length));
 }
 
 bool ensure_default_ini(
@@ -273,6 +290,19 @@ DWORD run_host() noexcept {
             read_ini(ini, L"Runtime", L"InjectionCooldownMs", 250), 0, 5000));
         const bool diagnostics = read_ini(
             ini, L"Diagnostics", L"EnableDiagnostics", 0) != 0;
+        LocalizationLanguageSetting language_setting =
+            parse_localization_language(read_ini_text(
+                ini, L"Localization", L"Language", L"auto"));
+        if (language_setting.mode == LocalizationLanguageMode::invalid) {
+            log::write(
+                "WARN: invalid Localization.Language setting; using automatic Steam game-language detection");
+            language_setting = {
+                LocalizationLanguageMode::automatic,
+                {}};
+        }
+        const bool language_overridden =
+            language_setting.mode ==
+            LocalizationLanguageMode::explicit_identifier;
 
         // Preserve the released API 1.0 lifecycle: its table and provider
         // registration become available before Steam finishes initializing.
@@ -280,53 +310,63 @@ DWORD run_host() noexcept {
         registry().open_registration();
         set_api_state(ApiState::accepting);
         log::write(
-            "Provider registration open for API 1.0; waiting for Steam language before releasing API 1.1");
+            "Provider registration open for API 1.0; waiting for localization language selection before releasing API 1.1");
 
         const std::uint64_t language_wait_started = GetTickCount64();
         std::uint64_t language_last_log = 0;
         SteamLanguageFailure language_last_failure =
             SteamLanguageFailure::none;
         SteamLanguageProbe startup_language{};
-        for (;;) {
-            if (g_stop.load(std::memory_order_acquire)) {
-                fail_pending_startup_for_stop();
-                return 0;
-            }
-            startup_language = probe_steam_language();
-            const std::uint64_t now = GetTickCount64();
-            const std::uint64_t elapsed = now - language_wait_started;
-            const SteamLanguageProbeDecision decision =
-                decide_steam_language_probe(
-                    startup_language, elapsed, steam_language_wait_ms);
-            if (decision == SteamLanguageProbeDecision::settle) {
-                break;
-            }
+        if (language_overridden) {
+            startup_language.available = true;
+            startup_language.current = language_setting.identifier;
+            log::write(
+                "Localization override: identifier='%s'; Steam language discovery skipped",
+                startup_language.current.c_str());
+        } else {
+            for (;;) {
+                if (g_stop.load(std::memory_order_acquire)) {
+                    fail_pending_startup_for_stop();
+                    return 0;
+                }
+                startup_language = probe_steam_language();
+                const std::uint64_t now = GetTickCount64();
+                const std::uint64_t elapsed = now - language_wait_started;
+                const SteamLanguageProbeDecision decision =
+                    decide_steam_language_probe(
+                        startup_language, elapsed, steam_language_wait_ms);
+                if (decision == SteamLanguageProbeDecision::settle) {
+                    break;
+                }
 
-            if (startup_language.failure_code != language_last_failure ||
-                now - language_last_log >= kSteamReadinessLogMs) {
-                log::write(
-                    "Steam language pending: failure=%u (%s) elapsed=%llu ms limit=%llu ms",
-                    static_cast<unsigned>(startup_language.failure_code),
-                    startup_language.failure
-                        ? startup_language.failure
-                        : "unknown transient failure",
-                    static_cast<unsigned long long>(elapsed),
-                    static_cast<unsigned long long>(steam_language_wait_ms));
-                language_last_failure = startup_language.failure_code;
-                language_last_log = now;
+                if (startup_language.failure_code != language_last_failure ||
+                    now - language_last_log >= kSteamReadinessLogMs) {
+                    log::write(
+                        "Steam language pending: failure=%u (%s) elapsed=%llu ms limit=%llu ms",
+                        static_cast<unsigned>(startup_language.failure_code),
+                        startup_language.failure
+                            ? startup_language.failure
+                            : "unknown transient failure",
+                        static_cast<unsigned long long>(elapsed),
+                        static_cast<unsigned long long>(steam_language_wait_ms));
+                    language_last_failure = startup_language.failure_code;
+                    language_last_log = now;
+                }
+                if (decision == SteamLanguageProbeDecision::timeout) {
+                    startup_language = {};
+                    startup_language.failure_code =
+                        SteamLanguageFailure::readiness_timeout;
+                    startup_language.failure =
+                        "Steam language readiness deadline expired";
+                    break;
+                }
+                Sleep(kSteamReadinessPollMs);
             }
-            if (decision == SteamLanguageProbeDecision::timeout) {
-                startup_language = {};
-                startup_language.failure_code =
-                    SteamLanguageFailure::readiness_timeout;
-                startup_language.failure =
-                    "Steam language readiness deadline expired";
-                break;
-            }
-            Sleep(kSteamReadinessPollMs);
         }
         const std::uint64_t language_wait_elapsed =
-            GetTickCount64() - language_wait_started;
+            language_overridden
+            ? 0
+            : GetTickCount64() - language_wait_started;
         const std::string startup_identifier = startup_language.available
             ? startup_language.current
             : std::string{};
@@ -353,11 +393,12 @@ DWORD run_host() noexcept {
             settle_cached_steam_language(std::move(startup_language));
         if (startup_language_result == ERUI_OK) {
             log::write(
-                "Startup language ready: current='%.*s' known=%u wait=%llu ms",
+                "Localization language ready: effective='%.*s' known=%u source=%s wait=%llu ms",
                 static_cast<int>(startup_identifier.size()),
                 startup_identifier.data(),
                 static_cast<unsigned>(
                     classify_steam_language(startup_identifier)),
+                language_overridden ? "configuration" : "steam",
                 static_cast<unsigned long long>(language_wait_elapsed));
         } else if (startup_language_result == ERUI_NOT_SUPPORTED) {
             log::write(
@@ -530,13 +571,14 @@ DWORD run_host() noexcept {
         const ERUI_Result language_result = get_cached_steam_language(&language);
         if (language_result == ERUI_OK) {
             log::write(
-                "Steam language: current='%.*s' known=%u",
+                "Localization language: effective='%.*s' known=%u source=%s",
                 static_cast<int>(language.identifier.length),
                 language.identifier.data,
-                static_cast<unsigned>(language.known_language));
+                static_cast<unsigned>(language.known_language),
+                language_overridden ? "configuration" : "steam");
         } else {
             log::write(
-                "Steam language unavailable: result=%u",
+                "Localization language unavailable: result=%u source=steam",
                 static_cast<unsigned>(language_result));
         }
         while (!g_stop.load(std::memory_order_acquire)) {
@@ -556,7 +598,8 @@ DWORD run_host() noexcept {
     if (steam_language_readiness() == SteamLanguageReadiness::pending) {
         SteamLanguageProbe unavailable{};
         unavailable.failure_code = SteamLanguageFailure::exception;
-        unavailable.failure = "host initialization failed before Steam language settled";
+        unavailable.failure =
+            "host initialization failed before localization language selection settled";
         (void)settle_cached_steam_language(std::move(unavailable));
     }
     return 1;

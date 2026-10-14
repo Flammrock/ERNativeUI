@@ -1,8 +1,8 @@
 #include "host_locale.hpp"
+#include "localization_config.hpp"
 
 #include <Windows.h>
 
-#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -22,14 +22,6 @@ std::string_view trim(std::string_view value) noexcept {
         value.remove_suffix(1);
     }
     return value;
-}
-
-bool safe_identifier(std::string_view identifier) noexcept {
-    if (identifier.empty() || identifier.size() > 64) return false;
-    return std::all_of(identifier.begin(), identifier.end(), [](unsigned char value) {
-        return (value >= 'a' && value <= 'z') ||
-            (value >= '0' && value <= '9') || value == '_' || value == '-';
-    });
 }
 
 bool utf8_to_utf16(std::string_view input, std::wstring& output) {
@@ -56,12 +48,12 @@ bool utf8_to_utf16(std::string_view input, std::wstring& output) {
 
 HostLocale load_host_locale(
     const std::filesystem::path& dll_directory,
-    std::string_view steam_identifier) noexcept {
+    std::string_view language_identifier) noexcept {
     HostLocale result{};
-    if (!safe_identifier(steam_identifier)) return result;
+    if (!is_safe_locale_identifier(language_identifier)) return result;
     try {
         const std::filesystem::path path = dll_directory / L"locales" /
-            (std::filesystem::path(steam_identifier) += L".ini");
+            (std::filesystem::path(language_identifier) += L".ini");
         std::error_code error{};
         const std::uintmax_t size = std::filesystem::file_size(path, error);
         if (error || size == 0 || size > kMaximumLocaleBytes) return result;

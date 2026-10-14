@@ -23,10 +23,11 @@ Call `erui::connect()` once, then query
 `connection.value().game_language()` before registration so the provider
 display name can be localized too. The returned `LanguageInfo` owns its data:
 
-- `available()` says whether Steam supplied a language;
+- `available()` says whether the host selected a language;
 - `known` provides ERNativeUI's convenient Elden Ring language enum;
-- `identifier` preserves Steam's exact UTF-8 token, including future or
-  community identifiers that map to `GameLanguage::unknown`.
+- `identifier` preserves the exact effective UTF-8 token. It normally comes
+  from Steam and may be overridden in `ERNativeUI.ini`; future or community
+  identifiers map to `GameLanguage::unknown` without being discarded.
 
 The template translates its first row into French as a compact pattern. Expand
 `text_for()` with your translations and keep English as the fallback. The
