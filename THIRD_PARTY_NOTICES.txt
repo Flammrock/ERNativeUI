@@ -38,9 +38,9 @@ Development tools
 -----------------
 
 JPEXS Free Flash Decompiler (FFDec) 26.2.1 was used to inspect Elden Ring's
-Scaleform GFX/SWF structure while researching and validating the optional GFX
-patch. FFDec is a development tool; it is not linked into or redistributed
-with ERNativeUI:
+Scaleform GFX/SWF structure while researching and validating ERNativeUI's
+structural transformations. FFDec is a development tool; it is not linked
+into or redistributed with ERNativeUI:
 
 https://github.com/jindrapetrik/jpexs-decompiler
 
@@ -49,17 +49,15 @@ not included in ERNativeUI packages:
 
 https://github.com/soulsmods/ModEngine2
 
-Modified Elden Ring UI asset
-----------------------------
+Elden Ring UI interoperability
+------------------------------
 
-The end-user package includes optional, modified
-`menu/win/02_040_optionsetting.gfx` and
-`menu/win/02_042_pc_graphicsetting.gfx` files. The first expands Controller
-Settings to 13 visual rows and corrects injected button-label presentation.
-Both files add the narrowly scoped character-name presentation used by
-TextInput rows. ERNativeUI.dll still supports the game's unmodified layouts;
-these assets are visual conveniences rather than runtime requirements.
+ERNativeUI's end-user packages do not redistribute Elden Ring GFX files.
+The host performs narrowly validated, in-memory transformations on compatible
+settings-movie bytes supplied by the game or mod loader. The repository keeps
+derived reference fixtures for structural regression tests and developer
+research; they are not installed into runtime or SDK binary packages.
 
 ELDEN RING and its original game assets are the property of their respective
-owners. The modified GFX asset is provided only for use with a lawfully owned
-copy of ELDEN RING.
+owners. Development tooling that reads GFX files is intended for files
+extracted from a lawfully owned copy of ELDEN RING.

@@ -134,12 +134,14 @@ a change callback.
 Destroying the C++ `Registration` value only discards this client-side access
 handle. It does not unregister the committed provider.
 
-## Presentation assets
+## Runtime presentation
 
-Most controls use stock native widgets. The optional GFX assets provide the
-matching left label on some action rows and richer TextInput and ColorPicker
-appearances. Their controls remain functional without those assets; see
-[Presentation and optional GFX assets](../presentation-and-gfx.md).
+Most controls use stock native widgets. ERNativeUI completes supported
+settings movies at runtime to provide the matching left label on affected
+action rows and richer TextInput and ColorPicker appearances. No loose GFX
+asset is normally required. Structurally compatible movies from other mods
+remain supported; see
+[Runtime GFX completion and presentation](../presentation-and-gfx.md).
 
 For the complete ownership, limits, and error contract, see
 [Lifecycle, errors, and limits](../../reference/lifecycle-errors-and-limits.md).

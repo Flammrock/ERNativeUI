@@ -21,7 +21,8 @@ Therefore, a mod can listen for player input, expose configurable bindings,
 and make the player's choices persistent.
 
 Input bindings require API 1.1, a successful `erui::connect()`, and the
-`input_bindings` capability. They do not require a binding-screen GFX patch.
+`input_bindings` capability. They do not require any additional binding-screen
+GFX transformation.
 
 ![A mod section in Elden Ring's controller binding screen](../assets/images/input-bindings/controller-bindings-section.png)
 

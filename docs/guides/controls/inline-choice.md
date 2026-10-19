@@ -210,7 +210,7 @@ table and check host support.
 |---|---|
 | First public API | 1.0 |
 | Capability | `erui::Capability::inline_choice` / `ERUI_CAP_INLINE_CHOICE` |
-| Optional GFX | None required |
+| GFX presentation | Uses the stock native choice widget |
 | Runtime value | Zero-based `std::uint8_t` option index |
 
 ## Value and lifetime behavior

@@ -33,6 +33,7 @@ struct CapturedTitleTarget {
         return route.valid() &&
             route.kind != erui::detail::PageRouteKind::root_main &&
             route.kind != erui::detail::PageRouteKind::builtin_main &&
+            route.kind != erui::detail::PageRouteKind::tab_main &&
             movie_context && persistent_result;
     }
 
@@ -60,6 +61,7 @@ public:
         if (!path || !pending_route.valid() ||
             pending_route.kind == erui::detail::PageRouteKind::root_main ||
             pending_route.kind == erui::detail::PageRouteKind::builtin_main ||
+            pending_route.kind == erui::detail::PageRouteKind::tab_main ||
             !movie_context || !persistent_result || !is_source_path(path)) {
             return nullptr;
         }

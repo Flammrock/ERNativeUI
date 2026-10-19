@@ -7,7 +7,7 @@ explicit locale for the host and every client. ERNativeUI does not translate
 provider names, row labels, help text, choice values, or dialog messages for
 the client.
 
-This guide describes the current API 1.2 C++17 surface. Language discovery
+This guide describes the current C++17 surface. Language discovery
 first appeared in API 1.0 and remains available to any client built with the
 1.0 SDK. A client that chooses API 1.1 uses its explicit connection lifecycle.
 API versions and ERNativeUI release versions are independent. See the

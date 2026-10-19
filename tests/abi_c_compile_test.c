@@ -9,6 +9,9 @@ _Static_assert(sizeof(ERUI_Utf16View) == 16u, "ERUI_Utf16View ABI drift");
 _Static_assert(sizeof(ERUI_GameLanguageInfo) == 32u,
     "ERUI_GameLanguageInfo ABI drift");
 _Static_assert(sizeof(ERUI_ProviderDesc) == 56u, "ERUI_ProviderDesc ABI drift");
+_Static_assert(sizeof(ERUI_TabIconDesc) == 32u,
+    "ERUI_TabIconDesc ABI drift");
+_Static_assert(sizeof(ERUI_TabDesc) == 64u, "ERUI_TabDesc ABI drift");
 _Static_assert(sizeof(ERUI_ButtonDesc) == 64u, "ERUI_ButtonDesc ABI drift");
 _Static_assert(sizeof(ERUI_ToggleDesc) == 64u, "ERUI_ToggleDesc ABI drift");
 _Static_assert(sizeof(ERUI_SliderDesc) == 80u, "ERUI_SliderDesc ABI drift");
@@ -57,7 +60,7 @@ _Static_assert(sizeof(ERUI_PageTitleFormatContext) == 56u,
 _Static_assert(sizeof(ERUI_PagePresentationDesc) == 64u,
     "ERUI_PagePresentationDesc ABI drift");
 _Static_assert(sizeof(ERUI_AlertDesc) == 48u, "ERUI_AlertDesc ABI drift");
-_Static_assert(sizeof(ERUI_Api) == 368u, "ERUI_Api ABI drift");
+_Static_assert(sizeof(ERUI_Api) == 376u, "ERUI_Api ABI drift");
 _Static_assert(_Alignof(ERUI_Api) == 8u, "ERUI_Api alignment drift");
 _Static_assert(offsetof(ERUI_ProviderDesc, owner_module) == 16u,
     "ERUI_ProviderDesc offset drift");
@@ -114,6 +117,33 @@ _Static_assert(offsetof(ERUI_Api, add_custom_slider) == 344u,
 _Static_assert(offsetof(ERUI_Api, get_custom_slider_index) == 360u,
     "ERUI_Api final custom-slider offset drift");
 _Static_assert(ERUI_API_V1_2_SIZE == 368u, "ERUI API 1.2 size drift");
+_Static_assert(offsetof(ERUI_Api, add_tab) == 368u,
+    "ERUI_Api tab block drift");
+_Static_assert(ERUI_API_V1_3_SIZE == 376u, "ERUI API 1.3 size drift");
+_Static_assert(offsetof(ERUI_TabIconDesc, pixels) == 16u,
+    "ERUI tab-icon pixels offset drift");
+_Static_assert(offsetof(ERUI_TabDesc, tab_id) == 8u,
+    "ERUI tab ID offset drift");
+_Static_assert(offsetof(ERUI_TabDesc, title) == 24u,
+    "ERUI tab title offset drift");
+_Static_assert(offsetof(ERUI_TabDesc, preferred_order) == 40u,
+    "ERUI tab order offset drift");
+_Static_assert(offsetof(ERUI_TabDesc, reserved0) == 44u,
+    "ERUI tab reserved0 offset drift");
+_Static_assert(offsetof(ERUI_TabDesc, icon) == 48u,
+    "ERUI tab icon offset drift");
+_Static_assert(offsetof(ERUI_TabDesc, reserved) == 56u,
+    "ERUI tab reserved offset drift");
+_Static_assert(ERUI_CAP_CUSTOM_TABS == (UINT64_C(1) << 18),
+    "ERUI custom-tabs capability drift");
+_Static_assert(ERUI_DUPLICATE_TAB_ID == 21u,
+    "ERUI duplicate-tab result drift");
+_Static_assert(ERUI_TAB_LIMIT_REACHED == 22u,
+    "ERUI tab-limit result drift");
+_Static_assert(ERUI_CUSTOM_TAB_MAX_COUNT == 1024u,
+    "ERUI custom-tab count limit drift");
+_Static_assert(ERUI_TAB_ICON_FORMAT_RGBA8 == 1u,
+    "ERUI RGBA8 tab-icon format drift");
 _Static_assert(ERUI_CAP_INPUT_BINDINGS == (UINT64_C(1) << 14),
     "ERUI input bindings capability drift");
 _Static_assert(ERUI_DUPLICATE_ACTION_ID == 15u,

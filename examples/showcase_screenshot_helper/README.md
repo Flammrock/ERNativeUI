@@ -1,15 +1,16 @@
 # Showcase Screenshot Helper
 
-`ShowcaseScreenshotHelper.dll` creates one small, predictable page for taking
-ERNativeUI documentation screenshots. It is also a compact example of reading
-a client-specific INI through ERNativeUI's host-owned Storage service.
+`ShowcaseScreenshotHelper.dll` creates one small, predictable view for taking
+ERNativeUI documentation screenshots. It can isolate one control or register
+one example custom tab. It is also a compact example of reading a
+client-specific INI through ERNativeUI's host-owned Storage service.
 
 The helper is intentionally English-only. It never queries the game language
 and all client-provided labels are fixed English strings. Set Elden Ring to
 English too when taking canonical screenshots so native values such as
 **On** and **OK** also appear in English.
 
-## Select one control
+## Select one showcase
 
 Keep `ShowcaseScreenshotHelper.ini` beside the DLL:
 
@@ -27,7 +28,7 @@ mode=button
 
 The accepted values are:
 
-| Mode | Isolated page content |
+| Mode | Result |
 |---|---|
 | `button` | **Show Greeting**, which opens **Hello, Tarnished!** |
 | `submenu` | **Open Details**, leading to one small child page |
@@ -39,13 +40,17 @@ The accepted values are:
 | `popup-choice` | **Quality Preset**, with four named values |
 | `text-input` | Empty **Player Name** with **Enter a name** placeholder |
 | `color-picker` | **Accent Color**, initially RGB `(171, 125, 99)` |
+| `custom-tab` | Top-level **My Mod Settings** tab with a generated `rgb(107, 100, 80)` triangle icon and one toggle |
 
 Restart Elden Ring after changing the mode. Menu topology is registered once
 during startup, so editing the file while the game is running cannot replace
-the current page. Open **System -> Game Options -> _Control_ Showcase** to see
-the selected control by itself.
+the current page. For the control modes, open **System -> Game Options ->
+_Control_ Showcase** to see the selected control by itself. For `custom-tab`,
+open **System** and select the top-level **My Mod Settings** tab.
 
-Numeric Slider and Custom Slider require an ERNativeUI host exposing API 1.2.
+This build uses the current API 1.3 headers, so every mode requires a host
+exposing API 1.3. The `custom-tab` mode additionally requires the optional
+custom-tab capability on a supported game executable.
 For matching before/after screenshots, press Right once on **Camera
 Distance** to change `x0.6` to `x0.7`. Press Left once on **Impossible
 Values** to change **hello** to `1s`.
@@ -144,9 +149,12 @@ external_dlls = [
 ]
 ```
 
-Install the optional `02_040` and `02_042` GFX assets when capturing the rich
-TextInput and ColorPicker presentations. Their controls remain functional
-without those assets, but they use the documented plain fallback appearance.
+No loose GFX assets are required. ERNativeUI completes the supported TextInput
+and ColorPicker presentation in memory while the settings movies load. If an
+asset mod replaces either movie with an unrecognized layout, the host leaves
+that movie unchanged and the controls use their documented fallback appearance.
 
 Return to the [examples overview](../README.md) or the
-[control documentation](../../docs/guides/controls/README.md).
+[control documentation](../../docs/guides/controls/README.md). For the
+`custom-tab` mode, continue with the
+[Custom Configuration tabs guide](../../docs/guides/custom-tabs.md).

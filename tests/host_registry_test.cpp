@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -20,6 +21,13 @@ ERUI_StringView ascii(const char* value) {
     ERUI_StringView result{};
     result.data = value;
     result.length = static_cast<std::uint32_t>(std::char_traits<char>::length(value));
+    return result;
+}
+
+ERUI_StringView ascii(std::string_view value) {
+    ERUI_StringView result{};
+    result.data = value.data();
+    result.length = static_cast<std::uint32_t>(value.size());
     return result;
 }
 
@@ -584,11 +592,591 @@ void verify_provider_identifier_contract() {
     ERUI_TEST_CHECK(registry.abort_provider(legacy_handle) == ERUI_OK);
 }
 
+void verify_custom_tab_registration_contract() {
+    // A copied 1.3 entry point must reject an older provider before touching
+    // either 1.3-only pointer.
+    {
+        erui::host::Registry legacy{};
+        ERUI_TEST_CHECK(legacy.enable_custom_tabs_backend());
+        legacy.open_registration();
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_2;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii("tabs.legacy");
+        provider.display_name = utf16(L"Legacy tabs");
+        ERUI_ProviderHandle handle{};
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(legacy.register_provider(
+            ERUI_API_VERSION_1_2, &provider, &handle, &root) == ERUI_OK);
+        ERUI_TEST_CHECK(legacy.add_tab(handle, nullptr, nullptr) ==
+            ERUI_NOT_SUPPORTED);
+    }
+
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_custom_tabs_backend());
+    erui::detail::TabConfiguration configuration{};
+    erui::detail::TabOrderOverride override{};
+    override.provider_id = "tabs.z";
+    override.tab_id = "main";
+    override.stable_key = "tabs.z/main";
+    override.order = -10;
+    configuration.order_overrides.emplace(override.stable_key, override);
+    registry.set_tab_configuration(std::move(configuration));
+    registry.open_registration();
+
+    const auto register_provider = [&](const char* id,
+                                       ERUI_ProviderHandle& handle,
+                                       ERUI_PageHandle& root) {
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_3;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii(id);
+        provider.display_name = utf16(L"Custom tabs");
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_3, &provider, &handle, &root) == ERUI_OK);
+    };
+
+    ERUI_ProviderHandle provider_z{};
+    ERUI_PageHandle root_z{};
+    register_provider("tabs.z", provider_z, root_z);
+    ERUI_ProviderHandle provider_a{};
+    ERUI_PageHandle root_a{};
+    register_provider("tabs.a", provider_a, root_a);
+
+    std::array<std::uint8_t, ERUI_TAB_ICON_RGBA8_BYTE_COUNT> pixels{};
+    for (std::size_t offset = 0; offset < pixels.size(); offset += 4) {
+        pixels[offset + 0] = 12;
+        pixels[offset + 1] = 34;
+        pixels[offset + 2] = 56;
+        pixels[offset + 3] = 255;
+    }
+    pixels[3] = 0;
+    pixels[7] = 127;
+    pixels[11] = 255;
+    ERUI_TabIconDesc icon{};
+    icon.size = sizeof(icon);
+    icon.format = ERUI_TAB_ICON_FORMAT_RGBA8;
+    icon.byte_count = static_cast<std::uint32_t>(pixels.size());
+    icon.pixels = pixels.data();
+
+    std::string copied_id = "main";
+    std::wstring copied_title = L"Copied title";
+    ERUI_TabDesc tab{};
+    tab.size = sizeof(tab);
+    tab.tab_id = ascii(copied_id);
+    tab.title = utf16(copied_title);
+    tab.preferred_order = 50;
+    tab.icon = &icon;
+
+    ERUI_PageHandle copied_page{};
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &tab, &copied_page) == ERUI_OK);
+    ERUI_TEST_CHECK(copied_page != ERUI_INVALID_PAGE &&
+        copied_page != root_z);
+
+    ERUI_ToggleDesc toggle{};
+    toggle.size = sizeof(toggle);
+    toggle.label = utf16(L"Copied row");
+    toggle.help = utf16(L"Copied row help");
+    toggle.enabled = 1;
+    ERUI_RowHandle row{};
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_z, copied_page, &toggle, &row) == ERUI_OK);
+
+    // All client memory is synchronous: overwriting it cannot alter the
+    // catalogue, icon, title, or row ownership retained by the host.
+    copied_id.assign("xxxx");
+    copied_title.assign(L"Changed title");
+    pixels.fill(0);
+
+    ERUI_TabDesc duplicate = tab;
+    duplicate.tab_id = ascii("main");
+    duplicate.title = utf16(L"Duplicate");
+    duplicate.icon = nullptr;
+    ERUI_PageHandle duplicate_page{UINT64_C(0xA55AA55AA55AA55A)};
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &duplicate, &duplicate_page) == ERUI_DUPLICATE_TAB_ID);
+    ERUI_TEST_CHECK(duplicate_page == ERUI_INVALID_PAGE);
+
+    const auto add_fallback = [&](ERUI_ProviderHandle provider,
+                                  const char* id,
+                                  std::int32_t order,
+                                  ERUI_PageHandle& output) {
+        ERUI_TabDesc fallback{};
+        fallback.size = sizeof(fallback);
+        fallback.tab_id = ascii(id);
+        fallback.title = utf16(L"Fallback tab");
+        fallback.preferred_order = order;
+        ERUI_TEST_CHECK(registry.add_tab(
+            provider, &fallback, &output) == ERUI_OK);
+    };
+    ERUI_PageHandle provider_a_main{};
+    ERUI_PageHandle provider_a_settings{};
+    ERUI_PageHandle provider_z_fallback{};
+    add_fallback(provider_a, "main", 50, provider_a_main);
+    add_fallback(provider_a, "settings", 50, provider_a_settings);
+    add_fallback(provider_z, "fallback", 100, provider_z_fallback);
+
+    // Reject malformed descriptors without publishing a page handle.
+    ERUI_TabDesc invalid = duplicate;
+    ERUI_PageHandle rejected{UINT64_C(0x5AA55AA55AA55AA5)};
+    invalid.tab_id = ascii("invalid/id");
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &invalid, &rejected) == ERUI_INVALID_ARGUMENT);
+    ERUI_TEST_CHECK(rejected == ERUI_INVALID_PAGE);
+    invalid = duplicate;
+    invalid.title = {};
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &invalid, &rejected) == ERUI_INVALID_ARGUMENT);
+    std::wstring maximum_title(
+        ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS, L'M');
+    invalid = duplicate;
+    invalid.tab_id = ascii("maximum-title");
+    invalid.title = utf16(maximum_title);
+    ERUI_PageHandle maximum_title_page{};
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &invalid, &maximum_title_page) == ERUI_OK);
+    ERUI_PagePresentationDesc maximum_presentation{};
+    maximum_presentation.size = sizeof(maximum_presentation);
+    maximum_presentation.page_title = utf16(maximum_title);
+    ERUI_TEST_CHECK(registry.set_page_presentation(
+        provider_z,
+        maximum_title_page,
+        &maximum_presentation) == ERUI_OK);
+    std::wstring oversized_title(
+        ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS + 1u, L'X');
+    invalid = duplicate;
+    invalid.tab_id = ascii("oversized-title");
+    invalid.title = utf16(oversized_title);
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &invalid, &rejected) == ERUI_INVALID_ARGUMENT);
+    ERUI_PagePresentationDesc oversized_presentation{};
+    oversized_presentation.size = sizeof(oversized_presentation);
+    oversized_presentation.page_title = utf16(oversized_title);
+    ERUI_TEST_CHECK(registry.set_page_presentation(
+        provider_z,
+        maximum_title_page,
+        &oversized_presentation) == ERUI_INVALID_ARGUMENT);
+    invalid = duplicate;
+    invalid.reserved[1] = 1;
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &invalid, &rejected) == ERUI_INVALID_ARGUMENT);
+
+    std::array<std::uint8_t, ERUI_TAB_ICON_RGBA8_BYTE_COUNT> invalid_pixels{};
+    ERUI_TabIconDesc bad_icon{};
+    bad_icon.size = sizeof(bad_icon);
+    bad_icon.format = static_cast<ERUI_TabIconFormat>(2u);
+    bad_icon.byte_count = static_cast<std::uint32_t>(invalid_pixels.size());
+    bad_icon.pixels = invalid_pixels.data();
+    invalid = duplicate;
+    invalid.tab_id = ascii("invalid-icon-format");
+    invalid.icon = &bad_icon;
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_z, &invalid, &rejected) == ERUI_INVALID_ARGUMENT);
+
+    ERUI_TEST_CHECK(registry.commit_provider(provider_z) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(provider_a) == ERUI_OK);
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    ERUI_TEST_CHECK(menu->tab_count() == 5);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+    ERUI_TEST_CHECK(compiled->tabs.size() == 5);
+    ERUI_TEST_CHECK(compiled->tab_page_indices.size() ==
+        compiled->tabs.size());
+
+    constexpr std::array<std::string_view, 5> expected_keys{
+        "tabs.z/main",
+        "tabs.a/main",
+        "tabs.a/settings",
+        "tabs.z/maximum-title",
+        "tabs.z/fallback",
+    };
+    for (std::size_t index = 0; index < compiled->tabs.size(); ++index) {
+        const auto& compiled_tab = compiled->tabs[index];
+        ERUI_TEST_CHECK(compiled_tab.page_index ==
+            compiled->tab_page_indices[index]);
+        ERUI_TEST_CHECK(compiled_tab.metadata.has_value());
+        const erui::TabMetadata& metadata = *compiled_tab.metadata;
+        ERUI_TEST_CHECK(metadata.provider_id + "/" + metadata.tab_id ==
+            expected_keys[index]);
+    }
+    const erui::TabMetadata& copied_metadata =
+        *compiled->tabs.front().metadata;
+    ERUI_TEST_CHECK(copied_metadata.preferred_order == 50);
+    ERUI_TEST_CHECK(copied_metadata.player_order.has_value() &&
+        *copied_metadata.player_order == -10);
+    ERUI_TEST_CHECK(copied_metadata.effective_order == -10);
+    ERUI_TEST_CHECK(copied_metadata.icon.source ==
+        erui::TabIconSource::rgba8);
+    ERUI_TEST_CHECK(copied_metadata.icon.rgba8_pixels.size() ==
+        ERUI_TAB_ICON_RGBA8_BYTE_COUNT);
+    ERUI_TEST_CHECK(copied_metadata.icon.rgba8_pixels[0] == 12);
+    ERUI_TEST_CHECK(copied_metadata.icon.rgba8_pixels[1] == 34);
+    ERUI_TEST_CHECK(copied_metadata.icon.rgba8_pixels[2] == 56);
+    ERUI_TEST_CHECK(copied_metadata.icon.rgba8_pixels[3] == 0);
+    ERUI_TEST_CHECK(copied_metadata.icon.rgba8_pixels[7] == 127);
+    ERUI_TEST_CHECK(copied_metadata.icon.rgba8_pixels[11] == 255);
+
+    const erui::detail::CompiledPage& copied_compiled_page =
+        compiled->pages[compiled->tabs.front().page_index];
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        copied_compiled_page.title_id)) == L"Copied title");
+    ERUI_TEST_CHECK(copied_compiled_page.rows.size() == 1);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        copied_compiled_page.rows.front().label_id)) == L"Copied row");
+    ERUI_TEST_CHECK(compiled->tabs[1].metadata->icon.source ==
+        erui::TabIconSource::fallback);
+    ERUI_TEST_CHECK(compiled->tabs[1].metadata->icon.rgba8_pixels.empty());
+
+    const erui::detail::TabDiagnosticsReport report =
+        registry.tab_diagnostics_report();
+    ERUI_TEST_CHECK(report.order_complete);
+    ERUI_TEST_CHECK(report.ordered_tabs.size() == expected_keys.size());
+    for (std::size_t index = 0; index < expected_keys.size(); ++index) {
+        ERUI_TEST_CHECK(report.ordered_tabs[index].stable_key ==
+            expected_keys[index]);
+        ERUI_TEST_CHECK(report.ordered_tabs[index].position == index + 1);
+    }
+}
+
+void verify_custom_tab_backend_gate() {
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(!registry.custom_tabs_backend_available());
+    registry.open_registration();
+    ERUI_TEST_CHECK(!registry.enable_custom_tabs_backend());
+    ERUI_TEST_CHECK(!registry.custom_tabs_backend_available());
+
+    ERUI_ProviderDesc provider{};
+    provider.size = sizeof(provider);
+    provider.api_version = ERUI_API_VERSION_1_3;
+    provider.owner_module = GetModuleHandleW(nullptr);
+    provider.provider_id = ascii("tabs.backend-disabled");
+    provider.display_name = utf16(L"Disabled tab backend");
+    ERUI_ProviderHandle provider_handle{};
+    ERUI_PageHandle root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_3,
+        &provider,
+        &provider_handle,
+        &root) == ERUI_OK);
+
+    // A copied 1.3 entry point fails closed before inspecting either public
+    // descriptor pointer when its authoritative native backend is absent.
+    ERUI_PageHandle untouched{UINT64_C(0xA55AA55AA55AA55A)};
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_handle, nullptr, &untouched) == ERUI_NOT_SUPPORTED);
+    ERUI_TEST_CHECK(untouched == UINT64_C(0xA55AA55AA55AA55A));
+}
+
+void verify_custom_tab_committed_limit() {
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_custom_tabs_backend());
+    registry.open_registration();
+
+    const auto register_provider = [&](const char* id,
+                                       ERUI_ProviderHandle& handle) {
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_3;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii(id);
+        provider.display_name = utf16(L"Tab limit");
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_3, &provider, &handle, &root) == ERUI_OK);
+    };
+    const auto add_tabs = [&](ERUI_ProviderHandle provider,
+                              std::string_view prefix,
+                              std::size_t count) {
+        for (std::size_t index = 0; index < count; ++index) {
+            const std::string id = std::string(prefix) +
+                std::to_string(index);
+            ERUI_TabDesc tab{};
+            tab.size = sizeof(tab);
+            tab.tab_id = ascii(id);
+            tab.title = utf16(L"Bounded tab");
+            tab.preferred_order = static_cast<std::int32_t>(index);
+            ERUI_PageHandle page{};
+            ERUI_TEST_CHECK(registry.add_tab(
+                provider, &tab, &page) == ERUI_OK);
+        }
+    };
+
+    ERUI_ProviderHandle first{};
+    ERUI_ProviderHandle second{};
+    register_provider("limit.first", first);
+    register_provider("limit.second", second);
+
+    // One provider can own the complete API 1.3 budget. This also exercises
+    // the per-provider page budget at 1 root page + 1,024 tab pages and proves
+    // that tab indices above the former eight-bit range are accepted.
+    add_tabs(first, "first-", ERUI_CUSTOM_TAB_MAX_COUNT);
+    ERUI_TabDesc overflow{};
+    overflow.size = sizeof(overflow);
+    overflow.tab_id = ascii("overflow");
+    overflow.title = utf16(L"Overflow");
+    ERUI_PageHandle overflow_page{UINT64_C(0xA55AA55AA55AA55A)};
+    ERUI_TEST_CHECK(registry.add_tab(
+        first, &overflow, &overflow_page) == ERUI_TAB_LIMIT_REACHED);
+    ERUI_TEST_CHECK(overflow_page == ERUI_INVALID_PAGE);
+
+    // Draft tabs do not reserve the process-wide committed budget. The
+    // second provider can stage a tab, but its commit must fail atomically
+    // after the first provider commits the complete budget.
+    add_tabs(second, "second-", 1);
+    ERUI_TEST_CHECK(registry.commit_provider(first) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(second) ==
+        ERUI_TAB_LIMIT_REACHED);
+    ERUI_TEST_CHECK(registry.abort_provider(second) == ERUI_OK);
+
+    ERUI_ProviderHandle after_limit{};
+    register_provider("limit.after", after_limit);
+    ERUI_TEST_CHECK(registry.add_tab(
+        after_limit, &overflow, &overflow_page) == ERUI_TAB_LIMIT_REACHED);
+    ERUI_TEST_CHECK(registry.abort_provider(after_limit) == ERUI_OK);
+
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    ERUI_TEST_CHECK(menu->tab_count() == ERUI_CUSTOM_TAB_MAX_COUNT);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+    ERUI_TEST_CHECK(compiled->tabs.size() == ERUI_CUSTOM_TAB_MAX_COUNT);
+    ERUI_TEST_CHECK(compiled->tabs[255].metadata.has_value());
+    ERUI_TEST_CHECK(compiled->tabs[256].metadata.has_value());
+    ERUI_TEST_CHECK(compiled->tabs.back().metadata.has_value());
+    ERUI_TEST_CHECK(compiled->tabs[255].metadata->tab_id == "first-255");
+    ERUI_TEST_CHECK(compiled->tabs[256].metadata->tab_id == "first-256");
+    ERUI_TEST_CHECK(compiled->tabs.back().metadata->tab_id == "first-1023");
+}
+
+void verify_fixed_fifty_custom_tab_stress() {
+    constexpr std::size_t kProviderCount = 2;
+    constexpr std::size_t kStressTabCount = 50;
+    constexpr std::size_t kTabsPerProvider =
+        kStressTabCount / kProviderCount;
+    constexpr std::size_t kRowsPerTab = 20;
+    constexpr std::uint8_t kLiveFirstPageCapacity = 7;
+    static_assert(kTabsPerProvider * kProviderCount ==
+        kStressTabCount);
+    static_assert(ERUI_CUSTOM_TAB_MAX_COUNT >= kStressTabCount);
+
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_custom_tabs_backend());
+    registry.open_registration();
+
+    struct ProviderFixture final {
+        const char* id{};
+        std::wstring title_prefix{};
+        std::int32_t order_offset{};
+        ERUI_ProviderHandle handle{ERUI_INVALID_PROVIDER};
+    };
+    std::array<ProviderFixture, kProviderCount> providers{{
+        {"stress.alpha", L"Alpha", 0},
+        {"stress.beta", L"Beta", 1},
+    }};
+
+    for (ProviderFixture& fixture : providers) {
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_3;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii(fixture.id);
+        provider.display_name = utf16(fixture.title_prefix);
+        ERUI_PageHandle root{ERUI_INVALID_PAGE};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_3,
+            &provider,
+            &fixture.handle,
+            &root) == ERUI_OK);
+        ERUI_TEST_CHECK(fixture.handle != ERUI_INVALID_PROVIDER);
+        ERUI_TEST_CHECK(root != ERUI_INVALID_PAGE);
+    }
+
+    for (std::size_t provider_index = 0;
+         provider_index < providers.size(); ++provider_index) {
+        ProviderFixture& fixture = providers[provider_index];
+        for (std::size_t tab_index = 0;
+             tab_index < kTabsPerProvider; ++tab_index) {
+            std::string tab_id = "tab-" + std::to_string(tab_index);
+            std::wstring title = fixture.title_prefix + L" Tab " +
+                std::to_wstring(tab_index);
+
+            ERUI_TabDesc tab{};
+            tab.size = sizeof(tab);
+            tab.tab_id = ascii(tab_id);
+            tab.title = utf16(title);
+            tab.preferred_order = static_cast<std::int32_t>(
+                tab_index * providers.size() + provider_index);
+            ERUI_PageHandle page{ERUI_INVALID_PAGE};
+            ERUI_TEST_CHECK(registry.add_tab(
+                fixture.handle, &tab, &page) == ERUI_OK);
+            ERUI_TEST_CHECK(page != ERUI_INVALID_PAGE);
+
+            // Every public view is borrowed only for the call. Overwrite the
+            // source storage immediately so the compiled assertions below
+            // prove that the Registry retained independent copies.
+            tab_id.assign("mutated");
+            title.assign(L"mutated");
+
+            for (std::size_t row_index = 0;
+                 row_index < kRowsPerTab; ++row_index) {
+                std::wstring label = fixture.title_prefix + L" Tab " +
+                    std::to_wstring(tab_index) + L" Row " +
+                    std::to_wstring(row_index);
+                std::wstring row_help = fixture.title_prefix + L" Help " +
+                    std::to_wstring(tab_index) + L"/" +
+                    std::to_wstring(row_index);
+                const std::uint8_t initial_value =
+                    static_cast<std::uint8_t>(
+                        (provider_index + tab_index + row_index) % 2);
+                ERUI_ToggleDesc toggle{};
+                toggle.size = sizeof(toggle);
+                toggle.label = utf16(label);
+                toggle.help = utf16(row_help);
+                toggle.initial_value = initial_value;
+                toggle.enabled = 1;
+                ERUI_RowHandle row{ERUI_INVALID_ROW};
+                ERUI_TEST_CHECK(registry.add_toggle(
+                    fixture.handle, page, &toggle, &row) == ERUI_OK);
+                ERUI_TEST_CHECK(row != ERUI_INVALID_ROW);
+                label.assign(L"mutated");
+                row_help.assign(L"mutated");
+            }
+        }
+    }
+
+    for (const ProviderFixture& fixture : providers) {
+        ERUI_TEST_CHECK(registry.commit_provider(fixture.handle) == ERUI_OK);
+    }
+
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    ERUI_TEST_CHECK(menu->tab_count() == kStressTabCount);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+    ERUI_TEST_CHECK(compiled->tabs.size() == kStressTabCount);
+    ERUI_TEST_CHECK(compiled->tab_page_indices.size() ==
+        kStressTabCount);
+    ERUI_TEST_CHECK(compiled->pagination_required);
+
+    std::size_t observed_rows = 0;
+    for (std::size_t ordered_index = 0;
+         ordered_index < compiled->tabs.size(); ++ordered_index) {
+        const std::size_t provider_index = ordered_index % providers.size();
+        const std::size_t tab_index = ordered_index / providers.size();
+        const ProviderFixture& fixture = providers[provider_index];
+        const erui::detail::CompiledTab& compiled_tab =
+            compiled->tabs[ordered_index];
+        ERUI_TEST_CHECK(compiled_tab.metadata.has_value());
+        ERUI_TEST_CHECK(compiled_tab.page_index ==
+            compiled->tab_page_indices[ordered_index]);
+        ERUI_TEST_CHECK(compiled_tab.page_index < compiled->pages.size());
+
+        const erui::TabMetadata& metadata = *compiled_tab.metadata;
+        ERUI_TEST_CHECK(metadata.provider_id == fixture.id);
+        ERUI_TEST_CHECK(metadata.tab_id ==
+            "tab-" + std::to_string(tab_index));
+        ERUI_TEST_CHECK(metadata.preferred_order ==
+            static_cast<std::int32_t>(ordered_index));
+        ERUI_TEST_CHECK(metadata.effective_order ==
+            static_cast<std::int32_t>(ordered_index));
+        ERUI_TEST_CHECK(!metadata.player_order.has_value());
+
+        const erui::detail::CompiledPage& page =
+            compiled->pages[compiled_tab.page_index];
+        ERUI_TEST_CHECK(page.kind == erui::PageKind::tab);
+        ERUI_TEST_CHECK(page.rows.size() == kRowsPerTab);
+        ERUI_TEST_CHECK(page.tab_physical_title_plan != nullptr);
+        ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(page.title_id)) ==
+            fixture.title_prefix + L" Tab " + std::to_wstring(tab_index));
+
+        for (std::size_t row_index = 0;
+             row_index < page.rows.size(); ++row_index) {
+            const erui::detail::CompiledRow& row = page.rows[row_index];
+            const std::uint8_t expected_value =
+                static_cast<std::uint8_t>(
+                    (provider_index + tab_index + row_index) % 2);
+            ERUI_TEST_CHECK(row.kind == erui::RowKind::toggle);
+            ERUI_TEST_CHECK(row.byte_value != nullptr);
+            ERUI_TEST_CHECK(*row.byte_value == expected_value);
+            ERUI_TEST_CHECK(row.last_observed_value == expected_value);
+            ERUI_TEST_CHECK(std::wstring(
+                compiled->texts.lookup(row.label_id)) ==
+                fixture.title_prefix + L" Tab " +
+                    std::to_wstring(tab_index) + L" Row " +
+                    std::to_wstring(row_index));
+        }
+        observed_rows += page.rows.size();
+
+        erui::detail::PageSlice first{};
+        erui::detail::PageSlice continuation{};
+        ERUI_TEST_CHECK(erui::detail::resolve_paginated_slice(
+            compiled_tab.page_index,
+            page.rows.size(),
+            kLiveFirstPageCapacity,
+            erui::detail::native_subpage_capacity,
+            0,
+            first));
+        ERUI_TEST_CHECK(erui::detail::resolve_paginated_slice(
+            compiled_tab.page_index,
+            page.rows.size(),
+            kLiveFirstPageCapacity,
+            erui::detail::native_subpage_capacity,
+            1,
+            continuation));
+        ERUI_TEST_CHECK(first.slice_count == 2 &&
+            first.first_row == 0 && first.row_count == 6 &&
+            !first.has_previous && first.has_next);
+        ERUI_TEST_CHECK(continuation.slice_count == 2 &&
+            continuation.first_row == 6 && continuation.row_count == 14 &&
+            continuation.has_previous && !continuation.has_next);
+
+        const erui::detail::PageRoute main_route =
+            erui::detail::PageRoute::tab_main(
+                compiled_tab.page_index, kLiveFirstPageCapacity);
+        const erui::detail::PageRoute continuation_route =
+            erui::detail::PageRoute::tab_continuation(
+                compiled_tab.page_index, kLiveFirstPageCapacity, 1);
+        ERUI_TEST_CHECK(erui::detail::is_previous_route_target(
+            continuation_route, main_route));
+        const erui::detail::ResolvedPagePresentation presentation =
+            compiled->resolve_presentation(continuation_route);
+        ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+            presentation.outer_title_id)) == fixture.title_prefix);
+        ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+            presentation.page_title_id)) ==
+            fixture.title_prefix + L" Tab " +
+                std::to_wstring(tab_index) + L" (2/2)");
+    }
+    ERUI_TEST_CHECK(observed_rows == kStressTabCount * kRowsPerTab);
+
+    const erui::detail::TabDiagnosticsReport report =
+        registry.tab_diagnostics_report();
+    ERUI_TEST_CHECK(report.order_complete);
+    ERUI_TEST_CHECK(report.ordered_tabs.size() == kStressTabCount);
+    for (std::size_t index = 0; index < report.ordered_tabs.size(); ++index) {
+        ERUI_TEST_CHECK(report.ordered_tabs[index].position == index + 1);
+        ERUI_TEST_CHECK(report.ordered_tabs[index].stable_key ==
+            std::string(providers[index % providers.size()].id) + "/tab-" +
+                std::to_string(index / providers.size()));
+    }
+}
+
 } // namespace
 
 int main() {
     erui::host::set_api_state(erui::host::ApiState::accepting);
     verify_provider_identifier_contract();
+    verify_custom_tab_backend_gate();
+    verify_custom_tab_registration_contract();
+    verify_custom_tab_committed_limit();
+    verify_fixed_fifty_custom_tab_stress();
 
     ERUI_Api early_v1{};
     early_v1.size = ERUI_API_V1_0_SIZE;
@@ -649,6 +1237,14 @@ int main() {
     ERUI_TEST_CHECK(negotiated.table.add_input_action != nullptr);
     ERUI_TEST_CHECK(negotiated.table.set_action_inputs != nullptr);
     ERUI_TEST_CHECK(negotiated.table.storage_get_info != nullptr);
+    ERUI_TEST_CHECK((negotiated.table.capabilities &
+        ERUI_CAP_CUSTOM_TABS) == 0);
+    ERUI_TEST_CHECK(negotiated.table.add_tab != nullptr);
+    ERUI_PageHandle unavailable_tab{UINT64_C(0x5AA55AA55AA55AA5)};
+    ERUI_TEST_CHECK(negotiated.table.add_tab(
+        ERUI_INVALID_PROVIDER, nullptr, &unavailable_tab) ==
+        ERUI_NOT_SUPPORTED);
+    ERUI_TEST_CHECK(unavailable_tab == UINT64_C(0x5AA55AA55AA55AA5));
     ERUI_TEST_CHECK(negotiated.canary == UINT64_C(0xA55AA55AF00DF00D));
 
     // An exact 1.0 request writes only the frozen 128-byte prefix. The newer
@@ -670,7 +1266,18 @@ int main() {
     // A provider is bound to the version-specific registration trampoline,
     // so even deliberately mixing tables cannot grant a 1.0 provider access
     // to 1.1-only operations or make the host inspect 1.1 pointers.
+    ERUI_TEST_CHECK(
+        erui::host::registry().enable_custom_tabs_backend());
+    ERUI_Api tabs_enabled{};
+    tabs_enabled.size = sizeof(tabs_enabled);
+    ERUI_TEST_CHECK(ERUI_GetApi(
+        ERUI_API_VERSION_1_3, &tabs_enabled) == ERUI_OK);
+    ERUI_TEST_CHECK((tabs_enabled.capabilities &
+        ERUI_CAP_CUSTOM_TABS) != 0);
+    ERUI_TEST_CHECK(tabs_enabled.add_tab != nullptr);
     erui::host::registry().open_registration();
+    ERUI_TEST_CHECK(
+        !erui::host::registry().enable_custom_tabs_backend());
     ERUI_ProviderDesc v1_provider{};
     v1_provider.size = sizeof(v1_provider);
     v1_provider.api_version = ERUI_API_VERSION_1_0;

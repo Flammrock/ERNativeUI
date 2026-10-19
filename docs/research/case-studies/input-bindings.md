@@ -112,7 +112,7 @@ states have a label but no selectable hit area. The PC cells in
 
 **Rejected:** adding more static GFX rows is the way to add bindings. It would
 duplicate a viewport rather than extend the logical model. The production
-feature needs no GFX patch.
+feature needs no additional binding-screen GFX transformation.
 
 ### 2. Recover the list and cell shapes
 

@@ -55,6 +55,22 @@ ERUI_Result ERUI_CALL register_provider_v1_2_entry(
         ERUI_API_VERSION_1_2, description, out_provider, out_root_page);
 }
 
+ERUI_Result ERUI_CALL register_provider_v1_3_entry(
+    const ERUI_ProviderDesc* description,
+    ERUI_ProviderHandle* out_provider,
+    ERUI_PageHandle* out_root_page) {
+    return register_provider_for_version(
+        ERUI_API_VERSION_1_3, description, out_provider, out_root_page);
+}
+
+ERUI_Result ERUI_CALL add_tab_entry(
+    ERUI_ProviderHandle provider,
+    const ERUI_TabDesc* description,
+    ERUI_PageHandle* out_page) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) return state;
+    return erui::host::registry().add_tab(provider, description, out_page);
+}
+
 ERUI_Result ERUI_CALL add_button_entry(
     ERUI_ProviderHandle provider,
     ERUI_PageHandle page,
@@ -494,6 +510,13 @@ ERUI_Result ERUI_CALL get_game_language_entry(
 
 } // namespace
 
+#if defined(ER_NATIVE_UI_TAB_CONTENT_RESEARCH_PROBE)
+extern "C" ERUI_EXPORT std::uint32_t ERUI_CALL
+ERUI_TabContentResearchProbeMarker() noexcept {
+    return UINT32_C(0x54414231); // "TAB1"
+}
+#endif
+
 extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     std::uint32_t requested_version,
     ERUI_Api* out_api) {
@@ -509,6 +532,9 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
         break;
     case ERUI_API_VERSION_1_2:
         selected_size = ERUI_API_V1_2_SIZE;
+        break;
+    case ERUI_API_VERSION_1_3:
+        selected_size = ERUI_API_V1_3_SIZE;
         break;
     default:
         return ERUI_UNSUPPORTED_VERSION;
@@ -552,7 +578,9 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
         ? &register_provider_v1_0_entry
         : requested_version == ERUI_API_VERSION_1_1
             ? &register_provider_v1_1_entry
-            : &register_provider_v1_2_entry;
+            : requested_version == ERUI_API_VERSION_1_2
+                ? &register_provider_v1_2_entry
+                : &register_provider_v1_3_entry;
     table.add_button = &add_button_entry;
     table.add_toggle = &add_toggle_entry;
     table.add_slider = &add_slider_entry;
@@ -612,6 +640,12 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
             &set_custom_slider_index_entry;
         table.get_custom_slider_index =
             &get_custom_slider_index_entry;
+    }
+    if (requested_version >= ERUI_API_VERSION_1_3) {
+        table.add_tab = &add_tab_entry;
+        if (erui::host::registry().custom_tabs_backend_available()) {
+            table.capabilities |= ERUI_CAP_CUSTOM_TABS;
+        }
     }
 
     std::memcpy(out_api, &table, selected_size);

@@ -105,19 +105,21 @@ ctest --preset windows-release
 cmake --install build/preset-release --config Release --prefix dist/ERNativeUI
 ```
 
-The preset builds the host, examples, GFX patcher, and tests in
+The preset builds the host, examples, developer GFX tooling, and tests in
 `build/preset-release`. A successful build also stages a Mod Engine 2-ready
 tree in `build/preset-release/deploy/Release`; `build.bat` then installs the
-SDK/runtime tree under `dist/ERNativeUI`.
+SDK/runtime tree under `dist/ERNativeUI`. Developer tooling is built and tested
+from source but is not installed into either public binary package.
 
 Before releasing, also review:
 
 - the [validation checklist](../../VALIDATION.md);
 - the [API 1.0 to 1.1 migration guide](../migrations/1.0-to-1.1.md);
 - the [API 1.1 to 1.2 migration guide](../migrations/1.1-to-1.2.md);
+- the [API 1.2 to 1.3 migration guide](../migrations/1.2-to-1.3.md);
 - the [feature matrix](../features.md) and compatibility claims;
-- the frozen API 1.0 and 1.1 client tests and the current API 1.2 C/C++ contract tests
-  included in the normal test suite;
+- the frozen API 1.0, 1.1 and 1.2 client tests and the current API 1.3 C/C++
+  contract tests included in the normal test suite;
 - the manual MinGW-w64-to-MSVC runtime gate in
   [VALIDATION.md](../../VALIDATION.md#cross-toolchain-client-validation).
 
@@ -218,9 +220,10 @@ dist/release/
 ```
 
 The Windows archive includes the runtime, public C and C++ headers, examples,
-GFX patcher, CMake package files, configuration/assets, license, third-party
-notices, and a version-pinned link to the online documentation. It deliberately
-does not duplicate the repository's screenshot-heavy documentation tree.
+CMake package files, configuration and locales, licenses, third-party notices,
+and a version-pinned link to the online documentation. It deliberately excludes
+the developer-only GFX patcher and loose replacement GFX files, and does not
+duplicate the repository's screenshot-heavy documentation tree.
 
 The script removes and recreates the complete `dist/release` directory on each
 run. Move any files you need to preserve before invoking it. Its `-Version`
@@ -254,12 +257,13 @@ dist/release/
 ```
 
 The Nexus ZIP is flattened for direct Mod Engine 2 use. It contains the host
-DLL and default INI, locales, optional `menu` GFX assets, example DLLs, license
-and third-party notices. Its `README.md` comes from
+DLL and default INI, locales, example DLLs, license and third-party notices.
+Runtime transformation adapts the settings movies loaded by the game, so the
+package does not install loose `menu` GFX overrides. Its `README.md` comes from
 [`assets/NEXUS_README.md`](https://github.com/Flammrock/ERNativeUI/blob/main/assets/NEXUS_README.md): this is a concise, standalone player guide whose
 documentation and support links are absolute. It does not contain the SDK
-headers, CMake package, patcher executable, version-pinned SDK documentation
-link, or source examples found in the Windows archive.
+headers, CMake package, developer tools, version-pinned SDK documentation link,
+or source examples found in the Windows archive.
 
 The public Nexus description is maintained separately in
 [`assets/NEXUS_PRESENTATION.bbcode`](https://github.com/Flammrock/ERNativeUI/blob/main/assets/NEXUS_PRESENTATION.bbcode).

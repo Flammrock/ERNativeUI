@@ -29,7 +29,8 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_POPUP_CHOICE | ERUI_CAP_GAME_LANGUAGE | ERUI_CAP_TEXT_INPUT |
     ERUI_CAP_COLOR_PICKER | ERUI_CAP_BUILTIN_PAGES |
     ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
-    ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER;
+    ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
+    ERUI_CAP_CUSTOM_TABS;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
@@ -48,11 +49,13 @@ struct ProviderState {
     std::uint64_t storage_saved_revision{};
     std::unordered_map<std::string, std::string> strings{};
     std::unordered_map<std::string, ERUI_ActionInputs> action_inputs{};
+    std::unordered_map<std::string, ERUI_PageHandle> tabs{};
 };
 
 std::mutex g_state_mutex{};
 std::unordered_map<ERUI_ProviderHandle, ProviderState> g_providers{};
 std::unordered_map<ERUI_InputActionHandle, ActionState> g_actions{};
+std::uint32_t g_custom_tab_count{};
 
 bool valid_slot(std::uint32_t state, std::uint32_t input,
     std::uint32_t count) noexcept {
@@ -134,7 +137,7 @@ ERUI_Result ERUI_CALL register_provider(
     g_register_calls.fetch_add(1, std::memory_order_relaxed);
     if (!description || !out_provider || !out_root_page ||
         description->size < sizeof(ERUI_ProviderDesc) ||
-        description->api_version != ERUI_API_VERSION_1_2 ||
+        description->api_version != ERUI_API_VERSION_1_3 ||
         !valid_machine_identifier(description->provider_id)) {
         return ERUI_INVALID_ARGUMENT;
     }
@@ -144,6 +147,49 @@ ERUI_Result ERUI_CALL register_provider(
         std::lock_guard lock(g_state_mutex);
         g_providers.try_emplace(*out_provider);
     }
+    return ERUI_OK;
+}
+
+ERUI_Result ERUI_CALL add_tab(
+    ERUI_ProviderHandle provider,
+    const ERUI_TabDesc* description,
+    ERUI_PageHandle* out_page) {
+    if (!description || !out_page ||
+        description->size < sizeof(*description) ||
+        description->flags != 0 || description->reserved0 != 0 ||
+        description->reserved[0] != 0 || description->reserved[1] != 0 ||
+        !valid_machine_identifier(description->tab_id) ||
+        !description->title.data || description->title.length == 0 ||
+        description->title.length > ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS ||
+        description->title.reserved != 0) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+    if (description->icon) {
+        const ERUI_TabIconDesc& icon = *description->icon;
+        if (icon.size < sizeof(icon) || icon.flags != 0 ||
+            icon.format != ERUI_TAB_ICON_FORMAT_RGBA8 ||
+            icon.byte_count != ERUI_TAB_ICON_RGBA8_BYTE_COUNT ||
+            !icon.pixels || icon.reserved[0] != 0 ||
+            icon.reserved[1] != 0) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+    }
+
+    std::lock_guard lock(g_state_mutex);
+    const auto found = g_providers.find(provider);
+    if (found == g_providers.end()) return ERUI_INVALID_HANDLE;
+    const std::string id = copy_view(description->tab_id);
+    if (found->second.tabs.find(id) != found->second.tabs.end()) {
+        return ERUI_DUPLICATE_TAB_ID;
+    }
+    if (g_custom_tab_count >= ERUI_CUSTOM_TAB_MAX_COUNT) {
+        return ERUI_TAB_LIMIT_REACHED;
+    }
+    const ERUI_PageHandle page =
+        g_next_handle.fetch_add(1, std::memory_order_relaxed);
+    found->second.tabs.emplace(id, page);
+    ++g_custom_tab_count;
+    *out_page = page;
     return ERUI_OK;
 }
 
@@ -722,8 +768,8 @@ ERUI_Result ERUI_CALL storage_get_info(
 
 ERUI_Api make_api() noexcept {
     ERUI_Api api{};
-    api.size = ERUI_API_V1_2_SIZE;
-    api.api_version = ERUI_API_VERSION_1_2;
+    api.size = ERUI_API_V1_3_SIZE;
+    api.api_version = ERUI_API_VERSION_1_3;
     api.capabilities = kCapabilities;
     api.register_provider = &register_provider;
     api.add_button = &add_button;
@@ -770,6 +816,7 @@ ERUI_Api make_api() noexcept {
     api.add_custom_slider = &add_custom_slider;
     api.set_custom_slider_index = &set_custom_slider_index;
     api.get_custom_slider_index = &get_custom_slider_index;
+    api.add_tab = &add_tab;
     return api;
 }
 
@@ -800,6 +847,7 @@ ERUI_TestConfigureConnection(
         std::lock_guard lock(g_state_mutex);
         g_providers.clear();
         g_actions.clear();
+        g_custom_tab_count = 0;
     }
     return ERUI_OK;
 }
@@ -909,12 +957,12 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     const ERUI_Result terminal =
         g_terminal_result.load(std::memory_order_relaxed);
     if (terminal != ERUI_OK) return terminal;
-    if (requested_version != ERUI_API_VERSION_1_2) {
+    if (requested_version != ERUI_API_VERSION_1_3) {
         return ERUI_UNSUPPORTED_VERSION;
     }
-    if (out_api->size < ERUI_API_V1_2_SIZE) return ERUI_INVALID_ARGUMENT;
+    if (out_api->size < ERUI_API_V1_3_SIZE) return ERUI_INVALID_ARGUMENT;
     const ERUI_Api api = make_api();
-    std::memcpy(out_api, &api, ERUI_API_V1_2_SIZE);
+    std::memcpy(out_api, &api, ERUI_API_V1_3_SIZE);
     return ERUI_OK;
 }
 

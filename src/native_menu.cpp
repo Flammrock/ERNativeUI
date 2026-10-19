@@ -456,7 +456,7 @@ bool add_inline_choice(
             }
         }
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::trace,
             "choice: native row constructed page=%p options=%llu selected=%u",
             page, static_cast<unsigned long long>(count),
             static_cast<unsigned>(*source_row.byte_value));
@@ -944,6 +944,11 @@ bool is_builtin_route(erui::detail::PageRouteKind kind) noexcept {
         kind == erui::detail::PageRouteKind::builtin_continuation;
 }
 
+bool is_tab_route(erui::detail::PageRouteKind kind) noexcept {
+    return kind == erui::detail::PageRouteKind::tab_main ||
+        kind == erui::detail::PageRouteKind::tab_continuation;
+}
+
 ColorPickerWidgetHost widget_host_for_route(
     const erui::detail::PageRoute& route) noexcept {
     if (route.kind == erui::detail::PageRouteKind::root_main) {
@@ -994,6 +999,27 @@ bool resolve_page_route_slice(
             erui::detail::resolve_paginated_slice(
                 route.logical_page_index,
                 menu.pages[route.logical_page_index].rows.size(),
+                route.root_capacity,
+                erui::detail::native_subpage_capacity,
+                route.slice_index,
+                output);
+    }
+    if (is_tab_route(route.kind)) {
+        const erui::detail::CompiledPage& page =
+            menu.pages[route.logical_page_index];
+        const bool kind_matches_slice =
+            (route.kind == erui::detail::PageRouteKind::tab_main &&
+                route.slice_index == 0) ||
+            (route.kind ==
+                    erui::detail::PageRouteKind::tab_continuation &&
+                route.slice_index != 0);
+        return page.kind == erui::PageKind::tab && kind_matches_slice &&
+            route.root_capacity != 0 &&
+            route.root_capacity <=
+                erui::detail::builtin_page_max_first_capacity &&
+            erui::detail::resolve_paginated_slice(
+                route.logical_page_index,
+                page.rows.size(),
                 route.root_capacity,
                 erui::detail::native_subpage_capacity,
                 route.slice_index,
@@ -1128,6 +1154,12 @@ RowInjectionOutcome inject_page_route(
                 route.logical_page_index,
                 route.builtin_category,
                 route.root_capacity);
+        } else if (route.kind ==
+                erui::detail::PageRouteKind::tab_continuation &&
+            slice->slice_index == 1) {
+            target = erui::detail::PageRoute::tab_main(
+                route.logical_page_index,
+                route.root_capacity);
         } else {
             target = route_with_slice(route, slice->slice_index - 1);
         }
@@ -1173,6 +1205,11 @@ RowInjectionOutcome inject_page_route(
             target = erui::detail::PageRoute::builtin_continuation(
                 route.logical_page_index,
                 route.builtin_category,
+                route.root_capacity,
+                slice->slice_index + 1);
+        } else if (route.kind == erui::detail::PageRouteKind::tab_main) {
+            target = erui::detail::PageRoute::tab_continuation(
+                route.logical_page_index,
                 route.root_capacity,
                 slice->slice_index + 1);
         } else {

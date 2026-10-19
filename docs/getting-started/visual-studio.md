@@ -5,8 +5,8 @@ Visual Studio interface. You do not need a `CMakeLists.txt`, package manager,
 or ERNativeUI `.lib`.
 
 Complete [Install the SDK](setup.md) first. You need Visual Studio 2022 with
-the **Desktop development with C++** workload and an extracted ERNativeUI
-1.2.0 or later compatible Windows x64 SDK.
+the **Desktop development with C++** workload and an extracted Windows x64 SDK
+that explicitly exposes ERUI API 1.3.
 
 ## 1. Create a DLL project
 
@@ -40,7 +40,7 @@ Choose one method.
 3. Add this directory to **Additional Include Directories**:
 
    ```text
-   C:\SDK\ERNativeUI-1.2.0-windows-x64\include
+   C:\SDK\ERNativeUI-current\include
    ```
 
 4. Keep `%(AdditionalIncludeDirectories)` in the value so inherited paths are

@@ -205,6 +205,10 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     constexpr std::uint16_t item_character = 200;
     constexpr std::uint16_t button_id = 104;
     constexpr std::uint16_t widgets_id = 105;
+    constexpr std::uint16_t back_tab_item_id = 210;
+    constexpr std::uint16_t back_tab_list_id = 211;
+    constexpr std::uint16_t tab_item_id = 212;
+    constexpr std::uint16_t tab_list_id = 213;
 
     std::vector<std::vector<std::uint8_t>> game_options_items{};
     for (std::uint16_t index = 0; index < 6; ++index) {
@@ -267,6 +271,26 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     widget_items.push_back(place_object(20, 106, 0, "ComboBox"));
     widget_items.push_back(place_object(34, 107, 0, "Slider"));
 
+    std::vector<std::vector<std::uint8_t>> back_tab_items{};
+    std::vector<std::vector<std::uint8_t>> tab_items{};
+    for (std::uint16_t index = 0; index < 9; ++index) {
+        const auto x = static_cast<std::int32_t>(
+            -9760 + static_cast<std::int32_t>(index) * 1800);
+        const auto name = "Item_0_" + std::to_string(index);
+        back_tab_items.push_back(place_object(
+            static_cast<std::uint16_t>(2U + index * 4U),
+            back_tab_item_id,
+            -6920,
+            name,
+            x));
+        tab_items.push_back(place_object(
+            static_cast<std::uint16_t>(5U + index * 6U),
+            tab_item_id,
+            -6920,
+            name,
+            x));
+    }
+
     std::vector<std::uint8_t> movie{
         'G', 'F', 'X', 11,
         0, 0, 0, 0,
@@ -287,6 +311,10 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     // earliest standalone ColorPicker reference.
     append_tag(movie, define_sprite(button_id, button_items));
     append_tag(movie, define_sprite(widgets_id, widget_items));
+    append_tag(movie, define_sprite(back_tab_item_id, {}));
+    append_tag(movie, define_sprite(tab_item_id, {}));
+    append_tag(movie, define_sprite(back_tab_list_id, back_tab_items));
+    append_tag(movie, define_sprite(tab_list_id, tab_items));
     append_tag(movie, define_text_stub(98, false));
     append_tag(movie, define_text_stub(99, true));
     append_tag(movie, define_sprite(103, text_input_items));
@@ -296,6 +324,10 @@ void append_tag(std::vector<std::uint8_t>& output, const std::vector<std::uint8_
     }
     append_tag(movie, define_sprite(donor_id, donor_items));
     append_tag(movie, define_sprite(window_list_id, window_items));
+    append_tag(movie, place_object(
+        156, back_tab_list_id, 10800, "BackTabList", 19200));
+    append_tag(movie, place_object(
+        191, tab_list_id, 10800, "TabList", 19200));
     append_tag(movie, tag(1, {}));
     append_tag(movie, tag(0, {}));
     write_u32(movie, 4, static_cast<std::uint32_t>(movie.size()));
@@ -616,6 +648,39 @@ int main() {
     ERUI_TEST_CHECK(
         missing_camera.error ==
             erui::gfx::ErrorCode::camera_options_panel_not_found);
+
+    // Widget-only entry points are intentionally independent from the panel
+    // expansion contract. A replacement Game Options movie may preserve the
+    // native TextInput/Widgets library while removing or rewriting
+    // CameraSetting; that must not make standalone widget inspection or
+    // transformation unavailable.
+    const erui::gfx::Inspection no_camera_text_input =
+        erui::gfx::inspect_text_input_host(no_camera);
+    ERUI_TEST_CHECK(no_camera_text_input.success());
+    ERUI_TEST_CHECK(
+        no_camera_text_input.host == erui::gfx::GfxHost::game_options);
+    ERUI_TEST_CHECK(no_camera_text_input.text_input_sprite == 103);
+
+    const erui::gfx::PatchResult no_camera_native =
+        erui::gfx::patch_widget_presentations(
+            no_camera,
+            erui::gfx::TextInputPresentation::native,
+            erui::gfx::ColorPickerPresentation::native);
+    ERUI_TEST_CHECK(no_camera_native.success());
+    ERUI_TEST_CHECK(no_camera_native.report.already_satisfied);
+    ERUI_TEST_CHECK(no_camera_native.output == no_camera);
+
+    const erui::gfx::PatchResult no_camera_widgets =
+        erui::gfx::patch_widget_presentations(
+            no_camera,
+            erui::gfx::TextInputPresentation::character_name,
+            erui::gfx::ColorPickerPresentation::character_creation);
+    ERUI_TEST_CHECK(no_camera_widgets.success());
+    ERUI_TEST_CHECK(
+        no_camera_widgets.report.after.character_name_text_input);
+    ERUI_TEST_CHECK(
+        no_camera_widgets.report.after.character_creation_color_picker);
+    ERUI_TEST_CHECK(no_camera_widgets.output != no_camera);
 
 #if defined(ERNATIVEUI_TEST_GAME_OPTIONS_GFX)
     std::ifstream real_file(

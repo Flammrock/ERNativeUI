@@ -101,11 +101,12 @@ void compile_physical_titles(
     }
 }
 
-void compile_builtin_physical_titles(
+void compile_live_capacity_physical_titles(
     CompiledMenu& compiled,
     const Page& input,
     CompiledPage& output,
-    std::size_t page_index) {
+    std::size_t page_index,
+    std::unique_ptr<BuiltinPhysicalTitlePlan>& destination) {
     auto plan = std::make_unique<BuiltinPhysicalTitlePlan>();
     const std::size_t logical_row_count = output.rows.size();
     for (std::uint8_t first_page_capacity = 1;
@@ -157,7 +158,7 @@ void compile_builtin_physical_titles(
             static_cast<std::uint8_t>(variant_index);
     }
     if (!plan->variants.empty()) {
-        output.builtin_physical_title_plan = std::move(plan);
+        destination = std::move(plan);
     }
 }
 
@@ -259,6 +260,10 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             throw std::logic_error("tab page is not owned by its menu");
         }
         compiled->tab_page_indices.push_back(tab_it->second);
+        compiled->tabs.push_back({
+            .page_index = tab_it->second,
+            .metadata = tab->tab_metadata_,
+        });
     }
 
     for (std::size_t page_index = 0; page_index < menu.pages_.size(); ++page_index) {
@@ -496,11 +501,25 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
         const std::size_t page_index =
             compiled->builtin_page_index(native_category);
         if (page_index >= compiled->pages.size()) continue;
-        compile_builtin_physical_titles(
+        compile_live_capacity_physical_titles(
             *compiled,
             *menu.pages_[page_index],
             compiled->pages[page_index],
-            page_index);
+            page_index,
+            compiled->pages[page_index].builtin_physical_title_plan);
+    }
+    // Custom tabs also expose their first-page capacity only after their
+    // native carrier has been constructed. Precompile the same immutable
+    // title variants for continuation pages without changing the ordinary
+    // submenu title plan retained above.
+    for (const std::size_t page_index : compiled->tab_page_indices) {
+        if (page_index >= compiled->pages.size()) continue;
+        compile_live_capacity_physical_titles(
+            *compiled,
+            *menu.pages_[page_index],
+            compiled->pages[page_index],
+            page_index,
+            compiled->pages[page_index].tab_physical_title_plan);
     }
 
     compiled->texts.freeze();

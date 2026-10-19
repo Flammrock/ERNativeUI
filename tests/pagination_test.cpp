@@ -208,6 +208,15 @@ int main() {
         PageRoute::builtin_continuation(8, 3, 3, 1);
     constexpr PageRoute camera_other_capacity =
         PageRoute::builtin_continuation(8, 1, 4, 1);
+    constexpr PageRoute tab_main = PageRoute::tab_main(9, 2);
+    constexpr PageRoute tab_first_continuation =
+        PageRoute::tab_continuation(9, 2, 1);
+    constexpr PageRoute tab_second_continuation =
+        PageRoute::tab_continuation(9, 2, 2);
+    constexpr PageRoute tab_other_capacity =
+        PageRoute::tab_continuation(9, 3, 1);
+    constexpr PageRoute other_tab =
+        PageRoute::tab_continuation(10, 2, 1);
     static_assert(same_native_page_domain(a, b));
     static_assert(!same_native_page_domain(a, c));
     static_assert(!same_native_page_domain(c, d));
@@ -215,6 +224,14 @@ int main() {
     static_assert(!same_native_page_domain(camera_a, sound));
     static_assert(!same_native_page_domain(
         camera_a, camera_other_capacity));
+    static_assert(same_native_page_domain(
+        tab_first_continuation, tab_second_continuation));
+    static_assert(!same_native_page_domain(
+        tab_first_continuation, tab_other_capacity));
+    static_assert(!same_native_page_domain(
+        tab_first_continuation, other_tab));
+    static_assert(!same_native_page_domain(
+        tab_main, tab_first_continuation));
     static_assert(is_previous_route_target(
         PageRoute::submenu(4, 2), PageRoute::submenu(4, 1)));
     static_assert(!is_previous_route_target(
@@ -231,6 +248,35 @@ int main() {
     static_assert(!is_previous_route_target(
         PageRoute::builtin_continuation(8, 1, 3, 1),
         PageRoute::builtin_main(8, 3, 3)));
+    static_assert(is_previous_route_target(
+        PageRoute::tab_continuation(9, 2, 1),
+        PageRoute::tab_main(9, 2)));
+    static_assert(!is_previous_route_target(
+        PageRoute::tab_continuation(9, 2, 1),
+        PageRoute::tab_main(9, 3)));
+    static_assert(!is_previous_route_target(
+        PageRoute::tab_continuation(9, 2, 1),
+        PageRoute::tab_main(10, 2)));
+    static_assert(is_previous_route_target(
+        PageRoute::tab_continuation(9, 2, 2),
+        PageRoute::tab_continuation(9, 2, 1)));
+    static_assert(!is_previous_route_target(
+        PageRoute::tab_continuation(9, 2, 2),
+        PageRoute::tab_continuation(9, 3, 1)));
+
+    // A two-row native custom-tab carrier reserves its second slot for Next.
+    // The remaining rows use ordinary 15-row continuation pages.
+    {
+        PageSlice first{};
+        PageSlice middle{};
+        PageSlice last{};
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 20, 2, 15, 0, first));
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 20, 2, 15, 1, middle));
+        ERUI_TEST_CHECK(resolve_paginated_slice(9, 20, 2, 15, 2, last));
+        assert_slice(first, 0, 1, false, true, 0, 3);
+        assert_slice(middle, 1, 13, true, true, 1, 3);
+        assert_slice(last, 14, 6, true, false, 2, 3);
+    }
 
     return 0;
 }

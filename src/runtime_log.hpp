@@ -5,6 +5,8 @@
 namespace erui::detail {
 
 void set_log_sink(LogSink sink) noexcept;
+void set_diagnostic_logging(bool enabled) noexcept;
+[[nodiscard]] bool diagnostic_logging_enabled() noexcept;
 
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((format(printf, 2, 3)))

@@ -418,7 +418,7 @@ void schedule_service() noexcept {
     }
 
     erui::detail::logf(
-        erui::LogLevel::info,
+        erui::LogLevel::trace,
         "Native alert scheduled in blocking slot: sequence=%llu messageId=0x%X job=%p",
         static_cast<unsigned long long>(request->sequence),
         static_cast<unsigned>(request->message_id),
@@ -475,7 +475,7 @@ void observe_composite_completion(void* popup) noexcept {
         g_title_gate_frames.load(std::memory_order_relaxed) -
         request->title_gate_baseline;
     erui::detail::logf(
-        dismissed ? erui::LogLevel::info : erui::LogLevel::warning,
+        dismissed ? erui::LogLevel::trace : erui::LogLevel::warning,
         dismissed
             ? "Native alert dismissed from blocking slot: sequence=%llu lowerGateFrames=%llu titleGateFrames=%llu"
             : "Native alert lost blocking-slot ownership: sequence=%llu lowerGateFrames=%llu titleGateFrames=%llu",

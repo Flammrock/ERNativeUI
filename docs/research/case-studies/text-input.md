@@ -47,7 +47,8 @@ The investigation deliberately treated these as separate questions:
 3. Which job opens the editable field, commits or cancels it, and releases
    input afterward?
 4. Is a length value a preset, a bit mask, or a per-row numeric maximum?
-5. Which visual changes require an optional GFX file rather than a DLL hook?
+5. Which visual changes belong to the GFX transformation rather than the
+   native control hooks?
 
 The resulting model has three layers:
 
@@ -305,16 +306,18 @@ The API capability belongs to finished ERUI API 1.1. Its position in the
 append-only table and the frozen API 1.0 prefix are tested independently of
 the ERNativeUI package release number.
 
-## Optional GFX boundary
+## GFX presentation boundary
 
 The native settings movies already contain `Widgets/TextInput`; editing,
-focus, confirmation, cancellation, and value persistence do not require a GFX
-patch. Without the optional artwork, the row uses the native plain settings
-presentation.
+focus, confirmation, cancellation, and value persistence do not depend on the
+enhanced GFX presentation. If runtime completion is unavailable or rejects an
+incompatible movie, the row uses the native plain settings presentation.
 
-The GFX patcher optionally adds the character-name bracket and red empty-state
-presentation to both supported host movies. It references the game's existing
-`MENU_FL_Cursor_EntWaku.tga`; it does not bundle that texture. New
+The runtime transformer adds the character-name bracket and red empty-state
+presentation to both supported host movies when missing. The offline patcher
+exercises the same presentation contract for research and tests. It references
+the game's existing `MENU_FL_Cursor_EntWaku.tga`; it does not bundle that
+texture. New
 movie-local definitions precede their first use, and a second patch run is
 byte-for-byte idempotent. This is presentation only: it neither installs the
 editor nor changes the public length contract.

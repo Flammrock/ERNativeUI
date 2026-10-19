@@ -335,9 +335,37 @@ const Page* Menu::find_builtin_page(detail::BuiltinPage page) const noexcept {
     return builtin_pages_[detail::builtin_page_offset(page)];
 }
 
-Page& Menu::add_tab(std::wstring title, std::wstring help) {
-    Page& page = create_page(PageKind::tab, std::move(title), std::move(help));
+Page& Menu::add_tab(std::wstring title) {
+    Page& page = create_page(PageKind::tab, std::move(title), {});
     tab_pages_.push_back(&page);
+    return page;
+}
+
+Page& Menu::add_tab(
+    TabMetadata metadata,
+    std::wstring title) {
+    if (metadata.provider_id.empty() || metadata.tab_id.empty()) {
+        throw std::invalid_argument("registered tab metadata has an empty ID");
+    }
+    if (metadata.icon.source == TabIconSource::fallback) {
+        if (!metadata.icon.rgba8_pixels.empty()) {
+            throw std::invalid_argument(
+                "fallback tab icon unexpectedly owns RGBA pixels");
+        }
+    } else if (metadata.icon.source != TabIconSource::rgba8 ||
+               metadata.icon.rgba8_pixels.size() !=
+                   ERUI_TAB_ICON_RGBA8_BYTE_COUNT) {
+        throw std::invalid_argument("registered tab icon has an invalid shape");
+    }
+
+    Page& page = create_page(PageKind::tab, std::move(title), {});
+    try {
+        page.tab_metadata_.emplace(std::move(metadata));
+        tab_pages_.push_back(&page);
+    } catch (...) {
+        pages_.pop_back();
+        throw;
+    }
     return page;
 }
 

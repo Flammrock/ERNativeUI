@@ -127,12 +127,18 @@ struct CompiledPage {
     TextId outer_title_id{};
     std::vector<TextId> physical_title_ids{};
     std::unique_ptr<BuiltinPhysicalTitlePlan> builtin_physical_title_plan{};
+    std::unique_ptr<BuiltinPhysicalTitlePlan> tab_physical_title_plan{};
     std::vector<CompiledRow> rows{};
 };
 
 struct ResolvedPagePresentation {
     TextId outer_title_id{};
     TextId page_title_id{};
+};
+
+struct CompiledTab {
+    std::size_t page_index{invalid_compiled_index};
+    std::optional<TabMetadata> metadata{};
 };
 
 struct CompiledMenu {
@@ -147,6 +153,9 @@ struct CompiledMenu {
     std::vector<CompiledInputBindingSection> input_binding_sections{};
     std::vector<bool> reachable_pages{};
     std::vector<std::size_t> tab_page_indices{};
+    // Ordered exactly as tab_page_indices. API 1.3 registrations carry
+    // metadata; research-only/internal legacy tabs intentionally do not.
+    std::vector<CompiledTab> tabs{};
     std::array<std::size_t, native_category_count> builtin_page_indices{
         invalid_compiled_index,
         invalid_compiled_index,
@@ -267,8 +276,11 @@ struct CompiledMenu {
             return root_plan(route.root_capacity).slice(route.slice_index);
         case PageRouteKind::builtin_continuation:
         case PageRouteKind::builtin_main:
+        case PageRouteKind::tab_continuation:
+        case PageRouteKind::tab_main:
             // Built-in page capacities and slices are derived from the live
-            // native panel. They intentionally are not compiler-owned.
+            // native panel. Custom tabs use the same live-capacity model.
+            // These slices intentionally are not compiler-owned.
             return nullptr;
         }
         return nullptr;
@@ -277,8 +289,42 @@ struct CompiledMenu {
     [[nodiscard]] ResolvedPagePresentation resolve_presentation(
         const PageRoute& route) const noexcept {
         if (route.kind == PageRouteKind::root_main ||
-            route.kind == PageRouteKind::builtin_main) {
+            route.kind == PageRouteKind::builtin_main ||
+            route.kind == PageRouteKind::tab_main) {
             return {};
+        }
+        if (route.kind == PageRouteKind::tab_continuation) {
+            if (!route.valid() || route.slice_index == 0 ||
+                route.root_capacity == 0 ||
+                route.root_capacity > builtin_page_max_first_capacity ||
+                route.logical_page_index >= pages.size() ||
+                !page_reachable(route.logical_page_index)) {
+                return {};
+            }
+            const CompiledPage& page = pages[route.logical_page_index];
+            if (page.kind != PageKind::tab ||
+                !page.tab_physical_title_plan) {
+                return {};
+            }
+            PageSlice slice{};
+            if (!resolve_paginated_slice(
+                    route.logical_page_index,
+                    page.rows.size(),
+                    route.root_capacity,
+                    native_subpage_capacity,
+                    route.slice_index,
+                    slice) ||
+                slice.slice_index == 0 || slice.slice_count <= 1) {
+                return {};
+            }
+            const std::vector<TextId>* const titles =
+                page.tab_physical_title_plan->titles_for(
+                    route.root_capacity, slice.slice_count);
+            if (!titles || route.slice_index >= titles->size()) return {};
+            return {
+                .outer_title_id = page.outer_title_id,
+                .page_title_id = (*titles)[route.slice_index],
+            };
         }
         if (route.kind == PageRouteKind::builtin_continuation) {
             if (!route.valid() || route.slice_index == 0 ||

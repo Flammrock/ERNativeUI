@@ -176,7 +176,7 @@ table and check a capability in client code.
 |---|---|
 | First public API | 1.0 |
 | Capability | `erui::Capability::button` / `ERUI_CAP_BUTTON` |
-| Optional GFX | Not required for activation. The optional `02_040` asset supplies a matching left-label field on Game/Camera action rows. |
+| GFX presentation | Runtime completion supplies the matching left-label field on affected action rows; activation does not depend on it. |
 | Runtime value | None |
 
 ## Callback and lifetime behavior

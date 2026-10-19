@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -66,6 +67,28 @@ struct MenuLocalization {
     std::wstring previous_help{L"Return to the preceding settings page."};
     std::wstring next_label{L"Next Page"};
     std::wstring next_help{L"Open the next settings page."};
+};
+
+enum class TabIconSource : std::uint8_t {
+    fallback,
+    rgba8,
+};
+
+// Immutable catalogue data owned by the host after provider registration.
+// The RGBA image, when present, is always an exact API 1.3 32x32 wire image.
+// Native rendering conversions remain outside the public ABI.
+struct TabIconSpec {
+    TabIconSource source{TabIconSource::fallback};
+    std::vector<std::uint8_t> rgba8_pixels{};
+};
+
+struct TabMetadata {
+    std::string provider_id{};
+    std::string tab_id{};
+    std::int32_t preferred_order{};
+    std::optional<std::int32_t> player_order{};
+    std::int32_t effective_order{};
+    TabIconSpec icon{};
 };
 
 using ActionCallback = void (*)(void* user_data) noexcept;
@@ -254,6 +277,9 @@ public:
     [[nodiscard]] const PagePresentationSpec& presentation() const noexcept {
         return presentation_;
     }
+    [[nodiscard]] const std::optional<TabMetadata>& tab_metadata() const noexcept {
+        return tab_metadata_;
+    }
     [[nodiscard]] std::size_t row_count() const noexcept { return rows_.size(); }
 
 private:
@@ -294,6 +320,7 @@ private:
     std::wstring title_{};
     std::wstring help_{};
     PagePresentationSpec presentation_{};
+    std::optional<TabMetadata> tab_metadata_{};
     std::vector<RowDefinition> rows_{};
 };
 
@@ -370,7 +397,10 @@ public:
     [[nodiscard]] const Page* find_builtin_page(
         detail::BuiltinPage page) const noexcept;
 
-    Page& add_tab(std::wstring title, std::wstring help = {});
+    Page& add_tab(std::wstring title);
+    Page& add_tab(
+        TabMetadata metadata,
+        std::wstring title);
 
     InputBindingSection& add_input_binding_section(
         std::string provider_id,

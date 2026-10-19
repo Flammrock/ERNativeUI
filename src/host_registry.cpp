@@ -18,7 +18,7 @@ namespace erui::host {
 namespace {
 
 constexpr std::size_t kMaxProviders = 256;
-constexpr std::size_t kMaxPagesPerProvider = 256;
+constexpr std::size_t kMaxPagesPerProvider = 4096;
 constexpr std::size_t kMaxRowsPerProvider = 4096;
 constexpr std::size_t kMaxBindingSections = 4096;
 constexpr std::size_t kMaxBindingSectionsPerProvider = 4096;
@@ -26,6 +26,10 @@ constexpr std::size_t kMaxBindingsPerProvider = 4096;
 constexpr std::size_t kMaxBindings = 4096;
 constexpr std::size_t kMaxIdentifierBytes = 255;
 constexpr std::size_t kMaxTextUnits = 4096;
+
+static_assert(ERUI_CUSTOM_TAB_MAX_COUNT == 1024u);
+static_assert(ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS == 95u);
+static_assert(ERUI_TAB_ICON_RGBA8_BYTE_COUNT == 4096u);
 
 static_assert(ERUI_BUILTIN_PAGE_GAME_OPTIONS ==
     static_cast<ERUI_BuiltinPage>(
@@ -516,6 +520,24 @@ void Registry::set_host_locale(erui::MenuLocalization pagination) {
     pagination_locale_ = std::move(pagination);
 }
 
+void Registry::set_tab_configuration(
+    erui::detail::TabConfiguration configuration) {
+    std::lock_guard lock(mutex_);
+    if (frozen_) {
+        throw std::logic_error(
+            "tab configuration must be set before registration freezes");
+    }
+    tab_configuration_ = std::move(configuration);
+    tab_diagnostics_report_ = {};
+    tab_diagnostics_report_.settings = tab_configuration_.settings;
+}
+
+erui::detail::TabDiagnosticsReport
+Registry::tab_diagnostics_report() const {
+    std::lock_guard lock(mutex_);
+    return tab_diagnostics_report_;
+}
+
 Registry& registry() noexcept {
     static Registry instance;
     return instance;
@@ -527,6 +549,18 @@ void set_api_state(ApiState state) noexcept {
 
 ApiState api_state() noexcept {
     return g_api_state.load(std::memory_order_acquire);
+}
+
+bool Registry::enable_custom_tabs_backend() noexcept {
+    std::lock_guard lock(mutex_);
+    if (open_ || frozen_) return false;
+    custom_tabs_backend_available_ = true;
+    return true;
+}
+
+bool Registry::custom_tabs_backend_available() const noexcept {
+    std::lock_guard lock(mutex_);
+    return custom_tabs_backend_available_;
 }
 
 void Registry::open_registration() noexcept {
@@ -655,7 +689,8 @@ ERUI_Result Registry::register_provider(
             ERUI_FIELD_END(ERUI_ProviderDesc, display_name)) ||
         (negotiated_api_version != ERUI_API_VERSION_1_0 &&
             negotiated_api_version != ERUI_API_VERSION_1_1 &&
-            negotiated_api_version != ERUI_API_VERSION_1_2) ||
+            negotiated_api_version != ERUI_API_VERSION_1_2 &&
+            negotiated_api_version != ERUI_API_VERSION_1_3) ||
         description->api_version != negotiated_api_version ||
         description->flags != 0 || !description->owner_module ||
         !valid_view(description->provider_id) ||
@@ -693,6 +728,113 @@ ERUI_Result Registry::register_provider(
         if (!inserted) return ERUI_INTERNAL_ERROR;
         *out_provider = handle;
         *out_root_page = root_handle;
+        note_activity_locked();
+        return ERUI_OK;
+    } catch (const std::bad_alloc&) {
+        return ERUI_OUT_OF_MEMORY;
+    } catch (...) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+}
+
+ERUI_Result Registry::add_tab(
+    ERUI_ProviderHandle provider_handle,
+    const ERUI_TabDesc* description,
+    ERUI_PageHandle* out_page) noexcept {
+    // Availability- and version-gate before touching any API 1.3-only
+    // pointer. This matters even though ordinary clients call add_tab only
+    // when ERUI_CAP_CUSTOM_TABS is present: it keeps copied function pointers
+    // safe and makes a table negotiated without the capability fail closed.
+    {
+        std::lock_guard lock(mutex_);
+        if (!custom_tabs_backend_available_) return ERUI_NOT_SUPPORTED;
+        const auto provider_it = providers_.find(provider_handle);
+        if (provider_it == providers_.end()) return ERUI_INVALID_HANDLE;
+        if (provider_it->second->api_version < ERUI_API_VERSION_1_3) {
+            return ERUI_NOT_SUPPORTED;
+        }
+    }
+
+    if (!out_page) return ERUI_INVALID_ARGUMENT;
+    *out_page = ERUI_INVALID_PAGE;
+    if (!description || !field_available(description->size,
+            ERUI_FIELD_END(ERUI_TabDesc, reserved)) ||
+        description->flags != 0 || description->reserved0 != 0 ||
+        description->reserved[0] != 0 ||
+        description->reserved[1] != 0 ||
+        !valid_machine_identifier(description->tab_id) ||
+        !valid_view(description->title) ||
+        description->title.length == 0 ||
+        description->title.length >
+            ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    const ERUI_TabIconDesc* const public_icon = description->icon;
+    if (public_icon &&
+        (!field_available(public_icon->size,
+             ERUI_FIELD_END(ERUI_TabIconDesc, reserved)) ||
+         public_icon->flags != 0 ||
+         public_icon->format != ERUI_TAB_ICON_FORMAT_RGBA8 ||
+         public_icon->byte_count != ERUI_TAB_ICON_RGBA8_BYTE_COUNT ||
+         !public_icon->pixels || public_icon->reserved[0] != 0 ||
+         public_icon->reserved[1] != 0)) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    try {
+        std::string tab_id = copy_string(description->tab_id);
+        std::wstring title = copy_utf16(description->title, false);
+        erui::TabIconSpec icon{};
+        if (public_icon) {
+            icon.source = erui::TabIconSource::rgba8;
+            icon.rgba8_pixels.assign(
+                public_icon->pixels,
+                public_icon->pixels + public_icon->byte_count);
+        }
+
+        std::lock_guard lock(mutex_);
+        if (!custom_tabs_backend_available_) return ERUI_NOT_SUPPORTED;
+        if (!open_) return ERUI_REGISTRATION_CLOSED;
+        const auto provider_it = providers_.find(provider_handle);
+        if (provider_it == providers_.end()) return ERUI_INVALID_HANDLE;
+        Provider& provider = *provider_it->second;
+        if (provider.api_version < ERUI_API_VERSION_1_3) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if (provider.committed) return ERUI_ALREADY_COMMITTED;
+        if (provider.tab_id_lookup.find(tab_id) !=
+            provider.tab_id_lookup.end()) {
+            return ERUI_DUPLICATE_TAB_ID;
+        }
+
+        std::size_t committed_tabs = 0;
+        for (const auto& item : providers_) {
+            if (item.second->committed) {
+                committed_tabs += item.second->tab_id_lookup.size();
+            }
+        }
+        if (committed_tabs + provider.tab_id_lookup.size() >=
+            ERUI_CUSTOM_TAB_MAX_COUNT) {
+            return ERUI_TAB_LIMIT_REACHED;
+        }
+
+        Page& page = create_page_locked(provider, std::move(title), {});
+        page.custom_tab = true;
+        page.tab_id = std::move(tab_id);
+        page.preferred_tab_order = description->preferred_order;
+        page.tab_icon = std::move(icon);
+        try {
+            if (!provider.tab_id_lookup.emplace(page.tab_id, &page).second) {
+                throw std::logic_error("duplicate custom-tab ID");
+            }
+        } catch (...) {
+            provider.page_lookup.erase(page.handle);
+            provider.pages.pop_back();
+            throw;
+        }
+
+        *out_page = page.handle;
         note_activity_locked();
         return ERUI_OK;
     } catch (const std::bad_alloc&) {
@@ -2028,6 +2170,11 @@ ERUI_Result Registry::set_page_presentation(
         if (erui::detail::valid_builtin_page(page->builtin_page)) {
             return ERUI_INVALID_ARGUMENT;
         }
+        if (page->custom_tab && !page_title.empty() &&
+            page_title.size() >
+                ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS) {
+            return ERUI_INVALID_ARGUMENT;
+        }
         page->menu_title = std::move(menu_title);
         page->page_title = std::move(page_title);
         page->title_formatter = description->formatter;
@@ -2048,6 +2195,18 @@ ERUI_Result Registry::commit_provider(ERUI_ProviderHandle handle) noexcept {
     if (found == providers_.end()) return ERUI_INVALID_HANDLE;
     Provider& provider = *found->second;
     if (provider.committed) return ERUI_ALREADY_COMMITTED;
+
+    std::size_t committed_custom_tabs = 0;
+    for (const auto& item : providers_) {
+        if (item.second->committed) {
+            committed_custom_tabs += item.second->tab_id_lookup.size();
+        }
+    }
+    if (provider.tab_id_lookup.size() > ERUI_CUSTOM_TAB_MAX_COUNT ||
+        committed_custom_tabs >
+            ERUI_CUSTOM_TAB_MAX_COUNT - provider.tab_id_lookup.size()) {
+        return ERUI_TAB_LIMIT_REACHED;
+    }
 
     for (const auto& row_record : provider.rows) {
         const Row& row = *row_record;
@@ -2107,9 +2266,10 @@ ERUI_Result Registry::commit_provider(ERUI_ProviderHandle handle) noexcept {
     ++generation_;
     note_activity_locked();
     erui::detail::logf(erui::LogLevel::info,
-        "Provider committed: id=%s priority=%d pages=%zu rows=%zu bindingSections=%zu bindings=%zu generation=%llu",
+        "Provider committed: id=%s priority=%d pages=%zu rows=%zu tabs=%zu bindingSections=%zu bindings=%zu generation=%llu",
         provider.id.c_str(), provider.priority, provider.pages.size(),
-        provider.rows.size(), provider.binding_sections.size(),
+        provider.rows.size(), provider.tab_id_lookup.size(),
+        provider.binding_sections.size(),
         provider.bindings.size(),
         static_cast<unsigned long long>(generation_));
     return ERUI_OK;
@@ -2777,6 +2937,101 @@ std::unique_ptr<erui::Menu> Registry::freeze_and_build_locked() {
             append_page_locked(*provider, *source->second, *destination);
         }
     }
+
+    struct RegisteredTabRef {
+        const Provider* provider{};
+        const Page* page{};
+    };
+    std::vector<RegisteredTabRef> registered_tabs{};
+    std::vector<erui::detail::TabOrderCandidate> tab_candidates{};
+    for (const Provider* provider : ordered) {
+        for (const auto& page_record : provider->pages) {
+            const Page& page = *page_record;
+            if (!page.custom_tab) continue;
+            const std::size_t source_index = registered_tabs.size();
+            registered_tabs.push_back({provider, &page});
+            tab_candidates.push_back({
+                .provider_id = provider->id,
+                .tab_id = page.tab_id,
+                .preferred_order = page.preferred_tab_order,
+                .source_index = source_index,
+            });
+        }
+    }
+
+    const erui::detail::TabOrderResolution tab_order =
+        erui::detail::resolve_tab_order(tab_candidates, tab_configuration_);
+    tab_diagnostics_report_ = erui::detail::make_tab_diagnostics_report(
+        tab_configuration_, tab_order);
+    if (!tab_order.complete ||
+        tab_order.ordered_tabs.size() != registered_tabs.size()) {
+        throw std::logic_error(
+            "custom-tab catalogue failed deterministic order validation");
+    }
+    for (const erui::detail::ResolvedTabOrderEntry& ordered_tab :
+         tab_order.ordered_tabs) {
+        if (ordered_tab.source_index >= registered_tabs.size()) {
+            throw std::logic_error("custom-tab order source is invalid");
+        }
+        const RegisteredTabRef& source =
+            registered_tabs[ordered_tab.source_index];
+        if (!source.provider || !source.page || !source.page->custom_tab ||
+            source.provider->id != ordered_tab.provider_id ||
+            source.page->tab_id != ordered_tab.tab_id) {
+            throw std::logic_error("custom-tab order identity mismatch");
+        }
+
+        erui::TabMetadata metadata{};
+        metadata.provider_id = ordered_tab.provider_id;
+        metadata.tab_id = ordered_tab.tab_id;
+        metadata.preferred_order = ordered_tab.preferred_order;
+        metadata.player_order = ordered_tab.player_override;
+        metadata.effective_order = ordered_tab.effective_order;
+        metadata.icon = source.page->tab_icon;
+        erui::Page& destination = menu->add_tab(
+            std::move(metadata), source.page->title);
+        append_page_locked(*source.provider, *source.page, destination);
+    }
+#if defined(ER_NATIVE_UI_TAB_CONTENT_RESEARCH_PROBE)
+    // Research-only bridge: API 1.2 has no public custom-tab entry point, so
+    // one dedicated client registers two disabled submenu transports. Copy
+    // their child pages into the already-existing internal tab model. This code is
+    // excluded from every normal host and must not become a compatibility
+    // contract for client mods.
+    constexpr const char* kProbeProviderId =
+        "ernativeui-tab-content-probe";
+    for (const Provider* provider : ordered) {
+        if (provider->id != kProbeProviderId) continue;
+        const auto root = provider->page_lookup.find(provider->root_page);
+        if (root == provider->page_lookup.end()) {
+            throw std::logic_error("tab content probe root page is missing");
+        }
+
+        std::size_t copied_tabs = 0;
+        for (const Row* row : root->second->rows) {
+            if (!row || row->kind != RowKind::submenu || row->enabled) {
+                continue;
+            }
+            const auto child = provider->page_lookup.find(row->child_page);
+            if (child == provider->page_lookup.end()) {
+                throw std::logic_error(
+                    "tab content probe child page is missing");
+            }
+            erui::Page& tab = menu->add_tab(child->second->title);
+            append_page_locked(*provider, *child->second, tab);
+            ++copied_tabs;
+        }
+        if (copied_tabs != 2) {
+            throw std::logic_error(
+                "tab content probe requires exactly two disabled transports");
+        }
+        erui::detail::logf(
+            erui::LogLevel::info,
+            "Research tab-content bridge copied %zu client-owned pages from provider=%s",
+            copied_tabs,
+            provider->id.c_str());
+    }
+#endif
     for (const Provider* provider : ordered) {
         for (const auto& section_record : provider->binding_sections) {
             const BindingSection& section = *section_record;

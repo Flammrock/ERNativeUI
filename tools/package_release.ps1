@@ -26,6 +26,20 @@ if ($LASTEXITCODE -ne 0) {
     throw 'CMake installation failed.'
 }
 
+# These were part of pre-runtime-transformation packages. Keep an explicit
+# release gate so a future install-rule change cannot silently reintroduce a
+# competing loose movie or the developer-only offline utility.
+$forbiddenPayload = @(
+    (Join-Path $installRoot 'bin\ERNativeUIGfxPatcher.exe'),
+    (Join-Path $installRoot 'bin\menu'),
+    (Join-Path $installRoot 'share\ERNativeUI\tools\gfx_patcher')
+)
+foreach ($forbiddenPath in $forbiddenPayload) {
+    if (Test-Path -LiteralPath $forbiddenPath) {
+        throw "Obsolete GFX payload was installed: $forbiddenPath"
+    }
+}
+
 $sdkArchive = Join-Path $releaseRoot "ERNativeUI-$Version-windows-x64.zip"
 Compress-Archive -LiteralPath $installRoot -DestinationPath $sdkArchive -CompressionLevel Optimal
 
@@ -36,7 +50,6 @@ if ($IncludeNexus) {
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\ERNativeUI.dll') -Destination $nexusRoot
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\ERNativeUI.ini') -Destination $nexusRoot
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\locales') -Destination $nexusRoot -Recurse
-    Copy-Item -LiteralPath (Join-Path $installRoot 'bin\menu') -Destination $nexusRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $installRoot 'bin\examples') -Destination $nexusRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\NEXUS_README.md') -Destination (Join-Path $nexusRoot 'README.md')
     Copy-Item -LiteralPath (Join-Path $installRoot 'share\ERNativeUI\LICENSE.txt') -Destination $nexusRoot

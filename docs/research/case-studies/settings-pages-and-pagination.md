@@ -83,7 +83,7 @@ provider destinations.
 `OptionSettingDialog` family. **Rejected:** every visible Configuration tab
 can therefore be treated as the same row page.
 
-## Live capacity instead of parsing a loose GFX
+## Live capacity remains authoritative after GFX completion
 
 The first implementation parsed a loose `02_040_optionsetting.gfx` at host
 startup. A controlled comparison then changed only the movie's number of row
@@ -121,9 +121,11 @@ already occupied all seven authored slots. The materializer hook was correct,
 but no provider row could appear. Expanding its panel to 13 slots made the
 unchanged probe visible and interactive.
 
-**Confirmed:** the DLL can obtain capacity from live memory and does not need
-to locate or parse a GFX file. **Rejected:** absence of a row on a full panel
-proves that its hook or constructor is wrong.
+**Confirmed:** pagination obtains capacity from the constructed native page;
+it does not infer capacity from the structural transformation result. Current
+production separately parses and completes the effective settings GFX at the
+validated file-opening seam before that page exists. **Rejected:** absence of
+a row on a full panel proves that its hook or constructor is wrong.
 
 ### Root planning when an earlier hook adds a row
 
@@ -157,10 +159,11 @@ The important boundary cases are:
 | Patched 13-row Game Options + one earlier compatible row | 5 | 8 | 7 provider rows + Next |
 
 "Overflowing" means that more logical provider rows remain than can fit in
-the first slice; when all content fits, no Next row is reserved. The table's
-new cooperative cases were live-validated on 2.7.0.0 and 2.7.1.0, with and
-without Solid Uncapper 2.3, and with and without the optional
-`02_040_optionsetting.gfx`.
+the first slice; when all content fits, no Next row is reserved. The table
+records the historical capacity experiment. Its cooperative cases were
+live-validated on 2.7.0.0 and 2.7.1.0, with and without Solid Uncapper 2.3.
+Current production completes recognized effective settings GFX in memory
+before the same live-capacity measurement.
 
 ## Logical pagination
 
@@ -291,13 +294,15 @@ Current production resolution is in
 in [`src/pagination.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/pagination.cpp), and route validation in
 [`src/submenu_navigation.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/submenu_navigation.cpp).
 
-## What this does not prove
+## What this evidence did not prove by itself
 
 Appending rows to existing panels does not prove that ERNativeUI can safely
 create a new top-level tab. The stock top dialog owns a fixed native category
 vector, separate GFX tab placements, a selection controller, cached panel
 factories, and paired teardown. Their complete record/icon/factory ownership
-and a scalable tab presentation remain future research targets.
+and a scalable tab presentation required a separate investigation. That later
+work is recorded in [Native custom Configuration tabs](custom-tabs.md); it
+does not retroactively turn ordinary row injection into proof of tab safety.
 
 Likewise, these settings-page results do not establish a universal constructor
 for Site of Grace pages or arbitrary game page families. Each family needs its

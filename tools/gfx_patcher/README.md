@@ -1,16 +1,39 @@
-# ERNativeUI GFX patcher internals
+# ERNativeUI developer GFX patcher internals
 
-`ERNativeUIGfxPatcher` performs optional, offline transformations of Elden
+`ERNativeUIGfxPatcher` is a source-built developer utility for applying and
+inspecting ERNativeUI's validated transformations offline. It reads Elden
 Ring's `menu/win/02_040_optionsetting.gfx` and
-`menu/win/02_042_pc_graphicsetting.gfx`. `ERNativeUI.dll` does not parse,
-load, or modify GFX files at runtime.
+`menu/win/02_042_pc_graphicsetting.gfx`, then writes a separate output file;
+the input is never modified. The utility and its output are not installed in
+ERNativeUI's public binary packages.
+
+Production `ERNativeUI.dll` uses the same structural transformer at the
+validated Scaleform file-opening seam. It transforms compatible bytes in
+memory before Scaleform consumes them, including compatible GFX already
+modified by another mod. It does not replace the file on disk. Unknown or
+conflicting structures fail closed and retain the bytes supplied by the game
+or mod loader.
 
 For `02_040`, the patcher expands `WindowList.ControllSetting` to 6–13 visual
 rows, expands `WindowList.CameraSetting` from its native 7 rows to as many as
 13, and adds the missing left-label field to their shared button widget. For
-either movie, it can optionally add the character-name TextInput presentation
-and a standalone character-creation ColorPicker widget. It writes a separate
-output file; the input is never modified.
+either movie, it can add the character-name TextInput presentation and a
+standalone character-creation ColorPicker widget.
+
+## Production runtime policy
+
+The host calls the semantic transformer directly with a fixed completion
+policy. In `02_040`, Game, Camera, Display, Sound, Keyboard/Mouse, and Graphics
+are completed to 13 placements. Network is completed to 10 because its native
+`UgcRestricted` warning occupies the lower region that rows 11 through 13
+would overlap. Controller Settings and Brightness use specialized templates
+and remain unchanged. In `02_042`, the native 15-row capacity is retained
+while the TextInput and ColorPicker presentations are completed.
+
+The offline command-line row switches intentionally expose only the original
+Game and Camera reproduction workflow. Production coverage for every ordinary
+panel is exercised through `ERNativeUI.SettingsGfxTransformer` and
+`ERNativeUI.SettingsGfxRuntime`.
 
 `ControllSetting` is Elden Ring's exact internal instance name for the visible
 **Game Options** root. It must remain unchanged in binary paths despite its
@@ -43,7 +66,7 @@ generic item character
 
 The original Camera Options panel authors exactly seven slots and uses all
 seven on the tested game configuration. It therefore has no spare native
-slot. The optional patch adds `Item_7_0` through `Item_12_0` at the same
+slot. The transformation adds `Item_7_0` through `Item_12_0` at the same
 1,000-twip (50-pixel) spacing, depths, transforms, and shared generic-row
 character already validated by the 13-row Game Options layout. Both panels
 start at Y `-4800`, so thirteen rows end at Y `7200`, the live-validated visual
@@ -256,14 +279,16 @@ patches it already contains:
 The report includes the detected host, visual row counts, TextInput
 presentation, standalone ColorPicker presence, and relevant sprite IDs.
 
-## Reproduce the two bundled GFX files
+## Reproduce the two checked-in reference fixtures
 
-The committed files in `assets/menu/win` are generated outputs, not suitable
-source originals. First extract fresh, unmodified copies of both movies from
-the Elden Ring game version being targeted and keep them outside
-`assets/menu/win`. The following PowerShell commands are the canonical recipe
-for the currently bundled assets. Run them from the repository root and change
-only `$OriginalMenu` to the directory containing the extracted originals:
+The committed files in `assets/menu/win` are generated reference fixtures, not
+suitable source originals and not release payloads. They provide stable,
+real-asset inputs for parser, transformer, runtime-policy, and compatibility
+tests. First extract fresh, unmodified copies of both movies from the Elden
+Ring game version being targeted and keep them outside `assets/menu/win`.
+The following PowerShell commands are the canonical fixture recipe. Run them
+from the repository root and change only `$OriginalMenu` to the directory
+containing the extracted originals:
 
 ```powershell
 $Patcher = ".\build\preset-release\Release\ERNativeUIGfxPatcher.exe"
@@ -288,7 +313,7 @@ $OriginalMenu = "C:\path\to\extracted\menu\win"
 
 These commands produce the repository's intended presentation:
 
-| Bundled output | Result |
+| Checked-in fixture | Result |
 |---|---|
 | `assets/menu/win/02_040_optionsetting.gfx` | 13 Game Options rows, 13 Camera Options rows, repaired Button labels, character-name TextInput, and standalone ColorPicker. |
 | `assets/menu/win/02_042_pc_graphicsetting.gfx` | Existing Advanced Settings row capacity, character-name TextInput, and standalone ColorPicker. |
@@ -306,15 +331,17 @@ ctest --test-dir .\build\preset-release `
   --output-on-failure
 ```
 
-If the assets were regenerated after an earlier build, run `build.bat` again
-to refresh both the staged runtime and `dist/ERNativeUI`.
+If the fixtures were regenerated after an earlier build, run `build.bat` again
+to rebuild and execute every structural and runtime-policy test against them.
 
-## Where CMake uses the bundled files
+## Where CMake uses the reference fixtures
 
 The standard CMake build deliberately does **not** generate the GFX files.
 Generation requires game-owned source movies that are not project build
-inputs. The repository therefore treats the two committed files under
-`assets/menu/win` as the source of truth for staging, testing, and packaging.
+inputs. The repository retains the two committed files under
+`assets/menu/win` strictly as reference inputs for tests and developer
+inspection. Runtime staging, CMake installation, and release packaging do not
+copy them.
 
 All related rules are in the [root CMakeLists.txt](../../CMakeLists.txt):
 
@@ -322,12 +349,12 @@ All related rules are in the [root CMakeLists.txt](../../CMakeLists.txt):
 |---|---|
 | `if(ERNATIVEUI_BUILD_GFX_PATCHER)` / target `ERNativeUIGfxPatcher` | Builds `tools/gfx_patcher/main.cpp` and links the transformation core. Change this only when the patcher target itself changes. |
 | Target `ERNativeUIGfxPatcherTests` / test `ERNativeUI.GfxPatcher` | Passes both committed asset paths to `tests/gfx_patcher_test.cpp` and validates their expected structure. Update this if asset names or test inputs change. |
-| Target `ERNativeUIStageRuntime` | Copies both committed assets into `build/preset-release/deploy/<Configuration>/menu/win`. Update its two `copy_if_different` commands if paths or filenames change. |
-| `install(FILES assets/menu/win/...)` | Copies both assets into `dist/ERNativeUI/bin/menu/win` during `cmake --install`. Update this list if a bundled GFX file is added, removed, or renamed. |
+| Targets `ERNativeUIGfxDocumentTests`, `ERNativeUISettingsGfxTransformerTests`, and `ERNativeUISettingsGfxRuntimeTests` | Pass the same fixtures to the production parser and transformer tests. Update their compile definitions if fixture paths change. |
+| Target `ERNativeUIStageRuntime` and the install rules | Deliberately omit loose GFX. Staging also removes the two exact legacy ERNativeUI movie files left by an earlier build while preserving unrelated menu overrides. |
 
 For an ordinary game-version refresh, keep the filenames unchanged and run the
 two reproduction commands above; no CMake edit is needed. A CMake change is
-needed only when the asset set or its paths change.
+needed only when the test-fixture set or its paths change.
 
 ## Install custom output
 
@@ -343,8 +370,9 @@ The input and output must be different paths. Use files extracted from the
 game version being targeted, and never patch Elden Ring's installed archive
 in place.
 
-The 13-row asset is optional. ERNativeUI still supports native panel
-capacities without it. Game Options retains its smaller native capacity, while
-Camera Options has no spare slot on the tested configuration and cannot accept
-an extra row until its GFX panel is expanded. Action-row labels in either panel
-use the shared `Text_1/Text` field described above.
+No loose output is required for ERNativeUI itself. At runtime the host applies
+missing validated transformations to the final compatible movie selected by
+the game and mod loader. Already-complete structures remain unchanged, so a
+separate mod may still supply a compatible modified movie. If that movie has
+unknown or conflicting structure, ERNativeUI leaves its bytes unchanged and
+reports the local transformation failure instead of guessing.

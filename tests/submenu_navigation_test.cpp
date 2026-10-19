@@ -95,6 +95,22 @@ int main() {
     ERUI_TEST_CHECK(!navigation.begin_request(
         builtin_main, 5100, builtin_child));
 
+    // A custom tab's live first page is navigation-only, while each overflow
+    // continuation is a normal native subpage with the tab panel as parent.
+    const PageRoute tab_continuation =
+        PageRoute::tab_continuation(2, 2, 1);
+    const PageRoute tab_main = PageRoute::tab_main(2, 2);
+    auto* tab_parent = reinterpret_cast<void*>(0x8000);
+    auto* tab_child = reinterpret_cast<void*>(0xA000);
+    ERUI_TEST_CHECK(navigation.begin_request(
+        tab_continuation, 5200, tab_parent));
+    resolution = navigation.resolve(tab_child, 5210, 2000);
+    ERUI_TEST_CHECK(resolution.kind == SubmenuResolutionKind::pending_request);
+    ERUI_TEST_CHECK(resolution.route == tab_continuation);
+    ERUI_TEST_CHECK(navigation.native_page(tab_continuation) == tab_child);
+    ERUI_TEST_CHECK(navigation.parent_page(tab_child) == tab_parent);
+    ERUI_TEST_CHECK(!navigation.begin_request(tab_main, 5300, tab_child));
+
     navigation.reset();
     ERUI_TEST_CHECK(navigation.page_count() == 0);
     return 0;

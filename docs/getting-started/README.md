@@ -37,12 +37,12 @@ directory or copy them into the project.
 
 - Start a real mod from the fully commented
   [client-mod template](../../examples/template/README.md).
-- Browse the [mod-author guides](../guides/README.md) for pages, controls,
-  dialogs, localization, bindings, and storage.
+- Browse the [mod-author guides](../guides/README.md) for custom tabs, pages,
+  controls, dialogs, localization, bindings, and storage.
 - Use [common errors](common-errors.md) if the DLL builds but no menu appears.
 - Read [Versioning](../versioning.md) before declaring the SDK and runtime
   requirement for a release.
 
-This documentation describes public API 1.2. API versions and ERNativeUI
-release versions are independent, even though the first release containing
-API 1.2 is ERNativeUI 1.2.0.
+This documentation describes public API 1.3. API versions and ERNativeUI
+release versions are independent; use an SDK/host package that explicitly
+states it contains the API required by the client.

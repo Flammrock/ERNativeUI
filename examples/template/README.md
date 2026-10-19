@@ -109,7 +109,7 @@ cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=C:\sdk\ERNativeUI
 cmake --build build --config Release
 ```
 
-`find_package(ERNativeUI 1.1.0 CONFIG REQUIRED)` supplies `ERNativeUI::SDK`, which
+`find_package(ERNativeUI CONFIG REQUIRED)` supplies `ERNativeUI::SDK`, which
 contains headers and a C++17 compile requirement only. A MinGW-w64 client may
 use the same installed package; the host itself remains an MSVC-ABI binary.
 
@@ -137,9 +137,9 @@ When Solid Uncapper is installed, place it before the host as described in the
 - The host copies all text/options and owns toggle, slider, inline-choice, and
   popup-choice bytes, TextInput strings, and ColorPicker RGB values. Choice
   indices and callbacks are always zero-based.
-- The current C++ wrapper requests the exact API 1.2 table. A host exposing
-  only API 1.0 or 1.1 is rejected with a clear connection error instead of silently
-  reducing the features available to a newly built client.
+- The current C++ wrapper requests the exact API 1.3 table. A host exposing
+  only API 1.0, 1.1, or 1.2 is rejected with a clear connection error instead
+  of silently reducing the features available to a newly built client.
 - Gate TextInput's builder with
   `menu.supports(erui::Capability::text_input)` to document the row's feature
   dependency at its call site.
@@ -208,5 +208,5 @@ See the [documentation home](../../docs/README.md),
 [architecture overview](../../docs/how-it-works.md) before publishing a client.
 [Versioning](../../docs/versioning.md) explains why the package requirement and
 runtime API negotiation are independent. The
-[presentation and optional GFX guide](../../docs/guides/presentation-and-gfx.md)
+[runtime GFX completion and presentation guide](../../docs/guides/presentation-and-gfx.md)
 explains the default `Title (n/t)` behavior and optional formatter contract.

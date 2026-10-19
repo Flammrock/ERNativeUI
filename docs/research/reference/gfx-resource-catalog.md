@@ -10,8 +10,10 @@ The safe order of preference is:
    object already supplies presentation, input, focus, update, and teardown.
 2. If the movie is already live, resolve a validated named object and perform
    only an operation whose value ownership is understood.
-3. Apply an offline structural patch only to a narrowly validated movie while
-   preserving its definitions, dependencies, and binding names.
+3. Structurally complete a narrowly validated movie while preserving its
+   definitions, dependencies, and binding names. Production does this only at
+   its proved file-opening seam; the offline tool remains useful for inspection
+   and reproducible fixtures.
 4. Treat opening another complete movie as research until its descriptor,
    player registration, layer, input route, and teardown have all been
    observed.
@@ -184,8 +186,8 @@ reference is separated so it cannot be mistaken for a loader callsite.
 
 | Logical stem | String RVA | Non-registration reference clusters | Registration reference | Evidence and reuse value |
 |---|---:|---|---:|---|
-| `02_040_OptionSetting` | `0x2AC11E8` | `FUN_140809660`: `0x8096CE`, `0x8096D5` | `0xAF8F4` | **Confirmed movie and live use.** It is the outer Configuration movie used by native settings rows. The optional patch extends row capacity and supplies repaired action-label, TextInput, and ColorPicker presentation. |
-| `02_042_PC_GraphicSetting` | `0x2AC12D8` | `FUN_140808860`: `0x8088E9`, `0x8088F0` | `0xAF91E` | **Confirmed movie and live use.** It is the Advanced Settings-style physical page used by provider subpages and continuation slices. Its optional TextInput and ColorPicker presentation must be patched independently from `02_040`. |
+| `02_040_OptionSetting` | `0x2AC11E8` | `FUN_140809660`: `0x8096CE`, `0x8096D5` | `0xAF8F4` | **Confirmed movie and live use.** It is the outer Configuration movie used by native settings rows. Production runtime completion validates the final loaded bytes, extends supported ordinary panels where needed, repairs the action label, and supplies TextInput and ColorPicker presentation before Scaleform parses the movie. |
+| `02_042_PC_GraphicSetting` | `0x2AC12D8` | `FUN_140808860`: `0x8088E9`, `0x8088F0` | `0xAF91E` | **Confirmed movie and live use.** It is the Advanced Settings-style physical page used by provider subpages and continuation slices. Its TextInput and ColorPicker presentation is completed independently because definitions are movie-local. |
 | `02_044_PC_TextSelect` | `0x2B14850` | `FUN_14094FDB0`: `0x94FF46`, `0x94FF4D`; `FUN_14094EEA0`: `0x94EF31`, `0x94EF38` | `0xAF92C` | **Lead only.** Useful for studying PC text/list selection; the name and references do not prove a reusable constructor. |
 | `02_160_KeyConfiguration` | `0x2AC1348` | `FUN_140808510`: `0x808615`, `0x80861C`; `FUN_140808770`: `0x8087EC`, `0x8087F3` | `0xAF948` | **Lead only for direct movie reuse.** ERNativeUI's confirmed input-binding integration reaches the native screen and row model rather than opening this stem directly. |
 | `02_990_TextInput` | `0x2AC5A78` | `FUN_14081CFD0`: `0x81D0BB`, `0x81D0C2` | `0xAF68F` | **Confirmed active editor and live use.** The character-name activation route selects this 400-pixel editor through `0x81D610 -> 0x81CFD0`; controlled tests established its 16-character behavior. |
@@ -230,14 +232,16 @@ runtime ActionScript construction. See the
 |---|---|
 | Native constructors | **Production.** Existing settings and dialog constructors select game presentation while retaining native focus, callbacks, sound, and teardown. |
 | Named object in an existing movie | **Production only for validated operations.** The host resolves a path through `0x74B140`, owns the complete `0x60`-byte proxy, performs a known operation such as UTF-16 text assignment through `0x74AE50`, and destroys its embedded value through `0xD81590`. |
-| Offline extension of an inspected movie | **Supported for the patcher's validated transforms.** Definitions, depths, transforms, lengths, character IDs, imports, and idempotence are checked. Character IDs remain movie-local. |
+| In-memory extension of a loaded settings movie | **Production for the two exact validated paths.** The host calls the original file opener, validates and snapshots its `MemoryFile`, applies the structural transformer under strict byte budgets, reparses serialized output, retains the replacement, and restores or preserves the original view on failure. |
+| Offline extension of an inspected movie | **Developer tooling for the same validated transforms.** Definitions, depths, transforms, lengths, character IDs, imports, and idempotence are checked. Character IDs remain movie-local; outputs are not public-package payloads. |
 | Open a complete existing movie | **Research boundary.** `0xD78E10` and `0xD7A370` are high-level observation anchors, but a public route still needs descriptor invariants, layer/viewport policy, input/focus ownership, cache behavior, thread, failure, and deterministic close/release. |
 | Copy a sprite between movies | **Unsupported.** A sprite definition does not carry its transitive character definitions, class bindings, fonts, images, or native instance-name contract. |
 | Generic client-facing Scaleform API | **Unsupported.** The current bridge does not establish general `SetMember`, `Invoke`, `AttachMovie`, stage construction, or a safe persistent `GFx::Value` lifetime. |
 
-Public installation and transformation options are documented in
-[Presentation and optional GFX assets](../../guides/presentation-and-gfx.md)
-and the [GFX patcher README](../../../tools/gfx_patcher/README.md).
+Current runtime behavior and modified-GFX compatibility are documented in
+[Runtime GFX completion](../../guides/presentation-and-gfx.md). The
+[developer GFX patcher README](../../../tools/gfx_patcher/README.md) documents
+the source-built offline tool.
 
 ## Reproduce the catalog
 
@@ -361,12 +365,12 @@ is satisfied:
 - Publish derived facts, small analytical diagrams, hashes, RVAs, signatures,
   original tooling, and narrowly written interoperability documentation rather
   than proprietary asset dumps.
-- The optional modified `02_040_optionsetting.gfx` and
-  `02_042_pc_graphicsetting.gfx` are a deliberate existing distribution
-  decision documented in
-  [`THIRD_PARTY_NOTICES.txt`](../../../THIRD_PARTY_NOTICES.txt). That decision
-  does not authorize adding other extracted GFX, `font.swf`, TGA images, or a
-  complete asset catalog.
+- The checked-in transformed `02_040_optionsetting.gfx` and
+  `02_042_pc_graphicsetting.gfx` files are narrowly scoped reference fixtures
+  for structural regression tests and developer research. They are not
+  installed into runtime or SDK binary packages. Their presence does not
+  authorize adding other extracted GFX, `font.swf`, TGA images, or a complete
+  asset catalog.
 - When tooling needs original asset bytes, ask users to extract them from
   their lawfully owned game. Prefer a reproducible transform over distributing
   another unmodified movie.

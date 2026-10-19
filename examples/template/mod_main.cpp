@@ -341,7 +341,7 @@ DWORD WINAPI initialize_mod(void*) noexcept {
         advanced.set_presentation(
             L"My Mod - Advanced", L"Advanced Settings");
 
-        // The current wrapper negotiates API 1.2 explicitly. Capability checks
+        // The current wrapper negotiates API 1.3 explicitly. Capability checks
         // still make each optional row's dependency clear at its call site.
         if (menu.supports(erui::Capability::text_input)) {
             erui::TextInputOptions alias{};

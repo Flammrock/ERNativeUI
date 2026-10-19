@@ -24,6 +24,54 @@ option(ERNATIVEUI_BUILD_EXAMPLES "Build client-mod examples"
     ${_ernativeui_default_runtime})
 option(ERNATIVEUI_BUILD_GFX_PATCHER "Build the user-asset GFX patcher"
     ${PROJECT_IS_TOP_LEVEL})
+option(ERNATIVEUI_BUILD_TAB_RESEARCH_PROBE
+    "Build the temporary native Configuration-tab research probe" OFF)
+option(ERNATIVEUI_BUILD_TAB_DUPLICATE_RESEARCH_PROBE
+    "Build the temporary duplicate-category Configuration-tab probe" OFF)
+option(ERNATIVEUI_BUILD_TAB_PRESENTATION_RESEARCH_PROBE
+    "Build the temporary Configuration-tab presentation probe" OFF)
+option(ERNATIVEUI_BUILD_TAB_VIEWPORT_RESEARCH_PROBE
+    "Build the temporary Configuration-tab viewport probe" OFF)
+option(ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE
+    "Build the temporary client-owned Configuration-tab content probe" OFF)
+option(ERNATIVEUI_BUILD_GFX_LOAD_RESEARCH_PROBE
+    "Build the observation-only Scaleform GFX-load research probe" OFF)
+option(ERNATIVEUI_BUILD_TAB_CAPACITY_RESEARCH_PROBE
+    "Build the observation-only live Configuration-tab capacity probe" OFF)
+option(ERNATIVEUI_BUILD_TAB_SLOT_APPEND_RESEARCH_PROBE
+    "Build the isolated native Configuration-tab slot-append proof" OFF)
+option(ERNATIVEUI_ENABLE_TAB_SLOT_APPEND_RESEARCH_MUTATION
+    "Allow the isolated tab-slot probe to append native records up to the research target" OFF)
+option(ERNATIVEUI_BUILD_GFX_TAB_GROWTH_RESEARCH_HOST
+    "Build a host that requests the authored GFX tab-slot research target without changing the native tab count" OFF)
+set(ERNATIVEUI_TAB_SLOT_RESEARCH_TARGET "9" CACHE STRING
+    "Research-only Configuration tab-slot target (9 or 10)")
+set_property(CACHE ERNATIVEUI_TAB_SLOT_RESEARCH_TARGET PROPERTY STRINGS 9 10)
+if(NOT ERNATIVEUI_TAB_SLOT_RESEARCH_TARGET MATCHES "^(9|10)$")
+    message(FATAL_ERROR
+        "ERNATIVEUI_TAB_SLOT_RESEARCH_TARGET must be exactly 9 or 10; got "
+        "'${ERNATIVEUI_TAB_SLOT_RESEARCH_TARGET}'.")
+endif()
+if(ERNATIVEUI_BUILD_GFX_TAB_GROWTH_RESEARCH_HOST AND
+        NOT ERNATIVEUI_BUILD_HOST)
+    message(FATAL_ERROR
+        "ERNATIVEUI_BUILD_GFX_TAB_GROWTH_RESEARCH_HOST requires "
+        "ERNATIVEUI_BUILD_HOST=ON.")
+endif()
+if(ERNATIVEUI_ENABLE_TAB_SLOT_APPEND_RESEARCH_MUTATION AND
+        NOT ERNATIVEUI_BUILD_TAB_SLOT_APPEND_RESEARCH_PROBE)
+    message(FATAL_ERROR
+        "ERNATIVEUI_ENABLE_TAB_SLOT_APPEND_RESEARCH_MUTATION requires "
+        "ERNATIVEUI_BUILD_TAB_SLOT_APPEND_RESEARCH_PROBE=ON.")
+endif()
+if(ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE AND
+        (NOT ERNATIVEUI_BUILD_HOST OR
+         NOT ERNATIVEUI_BUILD_TAB_VIEWPORT_RESEARCH_PROBE))
+    message(FATAL_ERROR
+        "ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE requires both "
+        "ERNATIVEUI_BUILD_HOST=ON and "
+        "ERNATIVEUI_BUILD_TAB_VIEWPORT_RESEARCH_PROBE=ON.")
+endif()
 option(ERNATIVEUI_BUILD_TESTS
     "Build ERNativeUI's tests when consumed as a subproject" OFF)
 if(PROJECT_IS_TOP_LEVEL)
@@ -65,17 +113,68 @@ set_target_properties(ERNativeUISDK PROPERTIES EXPORT_NAME SDK)
 target_link_libraries(ERNativeUISDK INTERFACE ERNativeUI::CABI)
 target_compile_features(ERNativeUISDK INTERFACE cxx_std_17)
 
+# Generic, lossless GFX/SWF document model. This target intentionally has no
+# dependency on the game runtime or the Elden Ring-specific settings-movie
+# transformer, so its parser and edit invariants can be validated in isolation.
+set(_ernativeui_need_gfx_document OFF)
+if(ERNATIVEUI_BUILD_HOST OR ERNATIVEUI_BUILD_GFX_PATCHER OR
+        _ernativeui_enable_tests OR
+        ERNATIVEUI_BUILD_TAB_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_DUPLICATE_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_PRESENTATION_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_VIEWPORT_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_GFX_LOAD_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_CAPACITY_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_SLOT_APPEND_RESEARCH_PROBE)
+    set(_ernativeui_need_gfx_document ON)
+endif()
+
+if(_ernativeui_need_gfx_document)
+    add_library(ERNativeUIGfxDocument STATIC src/gfx/gfx_document.cpp)
+    add_library(ERNativeUI::GfxDocument ALIAS ERNativeUIGfxDocument)
+    target_include_directories(ERNativeUIGfxDocument PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_compile_features(ERNativeUIGfxDocument PUBLIC cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUIGfxDocument PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+
+    # Elden Ring-specific semantic transforms live above the generic document
+    # model. The runtime policy/cache remains platform-neutral and separately
+    # testable; only the small native OpenFile adapter lives in Core.
+    add_library(ERNativeUISettingsGfxTransformer STATIC
+        src/gfx/settings_gfx_transformer.cpp
+        src/gfx/settings_gfx_runtime.cpp)
+    add_library(ERNativeUI::SettingsGfxTransformer ALIAS
+        ERNativeUISettingsGfxTransformer)
+    target_include_directories(ERNativeUISettingsGfxTransformer PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(ERNativeUISettingsGfxTransformer PUBLIC
+        ERNativeUI::GfxDocument)
+    target_compile_features(ERNativeUISettingsGfxTransformer PUBLIC cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUISettingsGfxTransformer PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+
+endif()
+
 set(_ernativeui_need_gfx_patch OFF)
 if(ERNATIVEUI_BUILD_GFX_PATCHER OR _ernativeui_enable_tests)
     set(_ernativeui_need_gfx_patch ON)
 endif()
 
 if(_ernativeui_need_gfx_patch)
-    # Portable, asset-free GFX transformation core.
-    add_library(ERNativeUIGfxPatch STATIC tools/gfx_patcher/gfx_patch.cpp)
+    # Backward-compatible CLI facade over the production semantic transformer.
+    add_library(ERNativeUIGfxPatch STATIC
+        tools/gfx_patcher/gfx_patch.cpp)
     add_library(ERNativeUI::GfxPatch ALIAS ERNativeUIGfxPatch)
     target_include_directories(ERNativeUIGfxPatch PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tools/gfx_patcher>)
+    target_link_libraries(ERNativeUIGfxPatch PRIVATE
+        ERNativeUI::SettingsGfxTransformer)
     target_compile_features(ERNativeUIGfxPatch PUBLIC cxx_std_20)
     if(_ernativeui_msvc_abi)
         target_compile_options(ERNativeUIGfxPatch PRIVATE
@@ -107,11 +206,23 @@ if(ERNATIVEUI_BUILD_HOST AND NOT _ernativeui_msvc_abi)
 endif()
 
 set(_ernativeui_need_native_core OFF)
-if(WIN32 AND (ERNATIVEUI_BUILD_HOST OR _ernativeui_enable_tests))
+if(WIN32 AND (ERNATIVEUI_BUILD_HOST OR _ernativeui_enable_tests OR
+        ERNATIVEUI_BUILD_TAB_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_DUPLICATE_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_PRESENTATION_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_VIEWPORT_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_GFX_LOAD_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_CAPACITY_RESEARCH_PROBE OR
+        ERNATIVEUI_BUILD_TAB_SLOT_APPEND_RESEARCH_PROBE))
     set(_ernativeui_need_native_core ON)
 endif()
 
 if(_ernativeui_need_native_core)
+    set(_ernativeui_hooks_source src/hooks.cpp)
+    set(_ernativeui_registry_source src/host_registry.cpp)
+    set(_ernativeui_tab_viewport_probe_source
+        src/native_tabs.cpp)
     include(FetchContent)
     set(BUILD_SHARED_LIBS OFF)
     set(SAFETYHOOK_FETCH_ZYDIS ON CACHE BOOL "" FORCE)
@@ -128,19 +239,184 @@ if(_ernativeui_need_native_core)
         EXCLUDE_FROM_ALL)
     FetchContent_MakeAvailable(safetyhook minhook)
 
+    if(ERNATIVEUI_BUILD_GFX_LOAD_RESEARCH_PROBE)
+        if(NOT _ernativeui_msvc_abi)
+            message(FATAL_ERROR
+                "ERNativeUIGfxLoadProbe requires the MSVC-compatible "
+                "Windows research build.")
+        endif()
+        add_library(ERNativeUIGfxLoadProbe SHARED
+            tools/research/gfx_load_probe/gfx_load_probe.cpp)
+        target_link_libraries(ERNativeUIGfxLoadProbe PRIVATE
+            safetyhook::safetyhook)
+        target_compile_features(ERNativeUIGfxLoadProbe PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUIGfxLoadProbe PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUIGfxLoadProbe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUIGfxLoadProbe")
+        target_compile_options(ERNativeUIGfxLoadProbe PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+        target_link_options(ERNativeUIGfxLoadProbe PRIVATE /INCREMENTAL:NO)
+    endif()
+
+    if(ERNATIVEUI_BUILD_TAB_CAPACITY_RESEARCH_PROBE)
+        if(NOT _ernativeui_msvc_abi)
+            message(FATAL_ERROR
+                "ERNativeUITabCapacityProbe requires the MSVC-compatible "
+                "Windows research build.")
+        endif()
+        add_library(ERNativeUITabCapacityProbe SHARED
+            tools/research/tab_capacity_probe/tab_capacity_probe.cpp
+            src/module.cpp)
+        target_include_directories(ERNativeUITabCapacityProbe PRIVATE src)
+        target_link_libraries(ERNativeUITabCapacityProbe PRIVATE
+            safetyhook::safetyhook)
+        target_compile_features(ERNativeUITabCapacityProbe PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUITabCapacityProbe PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUITabCapacityProbe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUITabCapacityProbe")
+        target_compile_options(ERNativeUITabCapacityProbe PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+        target_link_options(ERNativeUITabCapacityProbe PRIVATE /INCREMENTAL:NO)
+    endif()
+
+    if(ERNATIVEUI_BUILD_TAB_SLOT_APPEND_RESEARCH_PROBE)
+        if(NOT _ernativeui_msvc_abi)
+            message(FATAL_ERROR
+                "ERNativeUITabSlotAppendProbe requires the MSVC-compatible "
+                "Windows research build.")
+        endif()
+        add_library(ERNativeUITabSlotAppendProbe SHARED
+            tools/research/tab_slot_append_probe/tab_slot_append_probe.cpp
+            src/module.cpp)
+        target_include_directories(ERNativeUITabSlotAppendProbe PRIVATE src)
+        target_link_libraries(ERNativeUITabSlotAppendProbe PRIVATE
+            safetyhook::safetyhook)
+        target_compile_features(ERNativeUITabSlotAppendProbe PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUITabSlotAppendProbe PRIVATE
+            "ER_NATIVE_UI_TAB_SLOT_RESEARCH_TARGET=${ERNATIVEUI_TAB_SLOT_RESEARCH_TARGET}"
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        if(ERNATIVEUI_ENABLE_TAB_SLOT_APPEND_RESEARCH_MUTATION)
+            target_compile_definitions(ERNativeUITabSlotAppendProbe PRIVATE
+                ER_NATIVE_UI_TAB_SLOT_APPEND_RESEARCH_MUTATION=1)
+        endif()
+        set_target_properties(ERNativeUITabSlotAppendProbe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUITabSlotAppendProbe")
+        target_compile_options(ERNativeUITabSlotAppendProbe PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+        target_link_options(ERNativeUITabSlotAppendProbe PRIVATE
+            /INCREMENTAL:NO)
+    endif()
+
+    if(ERNATIVEUI_BUILD_TAB_RESEARCH_PROBE)
+        add_library(ERNativeUITabProbe SHARED
+            tools/research/tab_probe/tab_probe.cpp)
+        target_link_libraries(ERNativeUITabProbe PRIVATE safetyhook::safetyhook)
+        target_compile_features(ERNativeUITabProbe PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUITabProbe PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUITabProbe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUITabProbe")
+        if(_ernativeui_msvc_abi)
+            target_compile_options(ERNativeUITabProbe PRIVATE
+                /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+            target_link_options(ERNativeUITabProbe PRIVATE /INCREMENTAL:NO)
+        endif()
+    endif()
+
+    if(ERNATIVEUI_BUILD_TAB_DUPLICATE_RESEARCH_PROBE)
+        if(NOT _ernativeui_msvc_abi)
+            message(FATAL_ERROR
+                "ERNativeUITabDuplicateProbe requires the MSVC-compatible "
+                "Windows research build.")
+        endif()
+        add_library(ERNativeUITabDuplicateProbe SHARED
+            tools/research/tab_probe/tab_duplicate_probe.cpp)
+        target_link_libraries(ERNativeUITabDuplicateProbe PRIVATE
+            safetyhook::safetyhook)
+        target_compile_features(ERNativeUITabDuplicateProbe PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUITabDuplicateProbe PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUITabDuplicateProbe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUITabDuplicateProbe")
+        if(_ernativeui_msvc_abi)
+            target_compile_options(ERNativeUITabDuplicateProbe PRIVATE
+                /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+            target_link_options(ERNativeUITabDuplicateProbe PRIVATE
+                /INCREMENTAL:NO)
+        endif()
+    endif()
+
+    if(ERNATIVEUI_BUILD_TAB_PRESENTATION_RESEARCH_PROBE)
+        if(NOT _ernativeui_msvc_abi)
+            message(FATAL_ERROR
+                "ERNativeUITabPresentationProbe requires the MSVC-compatible "
+                "Windows research build.")
+        endif()
+        add_library(ERNativeUITabPresentationProbe SHARED
+            tools/research/tab_probe/tab_presentation_probe.cpp)
+        target_link_libraries(ERNativeUITabPresentationProbe PRIVATE
+            safetyhook::safetyhook)
+        target_compile_features(ERNativeUITabPresentationProbe PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUITabPresentationProbe PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUITabPresentationProbe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUITabPresentationProbe")
+        target_compile_options(ERNativeUITabPresentationProbe PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+        target_link_options(ERNativeUITabPresentationProbe PRIVATE
+            /INCREMENTAL:NO)
+    endif()
+
+    if(ERNATIVEUI_BUILD_TAB_VIEWPORT_RESEARCH_PROBE)
+        if(NOT _ernativeui_msvc_abi)
+            message(FATAL_ERROR
+                "ERNativeUITabViewportProbe requires the MSVC-compatible "
+                "Windows research build.")
+        endif()
+        add_library(ERNativeUITabViewportProbe SHARED
+            ${_ernativeui_tab_viewport_probe_source}
+            src/native_tab_runtime_state.cpp
+            src/tab_viewport.cpp)
+        target_include_directories(ERNativeUITabViewportProbe PRIVATE src)
+        target_link_libraries(ERNativeUITabViewportProbe PRIVATE
+            safetyhook::safetyhook)
+        target_compile_features(ERNativeUITabViewportProbe PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUITabViewportProbe PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUITabViewportProbe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUITabViewportProbe")
+        target_compile_options(ERNativeUITabViewportProbe PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+        target_link_options(ERNativeUITabViewportProbe PRIVATE
+            /INCREMENTAL:NO)
+    endif()
+
     # Private native implementation. Client mods never link this target.
     add_library(ERNativeUICore STATIC
         src/addresses.cpp
         src/color_picker.cpp
         src/color_picker_state.cpp
-        src/hooks.cpp
+        ${_ernativeui_hooks_source}
         src/host_storage.cpp
         src/input_binding_model.cpp
         src/menu.cpp
         src/menu_compiler.cpp
         src/module.cpp
+        src/native_tab_catalogue.cpp
+        src/native_tab_runtime_state.cpp
+        src/native_tabs.cpp
         src/native_dialog.cpp
         src/native_input_bindings.cpp
+        src/native_gfx_loader.cpp
         src/native_menu.cpp
         src/native_popup_choice.cpp
         src/native_slider_presentation.cpp
@@ -152,17 +428,28 @@ if(_ernativeui_need_native_core)
         src/runtime_state.cpp
         src/storage_document.cpp
         src/submenu_navigation.cpp
+        src/tab_configuration.cpp
+        src/tab_viewport.cpp
         src/text_input_state.cpp
         src/text_registry.cpp)
     add_library(ERNativeUI::Core ALIAS ERNativeUICore)
     target_include_directories(ERNativeUICore PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(ERNativeUICore PRIVATE safetyhook::safetyhook minhook)
+    target_link_libraries(ERNativeUICore PRIVATE
+        ERNativeUI::SettingsGfxTransformer
+        safetyhook::safetyhook
+        minhook)
     target_compile_features(ERNativeUICore PUBLIC cxx_std_20)
     target_compile_definitions(ERNativeUICore PRIVATE
         ER_NATIVE_UI_BUILD_VERSION="${PROJECT_VERSION}"
+        ER_NATIVE_UI_CUSTOM_TABS_BACKEND=1
+        ER_NATIVE_UI_PRODUCTION_TABS=1
         WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+    if(ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE)
+        target_compile_definitions(ERNativeUICore PRIVATE
+            ER_NATIVE_UI_TAB_CONTENT_RESEARCH_PROBE=1)
+    endif()
     if(_ernativeui_msvc_abi)
         target_compile_options(ERNativeUICore PRIVATE
             /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus /wd4100)
@@ -173,7 +460,7 @@ if(_ernativeui_need_native_core)
             src/host_api.cpp
             src/host_dllmain.cpp
             src/host_locale.cpp
-            src/host_registry.cpp
+            ${_ernativeui_registry_source}
             src/localization_config.cpp
             src/logger.cpp
             src/steam_language.cpp
@@ -186,6 +473,15 @@ if(_ernativeui_need_native_core)
             ERUI_HOST_EXPORTS
             ER_NATIVE_UI_BUILD_VERSION="${PROJECT_VERSION}"
             WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        if(ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE)
+            target_compile_definitions(ERNativeUIHost PRIVATE
+                ER_NATIVE_UI_TAB_CONTENT_RESEARCH_PROBE=1)
+        endif()
+        if(ERNATIVEUI_BUILD_GFX_TAB_GROWTH_RESEARCH_HOST)
+            target_compile_definitions(ERNativeUIHost PRIVATE
+                ER_NATIVE_UI_GFX_TAB_GROWTH_RESEARCH_HOST=1
+                "ER_NATIVE_UI_TAB_SLOT_RESEARCH_TARGET=${ERNATIVEUI_TAB_SLOT_RESEARCH_TARGET}")
+        endif()
         set_target_properties(ERNativeUIHost PROPERTIES
             OUTPUT_NAME ERNativeUI PREFIX "")
         if(_ernativeui_msvc_abi)
@@ -196,20 +492,40 @@ if(_ernativeui_need_native_core)
 
     endif()
 
+    if(ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE)
+        add_library(ERNativeUITabContentClient MODULE
+            tools/research/tab_probe/tab_content_client.cpp)
+        target_link_libraries(ERNativeUITabContentClient PRIVATE
+            ERNativeUI::SDK)
+        target_compile_features(ERNativeUITabContentClient PRIVATE cxx_std_17)
+        target_compile_definitions(ERNativeUITabContentClient PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        set_target_properties(ERNativeUITabContentClient PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "ERNativeUITabContentClient")
+        if(_ernativeui_msvc_abi)
+            target_compile_options(ERNativeUITabContentClient PRIVATE
+                /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+            target_link_options(ERNativeUITabContentClient PRIVATE
+                /INCREMENTAL:NO)
+        endif()
+    endif()
+
 endif()
 
 if(WIN32 AND ERNATIVEUI_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-# Keep the complete local deployment tree current even when only a document,
-# locale, or optional GFX asset changed. A POST_BUILD command on the host alone
-# is not rerun by an incremental build when the DLL itself is already current.
+# Keep the complete local deployment tree current even when only a document or
+# locale changed. A POST_BUILD command on the host alone is not rerun by an
+# incremental build when the DLL itself is already current.
 if(TARGET ERNativeUIHost)
     set(_ernativeui_stage_dependencies ERNativeUIHost)
     foreach(_ernativeui_example_target IN ITEMS
             TarnishedUIShowcase LocalizedGreeting
-            ShowcaseScreenshotHelperStage MyERNativeUIMod)
+            ShowcaseScreenshotHelperStage MyERNativeUIMod
+            CustomTabsStress)
         if(TARGET ${_ernativeui_example_target})
             list(APPEND _ernativeui_stage_dependencies
                 ${_ernativeui_example_target})
@@ -221,8 +537,12 @@ if(TARGET ERNativeUIHost)
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>"
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/licenses"
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win"
+        # Runtime transformation supersedes the two old loose-GFX overrides.
+        # Remove only those legacy files: ERNATIVEUI_DEPLOY_DIR may deliberately
+        # target a live mod tree containing unrelated menu replacements.
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_040_optionsetting.gfx"
+            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_042_pc_graphicsetting.gfx"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:ERNativeUIHost>"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/ERNativeUI.dll"
@@ -232,12 +552,6 @@ if(TARGET ERNativeUIHost)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/locales"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/locales"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
-            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_040_optionsetting.gfx"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx"
-            "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/menu/win/02_042_pc_graphicsetting.gfx"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_ernativeui_package_readme_file}"
             "${ERNATIVEUI_DEPLOY_DIR}/$<CONFIG>/README.md"
@@ -303,6 +617,10 @@ if(_ernativeui_enable_tests)
             OUTPUT_NAME ERNativeUI
             PREFIX ""
             RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/abi/runtime/current"
+            ARCHIVE_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/abi/runtime/current"
+            LIBRARY_OUTPUT_DIRECTORY
                 "${CMAKE_BINARY_DIR}/abi/runtime/current")
         if(_ernativeui_msvc_abi)
             target_compile_options(ERNativeUIAbiHostCurrent PRIVATE
@@ -354,10 +672,120 @@ if(_ernativeui_enable_tests)
     target_compile_features(ERNativeUIGfxPatcherTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.GfxPatcher COMMAND ERNativeUIGfxPatcherTests)
 
+    add_executable(ERNativeUIGfxDocumentTests tests/gfx_document_test.cpp)
+    target_link_libraries(ERNativeUIGfxDocumentTests PRIVATE
+        ERNativeUI::GfxDocument)
+    target_include_directories(ERNativeUIGfxDocumentTests PRIVATE tests)
+    target_compile_definitions(ERNativeUIGfxDocumentTests PRIVATE
+        ERNATIVEUI_TEST_GAME_OPTIONS_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
+        ERNATIVEUI_TEST_ADVANCED_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx")
+    target_compile_features(ERNativeUIGfxDocumentTests PRIVATE cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUIGfxDocumentTests PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ERNativeUI.GfxDocument COMMAND ERNativeUIGfxDocumentTests)
+
+    add_executable(ERNativeUISettingsGfxTransformerTests
+        tests/settings_gfx_transformer_test.cpp)
+    target_link_libraries(ERNativeUISettingsGfxTransformerTests PRIVATE
+        ERNativeUI::SettingsGfxTransformer)
+    target_include_directories(ERNativeUISettingsGfxTransformerTests PRIVATE
+        tests)
+    target_compile_definitions(ERNativeUISettingsGfxTransformerTests PRIVATE
+        ERNATIVEUI_TEST_GAME_OPTIONS_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
+        ERNATIVEUI_TEST_ADVANCED_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx")
+    target_compile_features(ERNativeUISettingsGfxTransformerTests PRIVATE
+        cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUISettingsGfxTransformerTests PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ERNativeUI.SettingsGfxTransformer
+        COMMAND ERNativeUISettingsGfxTransformerTests)
+
+    add_executable(ERNativeUISettingsGfxRuntimeTests
+        tests/settings_gfx_runtime_test.cpp)
+    target_link_libraries(ERNativeUISettingsGfxRuntimeTests PRIVATE
+        ERNativeUI::SettingsGfxTransformer)
+    target_include_directories(ERNativeUISettingsGfxRuntimeTests PRIVATE
+        tests)
+    target_compile_definitions(ERNativeUISettingsGfxRuntimeTests PRIVATE
+        ERNATIVEUI_TEST_GAME_OPTIONS_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_040_optionsetting.gfx"
+        ERNATIVEUI_TEST_ADVANCED_GFX="${CMAKE_CURRENT_SOURCE_DIR}/assets/menu/win/02_042_pc_graphicsetting.gfx")
+    target_compile_features(ERNativeUISettingsGfxRuntimeTests PRIVATE
+        cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUISettingsGfxRuntimeTests PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ERNativeUI.SettingsGfxRuntime
+        COMMAND ERNativeUISettingsGfxRuntimeTests)
+
     add_executable(ERNativeUIPaginationTests tests/pagination_test.cpp src/pagination.cpp)
     target_include_directories(ERNativeUIPaginationTests PRIVATE src)
     target_compile_features(ERNativeUIPaginationTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.Pagination COMMAND ERNativeUIPaginationTests)
+
+    add_executable(ERNativeUITabViewportTests
+        tests/tab_viewport_test.cpp src/tab_viewport.cpp)
+    target_include_directories(ERNativeUITabViewportTests PRIVATE
+        src include tests)
+    target_compile_features(ERNativeUITabViewportTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.TabViewport COMMAND ERNativeUITabViewportTests)
+
+    add_executable(ERNativeUITabPointerDwellTests
+        tests/tab_pointer_dwell_test.cpp src/tab_viewport.cpp)
+    target_include_directories(ERNativeUITabPointerDwellTests PRIVATE src tests)
+    target_compile_features(ERNativeUITabPointerDwellTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.TabPointerDwell
+        COMMAND ERNativeUITabPointerDwellTests)
+
+    add_executable(ERNativeUITabRecordEpochTests
+        tests/tab_record_epoch_test.cpp)
+    target_include_directories(ERNativeUITabRecordEpochTests PRIVATE src tests)
+    target_compile_features(ERNativeUITabRecordEpochTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.TabRecordEpoch COMMAND ERNativeUITabRecordEpochTests)
+
+    add_executable(ERNativeUITabTransitionInputGateTests
+        tests/tab_transition_input_gate_test.cpp)
+    target_include_directories(ERNativeUITabTransitionInputGateTests PRIVATE src tests)
+    target_compile_features(ERNativeUITabTransitionInputGateTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.TabTransitionInputGate
+        COMMAND ERNativeUITabTransitionInputGateTests)
+
+    add_executable(ERNativeUITabConfigurationTests
+        tests/tab_configuration_test.cpp src/tab_configuration.cpp)
+    target_include_directories(ERNativeUITabConfigurationTests PRIVATE
+        src tests)
+    target_compile_features(ERNativeUITabConfigurationTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.TabConfiguration
+        COMMAND ERNativeUITabConfigurationTests)
+
+    add_executable(ERNativeUINativeTabCatalogueTests
+        tests/native_tab_catalogue_test.cpp
+        src/menu.cpp
+        src/menu_compiler.cpp
+        src/native_tab_catalogue.cpp
+        src/pagination.cpp
+        src/tab_configuration.cpp
+        src/text_registry.cpp)
+    target_include_directories(ERNativeUINativeTabCatalogueTests PRIVATE
+        src include tests)
+    target_compile_features(ERNativeUINativeTabCatalogueTests PRIVATE
+        cxx_std_20)
+    add_test(NAME ERNativeUI.NativeTabCatalogue
+        COMMAND ERNativeUINativeTabCatalogueTests)
+
+    add_executable(ERNativeUINativeTabRuntimeStateTests
+        tests/native_tab_runtime_state_test.cpp
+        src/native_tab_runtime_state.cpp)
+    target_include_directories(ERNativeUINativeTabRuntimeStateTests PRIVATE
+        src tests)
+    target_compile_features(ERNativeUINativeTabRuntimeStateTests PRIVATE
+        cxx_std_20)
+    add_test(NAME ERNativeUI.NativeTabRuntimeState
+        COMMAND ERNativeUINativeTabRuntimeStateTests)
 
     add_executable(ERNativeUIModelTests
         tests/menu_model_test.cpp src/menu.cpp src/menu_compiler.cpp
@@ -370,6 +798,28 @@ if(_ernativeui_enable_tests)
     target_include_directories(ERNativeUIRuntimeOptionsTests PRIVATE src include)
     target_compile_features(ERNativeUIRuntimeOptionsTests PRIVATE cxx_std_20)
     add_test(NAME ERNativeUI.RuntimeOptions COMMAND ERNativeUIRuntimeOptionsTests)
+
+    add_executable(ERNativeUILoggingPolicyTests
+        tests/logging_policy_test.cpp
+        src/runtime_log.cpp)
+    target_include_directories(ERNativeUILoggingPolicyTests PRIVATE
+        src include tests)
+    target_compile_features(ERNativeUILoggingPolicyTests PRIVATE cxx_std_20)
+    add_test(NAME ERNativeUI.LoggingPolicy COMMAND ERNativeUILoggingPolicyTests)
+
+    if(WIN32)
+        add_executable(ERNativeUILoggerIntegrationTests
+            tests/logger_integration_test.cpp
+            src/logger.cpp)
+        target_include_directories(ERNativeUILoggerIntegrationTests PRIVATE
+            src include tests)
+        target_compile_features(ERNativeUILoggerIntegrationTests PRIVATE
+            cxx_std_20)
+        target_compile_definitions(ERNativeUILoggerIntegrationTests PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        add_test(NAME ERNativeUI.LoggerIntegration
+            COMMAND ERNativeUILoggerIntegrationTests)
+    endif()
 
     add_executable(ERNativeUIGameBuildTests tests/game_build_test.cpp)
     target_include_directories(ERNativeUIGameBuildTests PRIVATE src tests)
@@ -596,18 +1046,10 @@ if(TARGET ERNativeUIHost)
     install(FILES assets/ERNativeUI.ini DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(DIRECTORY assets/locales/
         DESTINATION ${CMAKE_INSTALL_BINDIR}/locales)
-    install(FILES assets/menu/win/02_040_optionsetting.gfx
-        assets/menu/win/02_042_pc_graphicsetting.gfx
-        DESTINATION ${CMAKE_INSTALL_BINDIR}/menu/win)
-endif()
-if(TARGET ERNativeUIGfxPatcher)
-    install(TARGETS ERNativeUIGfxPatcher RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(FILES tools/gfx_patcher/README.md
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/ERNativeUI/tools/gfx_patcher)
 endif()
 if(TARGET TarnishedUIShowcase)
     install(TARGETS TarnishedUIShowcase LocalizedGreeting
-        ShowcaseScreenshotHelper MyERNativeUIMod
+        ShowcaseScreenshotHelper MyERNativeUIMod CustomTabsStress
         LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/examples
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/examples)
     install(FILES

@@ -32,6 +32,11 @@ int main() {
         detail::PageRoute::root_main(0, detail::game_options_vanilla_capacity),
         &movie_context,
         persistent) == nullptr);
+    ERUI_TEST_CHECK(state.observe(
+        native_menu_title_source_path,
+        detail::PageRoute::tab_main(3, 2),
+        &movie_context,
+        persistent) == nullptr);
 
     const char* replacement = state.observe(
         native_menu_title_source_path, first, &movie_context, persistent);
@@ -54,6 +59,15 @@ int main() {
     ERUI_TEST_CHECK(state.observe(
         native_menu_title_source_path, second, &movie_context, persistent));
     ERUI_TEST_CHECK(state.consume(second).valid());
+
+    const detail::PageRoute tab_continuation =
+        detail::PageRoute::tab_continuation(3, 2, 1);
+    ERUI_TEST_CHECK(state.observe(
+        native_menu_title_source_path,
+        tab_continuation,
+        &movie_context,
+        persistent));
+    ERUI_TEST_CHECK(state.consume(tab_continuation).valid());
 
     state.reset();
     return 0;

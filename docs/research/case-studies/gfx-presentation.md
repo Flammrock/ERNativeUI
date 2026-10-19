@@ -2,14 +2,17 @@
 
 This case study records how ERNativeUI extended Elden Ring's settings movies
 without confusing a static Scaleform placement with a working native control.
-It covers the optional row-capacity patch, the Game Options action-label
-repair, and the TextInput and ColorPicker presentations shipped with ERUI API
-1.1.
+It covers the row-capacity transformation, the Game Options action-label
+repair, and the TextInput and ColorPicker presentations introduced with ERUI
+API 1.1. These transformations were first proved with an offline tool and are
+now applied in memory by the host at the validated Scaleform file-opening
+seam.
 
-For installation and command-line usage, read
-[Presentation and optional GFX assets](../../guides/presentation-and-gfx.md)
-and the [patcher README](../../../tools/gfx_patcher/README.md). This page is
-the evidence and reproduction record behind those assets.
+For current runtime behavior, read
+[Runtime GFX completion](../../guides/presentation-and-gfx.md). The
+[developer patcher README](../../../tools/gfx_patcher/README.md) documents the
+source-built offline inspector and transformer. This page preserves the
+evidence and reproduction record behind both paths.
 
 ## Reference artifacts and provenance
 
@@ -32,12 +35,12 @@ The checked movie samples were:
 | Artifact | Bytes | SHA-256 | Provenance |
 |---|---:|---|---|
 | Unmodified `02_040_optionsetting.gfx` | 44,016 | `2B09D4E64EAB964F8D4045D25960F4C6CE1806D6596C75A21F28F334D0CD10B3` | User-extracted six-row reference; not committed |
-| Shipped `02_040_optionsetting.gfx` | 45,129 | `5085358397E17271654EDA15A4D0299C57A06772A2937C3FF074197D820FCEFA` | Thirteen-row Game/Camera Options, action-label repair, TextInput frame, and standalone ColorPicker |
+| Checked-in transformed `02_040_optionsetting.gfx` fixture | 45,129 | `5085358397E17271654EDA15A4D0299C57A06772A2937C3FF074197D820FCEFA` | Thirteen-row Game/Camera Options, action-label repair, TextInput frame, and standalone ColorPicker |
 | Unmodified `02_042_pc_graphicsetting.gfx` | 27,056 | `E87477878203AC04104FDC3617D870BD44A0BF8C14F1A8E20922F59605867DAC` | User-extracted fifteen-row Advanced Settings source; not committed |
-| Shipped `02_042_pc_graphicsetting.gfx` | 27,574 | `687082466CA2C16BF5E50F1D21BCA9C3C6E2330B45BB8C79D92D773200FE2890` | Advanced Settings TextInput frame and standalone ColorPicker |
+| Checked-in transformed `02_042_pc_graphicsetting.gfx` fixture | 27,574 | `687082466CA2C16BF5E50F1D21BCA9C3C6E2330B45BB8C79D92D773200FE2890` | Advanced Settings TextInput frame and standalone ColorPicker |
 
 Applying all supported transformations to the recorded `02_040` source
-produced the checked-in asset byte for byte and added 1,113 bytes. Character
+produced the checked-in fixture byte for byte and added 1,113 bytes. Character
 IDs below describe these exact movies only; the patcher discovers structure
 instead of treating those IDs as a cross-version interface.
 
@@ -125,7 +128,7 @@ ColorPicker transformations.
 for a row. The static movie proves the named destinations, but it does not by
 itself reveal the native discriminator or event path.
 
-## Case 1: optional thirteen-row capacity
+## Case 1: thirteen-row capacity
 
 The unmodified Game Options panel authors six placements, `Item_0_0` through
 `Item_5_0`. Elden Ring constructs four vanilla rows in the tested setup, so
@@ -148,19 +151,48 @@ reference assets. It is not a universal native row limit. The patcher accepts
 Game Options targets from 6 through 13 and Camera Options targets from 7
 through 13, refuses shrinking, and clones the existing placement convention.
 
-The DLL does not read the loose movie. Native code reports the current live
-capacity from the constructed page, so pagination works with the original
-movie, the optional 13-row movie, or another structurally compatible capacity.
-The runtime also subtracts the post-materializer live row count. A compatible
-mod that adds a row earlier in the native call chain therefore consumes one
-of those placements just like an Elden Ring row; the GFX capacity itself does
-not change.
+The current DLL receives the final movie bytes selected by the game and mod
+loader at `CSScaleformFileOpener::OpenFile`. It parses and validates that
+compatible input, adds only missing required structure, serializes and
+revalidates the result, then replaces the transient `MemoryFile` view before
+Scaleform consumes it. The source file on disk is never modified. A compatible
+movie that already contains a required transformation remains unchanged;
+unknown or conflicting structure is left untouched rather than guessed.
+
+Native code still reports the current live capacity from the constructed
+page. The runtime subtracts the post-materializer live row count, so a
+compatible mod that adds a row earlier in the native call chain consumes one
+placement just like an Elden Ring row.
 See the [settings pages and pagination case study](settings-pages-and-pagination.md)
 for the native half.
 
 **Rejected:** failing to see an appended Camera Options row proves that its
 native hook is wrong. The unchanged native probe became visible as soon as
 the panel had a free placement.
+
+### Production completion of the other ordinary panels
+
+The later runtime pass applied the same structural method to every ordinary
+settings carrier in `02_040` rather than assuming that Game and Camera were the
+only useful panels:
+
+| Visible page | Internal panel | Observed authored rows | Runtime minimum | Structural note |
+|---|---|---:|---:|---|
+| Game Options | `ControllSetting` | 6 | 13 | Uniform generic-row character |
+| Camera Options | `CameraSetting` | 7 | 13 | Uniform generic-row character |
+| Display | `EnvironmentSetting` | 12 | 13 | Shares its underlying sprite definition with Sound |
+| Sound | `AudioSetting` | 12 | 13 | The shared definition is expanded once, not duplicated |
+| Network | `NetworkSetting` | 7 | 10 | `UgcRestricted` occupies the lower region; row 11 would overlap it |
+| Keyboard/Mouse | `PCMouseKey` | 7 | 13 | The authored final slot is the generic spare-row character used for additions |
+| Graphics | `PCGraphic` | 7 | 13 | Uses the same trailing-spare convention |
+
+The ordinary placements remain single-frame `PlaceObject2` records at
+`Y(N) = -4800 + 1000 * N`, but their depth order is not universally ascending.
+The transformer therefore validates unique depths and the complete indexed
+sequence instead of copying a Game Options-only depth formula. It also treats
+Display/Sound aliasing as one shared definition and preserves Network's native
+warning placement. Brightness and Controller Settings use specialized
+templates and are deliberately excluded.
 
 ## Case 2: restoring the left label on action rows
 
@@ -228,7 +260,7 @@ Ring silently omitted the frame in game.
 **Rejected:** successful FFDec parsing proves a definition may follow its
 first control-tag use in Elden Ring's loader.
 
-The production patcher inserts or relocates the external-image definition,
+The production transformer inserts or relocates the external-image definition,
 wrapper, and scaling grid before their earliest TextInput or ColorPicker use.
 That ordering rendered correctly in both hosts and is now part of structural
 verification.
@@ -363,10 +395,12 @@ and the compiled presentation state in
 
 ## Structural validation and idempotence
 
-The implementation in [`gfx_patch.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/tools/gfx_patcher/gfx_patch.cpp)
+The production implementation in
+[`settings_gfx_transformer.cpp`](https://github.com/Flammrock/ERNativeUI/blob/main/src/gfx/settings_gfx_transformer.cpp)
 locates hosts from named children, depths, transforms, edit-field properties,
-and surrounding widget structure. It does not identify a current movie from
-one hard-coded character ID.
+and surrounding widget structure. The offline `gfx_patch.cpp` implementation
+preserves the earlier reproducibility path. Neither identifies a current movie
+from one hard-coded character ID.
 
 Before producing output it validates, as applicable:
 
@@ -386,14 +420,16 @@ moves it into place only after validation; it also refuses identical input and
 output paths.
 
 The automated [GFX patcher test](https://github.com/Flammrock/ERNativeUI/blob/main/tests/gfx_patcher_test.cpp) covers
-synthetic structures and both checked-in assets. In particular, it verifies:
+synthetic structures and both checked-in reference fixtures. In particular, it
+verifies:
 
 - every supported row boundary and refusal to shrink;
 - TextInput and ColorPicker second-pass byte idempotence;
 - the same final bytes whether TextInput or ColorPicker is applied first;
 - rejection of occupied and partial/conflicting structures;
 - preservation of unrelated Button children and trailing padding; and
-- structural inspection of the shipped 13-row and Advanced Settings assets.
+- structural inspection of the checked-in 13-row and Advanced Settings
+  reference fixtures.
 
 **Confirmed:** applying the same requested transformation twice produces the
 same bytes. This is idempotence for a recognized movie, not permission to
@@ -409,12 +445,15 @@ silently patch an unknown future revision.
 | Additional visible capacity | Pagination based on the constructed page's live capacity |
 | A hidden standalone ColorPicker definition | Native editor opening, RGB state, commit/cancel, and teardown |
 
-`ERNativeUI.dll` does not parse, patch, or load these GFX files at runtime.
-The files are optional presentation assets; the host uses the game's native
-constructors and reads live page state. Where a custom presentation is absent
-or fails runtime preflight, the native API keeps a usable fallback when one is
-defined—for example, a ColorPicker remains an action row that can open the
-native editor.
+`ERNativeUI.dll` does not create a new movie or mutate a live display tree.
+It structurally completes the two recognized settings movies while their
+loaded bytes are still behind the validated file-opening boundary. Scaleform
+then creates the ordinary movie and display objects from those completed
+bytes. The host continues to use the game's native constructors and live page
+state. If parsing, semantic validation, serialization, or the native
+`MemoryFile` boundary fails, the original bytes remain selected and the native
+API keeps a usable fallback where one is defined—for example, a ColorPicker
+remains an action row that can open the native editor.
 
 **Rejected:** adding a placement alone creates a callback, focus target,
 native page, event route, or arbitrary new top-level interface.
@@ -454,7 +493,10 @@ raw game assets under the ignored `research-work/` directory.
    command syntax is in the
    [patcher README](../../../tools/gfx_patcher/README.md#complete-command-line-reference).
 6. Build and run `ERNativeUI.GfxPatcher`, which exercises generated fixtures
-   and the checked-in release assets.
+   and the checked-in reference fixtures. Run `ERNativeUI.GfxDocument`,
+   `ERNativeUI.SettingsGfxTransformer`, and `ERNativeUI.SettingsGfxRuntime` to
+   cover the parser, production semantic transformer, runtime policy/cache,
+   and serialization boundary.
 7. Use a bounded in-game comparison for presentation claims: original versus
    generated movie, root versus child host, focus/hover, value update, commit,
    cancel, page reopen, and two independent rows of the same type.
@@ -476,18 +518,21 @@ For each changed movie:
 5. update a structural matcher only after explaining every changed field;
 6. add a regression fixture for the changed structure and rerun idempotence,
    conflict, order-independence, and checked-asset tests;
-7. produce a separate output and verify its complete tree and hash; and
-8. repeat the bounded in-game matrix before replacing a shipped asset.
+7. produce a separate reference output and verify its complete tree and hash;
+   and
+8. repeat the bounded in-game matrix before accepting the new structure in the
+   runtime transformer.
 
 A movie that looks similar in FFDec is not automatically compatible. A new
 hash requires renewed structural and live evidence.
 
 ## Scope of the result
 
-TextInput and ColorPicker were completed and published in ERUI API 1.1; they
-remain supported native controls with optional enhanced presentation. This work proves offline
-extension of two existing host movies and runtime binding to known named
-widgets.
+TextInput and ColorPicker were completed and published in ERUI API 1.1. They
+remain supported native controls with host-completed enhanced presentation and
+native fallbacks when completion is unavailable. This work proves both offline
+and file-opening-time structural extension of two existing host movies, plus
+runtime binding to known named widgets.
 
 It does not prove a general runtime `AttachMovie`, arbitrary ActionScript
 method invocation, custom movie loader, resource owner, event subscription

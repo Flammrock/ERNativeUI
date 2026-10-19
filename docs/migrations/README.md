@@ -6,7 +6,7 @@ tags preserve the documentation shipped with each release.
 
 Every new API version adds one focused guide for that adjacent version
 transition. These guides are permanent: a mod author may still need
-`1.0 -> 1.1` long after `1.2` has been released. If a transition requires no
+`1.0 -> 1.1` long after `1.3` has been released. If a transition requires no
 source changes, its guide says so explicitly rather than leaving a gap in the
 version chain.
 
@@ -15,11 +15,12 @@ version chain.
 | From | To | Status | Guide |
 |---|---|---|---|
 | 1.0 | 1.1 | Retained | [Migrate from API 1.0 to API 1.1](1.0-to-1.1.md) |
-| 1.1 | 1.2 | Current | [Migrate from API 1.1 to API 1.2](1.1-to-1.2.md) |
+| 1.1 | 1.2 | Retained | [Migrate from API 1.1 to API 1.2](1.1-to-1.2.md) |
+| 1.2 | 1.3 | Current | [Migrate from API 1.2 to API 1.3](1.2-to-1.3.md) |
 
 Future API versions add another guide instead of rewriting an earlier one.
-This directory therefore retains both `1.0 -> 1.1` and `1.1 -> 1.2` when the
-next adjacent guide is introduced.
+This directory therefore retains every earlier adjacent guide when the next
+transition is introduced.
 
 Migration is optional when a mod does not need the newer API surface. A mod
 author may intentionally keep building against an older SDK/API, and every

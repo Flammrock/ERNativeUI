@@ -6,41 +6,37 @@ to execute clients built against earlier APIs against a newer host, not merely
 to recompile their source with the newest header. That includes both
 historical binaries and clients that intentionally keep using an older SDK.
 
-The v1.0 snapshot is copied byte-for-byte from the `ERNativeUI-v1.0.0` Git
-tag. `releases/v1_0/ORIGIN.md` records its commit and blob identities, while
-`release.cmake` pins independent SHA-256 digests checked at configure time.
-Never update a frozen snapshot to make a compatibility test pass.
+Each released API snapshot is copied byte-for-byte from its recorded Git tag.
+Its `ORIGIN.md` records the commit and blob identities, while `release.cmake`
+pins independent SHA-256 digests checked at configure time. Never update a
+frozen snapshot to make a compatibility test pass.
 
 ## Layout
 
 ```text
 tests/abi/
-|-- current/                  layout, negotiation, guard, and 1.1 C ABI tests
+|-- current/                  layout, negotiation, guard, and current ABI tests
 |-- support/                  test-only loader and control ABI
 |-- cmake/                    reusable release-target helper
 `-- releases/
-    `-- v1_0/
-        |-- include/          exact released C and C++ headers
-        |-- ORIGIN.md         tag, commit, Git blobs, and file hashes
-        |-- release.cmake     frozen API metadata and SHA-256 pins
-        |-- layout_test.c
-        |-- c_client_test.c
-        |-- cpp_client_test.cpp
-        |-- current_host_smoke_test.c
-        |-- current_host_wrapper_smoke_test.cpp
-        |-- pending_readiness_lifecycle_test.cpp
-        `-- contract_host.cpp
+    |-- v1_0/
+    |-- v1_1/
+    `-- v1_2/
 ```
 
-The contract host is deliberately a reverse-direction fixture: it exposes
-only the released v1.0 prefix, allowing the current 1.1 C++ wrapper to prove
-that it rejects an older host without silently downgrading. The raw C
-negotiation test separately proves that callers which explicitly request the
-released 1.0 prefix can still obtain it. The root build also creates a
+Every release directory contains the exact public headers, `ORIGIN.md`,
+`release.cmake`, layout and C/C++ contract clients, current-host smoke clients,
+and a version-exact contract host. The v1.0 directory additionally owns
+`pending_readiness_lifecycle_test.cpp` for its historical startup behavior.
+
+Each release-owned contract host is deliberately a reverse-direction fixture:
+it exposes exactly that frozen API and rejects newer requests. The raw C
+negotiation tests separately prove that callers which explicitly request an
+earlier supported prefix can still obtain it. The root build also creates a
 game-independent current host from the production negotiation and registry
-sources. Frozen C and C++17 smoke clients load that DLL in isolated processes,
-proving the other direction without launching Elden Ring or installing native
-hooks.
+sources. Frozen C and C++17 smoke clients for APIs 1.0, 1.1, and 1.2 load that
+DLL in isolated processes, proving the other compatibility direction without
+launching Elden Ring or installing native hooks.
 The current strict-C TextInput client uses the same DLL to cover the complete
 1, 3, 7, 16, 17, and 35-unit boundary matrix plus copied input and getter/
 setter buffer semantics. A second strict-C client covers independent
@@ -76,7 +72,7 @@ unit C linkage are covered explicitly. The host-storage tests then verify that
 the same codec is used at the real INI boundary.
 
 `ERNativeUIAbiConnectionHost` is a second, deliberately narrow fixture for the
-header-only 1.1 `Connection` contract. It counts `ERUI_GetApi`, language,
+header-only current `Connection` contract. It counts `ERUI_GetApi`, language,
 registration, commit, and abort calls and can return a bounded sequence of
 `ERUI_HOST_NOT_READY` results. The corresponding test proves that `connect()`
 is the only negotiation step, that language lookup is explicit and optional,
@@ -183,9 +179,10 @@ add_subdirectory(tests/abi)
 When configured from the repository root, `ERNativeUIAbiHostCurrent` enables
 the frozen-client-to-current-host smoke tests automatically. A standalone
 `tests/abi` configure intentionally omits that project-owned production target;
-layout tests, the frozen v1.0 contract host, and current-client-to-v1.0
-rejection tests still build and run. The explicit-connection fixture and test
-also remain available in a standalone build.
+layout tests and the frozen v1.0, v1.1, and v1.2 contract fixtures still build
+and run, together with the applicable current-client rejection checks. The
+explicit-connection fixture and test also remain available in a standalone
+build.
 
 This subtree may also be configured directly on Windows:
 

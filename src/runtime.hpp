@@ -1,5 +1,6 @@
 #pragma once
 
+#include "log_level.hpp"
 #include "menu.hpp"
 
 #include <cstddef>
@@ -9,14 +10,11 @@ namespace erui::native {
 struct GameAddresses;
 }
 
-namespace erui {
+namespace erui::detail {
+struct TabConfiguration;
+}
 
-enum class LogLevel : std::uint8_t {
-    info,
-    warning,
-    error,
-    trace,
-};
+namespace erui {
 
 using LogSink = void (*)(LogLevel level, const char* message) noexcept;
 
@@ -87,6 +85,19 @@ struct Capabilities {
     Menu& menu,
     RuntimeOptions options,
     const native::GameAddresses& addresses) noexcept;
+
+// Host-only integration points. They keep RuntimeOptions layout-frozen while
+// supplying the immutable player tab configuration needed to build the API
+// 1.3 native-tab catalogue. Ordinary embedders continue to use install().
+[[nodiscard]] InstallResult install_with_tab_configuration(
+    Menu& menu,
+    RuntimeOptions options,
+    const detail::TabConfiguration& tab_configuration) noexcept;
+[[nodiscard]] InstallResult install_with_resolved_addresses_and_tab_configuration(
+    Menu& menu,
+    RuntimeOptions options,
+    const native::GameAddresses& addresses,
+    const detail::TabConfiguration& tab_configuration) noexcept;
 void uninstall() noexcept;
 [[nodiscard]] bool installed() noexcept;
 [[nodiscard]] Capabilities capabilities() noexcept;

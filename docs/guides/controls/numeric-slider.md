@@ -198,7 +198,7 @@ player-change callback.
 |---|---|
 | First public API | 1.2 |
 | Capability | `erui::Capability::numeric_slider` / `ERUI_CAP_NUMERIC_SLIDER` |
-| Optional GFX | None required |
+| GFX presentation | Uses the stock native slider widget |
 | Positions | 2 through 256 |
 | Decimal precision | 0 through 9 places |
 

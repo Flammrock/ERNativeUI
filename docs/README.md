@@ -7,8 +7,8 @@ what you want to do.
 ## I want to install ERNativeUI
 
 Follow the [player installation guide](getting-started/player-installation.md)
-for requirements, Mod Engine 2 setup, optional GFX assets, runtime
-configuration, verification, and troubleshooting.
+for requirements, Mod Engine 2 setup, runtime GFX completion, configuration,
+verification, and troubleshooting.
 
 ## I want to create a mod with ERNativeUI
 
@@ -18,7 +18,7 @@ configuration, verification, and troubleshooting.
 2. Check the [supported features](features.md), including API-version and
    release status.
 3. Check [game and mod compatibility](COMPATIBILITY.md) for the running game
-   build, other DLLs, and optional loose assets.
+   build, other DLLs, and modified-GFX compatibility.
 4. Understand the independent [release and API versions](versioning.md).
 5. Read [how ERNativeUI works](how-it-works.md) for the host/client model,
    registration lifecycle, ownership, and callbacks.
@@ -33,7 +33,7 @@ describes the current API; migration guides record only the changes needed
 between adjacent API versions. Tagged releases preserve the documentation that
 shipped with that version.
 
-Three focused, buildable examples are also available:
+Four focused, buildable examples are also available:
 
 - [Localized Greeting](../examples/localized_greeting/README.md) demonstrates
   connection, game-language selection, fallback text, and a native dialog.
@@ -41,8 +41,11 @@ Three focused, buildable examples are also available:
   demonstrates the broader menu, dialog, presentation, localization, and
   input APIs.
 - [Showcase Screenshot Helper](../examples/showcase_screenshot_helper/README.md)
-  reads an INI beside its DLL and publishes one isolated English control so
-  documentation screenshots can match their minimal code examples.
+  reads an INI beside its DLL and publishes one isolated English control or
+  custom tab so documentation screenshots can match their minimal examples.
+- [Custom Tabs Stress](../examples/custom_tabs_stress/README.md) exercises a
+  fixed 50-tab, 1,000-row workload for integration and performance testing;
+  ordinary mods should follow the dedicated custom-tab guide instead.
 
 The public SDK has two header-only client surfaces: a friendly C++17 wrapper
 and a strict C ABI. Client mods discover the already-loaded host at runtime;
@@ -72,7 +75,10 @@ and links the reproducible Ghidra workflow and architecture map.
 
 The research library includes reproducible case studies for settings-page
 placement and pagination, dialogs, popup choices, TextInput, ColorPicker,
-numeric/custom sliders, input bindings, GFX presentation, and Steam language discovery. Use the
+numeric/custom sliders, input bindings, GFX presentation, Steam language
+discovery, and custom tabs. The
+[custom-tabs case study](research/case-studies/custom-tabs.md) records the
+native tab-strip, icon, input and reusable-page evidence. Use the
 [supported features](features.md), [mod-author guides](guides/README.md), the
 [reference](reference/README.md), and the public headers for current behavior
 and contracts; use the research library for native implementation evidence and

@@ -156,13 +156,14 @@ table and check host support.
 |---|---|
 | First public API | 1.1 |
 | Capability | `erui::Capability::text_input` / `ERUI_CAP_TEXT_INPUT` |
-| Optional GFX | `02_040` and `02_042` provide the native brackets and red empty-state presentation |
+| GFX presentation | ERNativeUI completes the native brackets and red empty-state presentation at runtime |
 | Enabled option | Not exposed; omit the `add_text_input` call when the row should not exist |
 | Runtime value | Copied UTF-16 text |
 
-The TextInput remains editable without the optional GFX files, but its visual
-presentation will not match the character-name widget. See
-[Presentation and optional GFX assets](../presentation-and-gfx.md).
+No loose GFX file is required. If an asset mod supplies an unrecognized
+settings movie, ERNativeUI keeps that movie unchanged and TextInput retains its
+functional fallback presentation. See
+[Runtime GFX completion and presentation](../presentation-and-gfx.md).
 
 ## Value and confirmation behavior
 
@@ -184,7 +185,8 @@ presentation will not match the character-name widget. See
 - Setting `initial_value` longer than the fixed maximum.
 - Expecting `set_text` to truncate an oversized value or call the change
   callback.
-- Assuming the optional GFX files provide behavior; they provide presentation.
+- Assuming presentation controls editor behavior; editing remains a separate
+  native operation.
 
 [Controls index](README.md) |
 [Reverse-engineering reference](../../research/case-studies/text-input.md) |

@@ -4,11 +4,11 @@ This walkthrough starts with an empty directory and produces a Windows x64
 client DLL. When its row is activated in Elden Ring, it opens a native dialog
 saying **Hello, Tarnished!**
 
-Complete [Install the SDK](setup.md) first. The commands below assume the
-ERNativeUI 1.2.0 SDK was extracted to:
+Complete [Install the SDK](setup.md) first. The commands below assume an SDK
+that explicitly exposes API 1.3 was extracted and its directory renamed to:
 
 ```text
-C:\SDK\ERNativeUI-1.2.0-windows-x64
+C:\SDK\ERNativeUI-current
 ```
 
 Replace that path when you installed another compatible release or location.
@@ -30,9 +30,9 @@ Put this in `CMakeLists.txt`:
 cmake_minimum_required(VERSION 3.24)
 project(HelloTarnished LANGUAGES CXX)
 
-# This is a minimum ERNativeUI package-release requirement. It is not the
-# runtime API selector; the API 1.2 wrapper performs that check at runtime.
-find_package(ERNativeUI 1.2.0 CONFIG REQUIRED)
+# Package releases and ERUI APIs are independent. Resolve an SDK that exposes
+# the current API 1.3 declarations; its headers select the runtime contract.
+find_package(ERNativeUI CONFIG REQUIRED)
 
 add_library(HelloTarnished MODULE src/hello_tarnished.cpp)
 target_link_libraries(HelloTarnished PRIVATE ERNativeUI::SDK)
@@ -75,7 +75,7 @@ void show_greeting() noexcept {
 
 DWORD WINAPI initialize_mod(void*) noexcept {
     // connect() discovers the host already loaded by Mod Engine 2 and asks it
-    // for the API 1.2 function table. It does not load ERNativeUI.dll itself.
+    // for the exact API selected by these headers. It does not load the host.
     const auto connection = erui::connect();
     if (!connection) {
         OutputDebugStringW(L"[HelloTarnished] ERNativeUI connection failed.\n");
@@ -139,7 +139,7 @@ Open **Developer Command Prompt for VS 2022**, change to the
 `HelloTarnished` directory, and run:
 
 ```bat
-cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH="C:\SDK\ERNativeUI-1.2.0-windows-x64"
+cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH="C:\SDK\ERNativeUI-current"
 ```
 
 What each argument means:
@@ -184,20 +184,19 @@ Create this layout inside the Mod Engine 2 directory:
     |-- ERNativeUI\
     |   |-- ERNativeUI.dll
     |   |-- ERNativeUI.ini
-    |   |-- locales\
-    |   `-- menu\
+    |   `-- locales\
     `-- HelloTarnished\
         `-- HelloTarnished.dll
 ```
 
-Copy `ERNativeUI.dll`, `ERNativeUI.ini`, `locales`, and `menu` from the
-extracted SDK's `bin` directory. Copy the DLL you just built into the
+Copy `ERNativeUI.dll`, `ERNativeUI.ini`, and `locales` from the extracted
+SDK's `bin` directory. Copy the DLL you just built into the
 `HelloTarnished` directory.
 
 `ERNativeUI.ini` is optional because the host generates a default file when it
-is missing. The `locales` directory provides host translations. The `menu`
-directory contains optional patched GFX presentation used by enhanced widgets
-and expanded page capacity.
+is missing. The `locales` directory provides host translations. Expanded
+settings capacity and supported widget presentation are completed by the host
+at runtime; there is no loose GFX installation step.
 
 In `config_eldenring.toml`, load the shared host before the client:
 
@@ -209,18 +208,7 @@ external_dlls = [
 ]
 ```
 
-To load the optional loose GFX files, add ERNativeUI to the existing mod-loader
-list:
-
-```toml
-[extension.mod_loader]
-enabled = true
-mods = [
-    { enabled = true, name = "ERNativeUI", path = "mod\\ERNativeUI" },
-]
-```
-
-Preserve any DLL and mod entries already present in your own configuration.
+Preserve any DLL entries already present in your own configuration.
 Only one `ERNativeUI.dll` should be loaded into the process.
 
 ## 6. Run the test

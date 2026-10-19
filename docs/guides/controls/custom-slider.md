@@ -185,7 +185,7 @@ native row without invoking the player-change callback.
 |---|---|
 | First public API | 1.2 |
 | Capability | `erui::Capability::custom_slider` / `ERUI_CAP_CUSTOM_SLIDER` |
-| Optional GFX | None required |
+| GFX presentation | Uses the stock native slider widget |
 | Positions | 2 through 256 |
 | Maximum text per position | 64 valid UTF-16 code units |
 

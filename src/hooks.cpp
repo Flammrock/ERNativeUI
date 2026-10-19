@@ -10,6 +10,7 @@
 #include "native_title_bridge.hpp"
 #include "pagination.hpp"
 #include "runtime_log.hpp"
+#include "runtime_requirements.hpp"
 #include "runtime_state.hpp"
 #include "root_button_text_override.hpp"
 #include "submenu_navigation.hpp"
@@ -25,6 +26,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -40,6 +44,26 @@ constexpr std::uint32_t kTitleFaultLogLimit = 4;
 
 GameAddresses g_addresses{};
 SafetyHookInline g_game_options_hook{};
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+SafetyHookMid g_tab_content_category8_pre_hook{};
+SafetyHookInline g_tab_content_composite_teardown_hook{};
+using TabCarrierCompositeTeardownFn = void(__fastcall*)(void*);
+std::atomic<TabCarrierCompositeTeardownFn>
+    g_original_tab_content_composite_teardown{};
+std::atomic_bool g_tab_content_hooks_exposed{};
+std::atomic_bool g_tab_content_callbacks_armed{};
+std::atomic_uint64_t g_tab_content_teardown_generation{};
+std::atomic_uint32_t g_tab_content_route_log_count{};
+std::atomic_uint32_t g_tab_content_route_fault_log_count{};
+constexpr std::uintptr_t kCategory8PreRva = 0x93CF89;
+constexpr std::uintptr_t kCategory8MaterializerRva = 0x95C050;
+constexpr std::uintptr_t kCategory8ExtraCallbackRva = 0x95A820;
+constexpr std::uintptr_t kCompositeTeardownRva = 0x93C1A0;
+// The first-page capacity is discovered from each live Graphics carrier. Use
+// one row only when reserving pagination bindings: it is the conservative
+// worst case and is not a claim about the authored GFX capacity.
+constexpr std::uint8_t kTabCarrierMinimumPlanCapacity = 1;
+#endif
 SafetyHookInline g_camera_panel_materializer_hook{};
 SafetyHookInline g_display_panel_materializer_hook{};
 SafetyHookInline g_sound_panel_materializer_hook{};
@@ -60,6 +84,13 @@ SafetyHookInline g_dialog_back_gate_hook{};
 std::atomic<PageFrameFn> g_original_page_frame{};
 std::atomic<NativeBackFn> g_original_dialog_back{};
 SafetyHookMid g_scaleform_path_resolver_hook{};
+constexpr std::array<std::uint8_t, 16> kScaleformPathResolverEntry271{
+    0x4C, 0x89, 0x44, 0x24, 0x18, 0x4C, 0x89, 0x4C,
+    0x24, 0x20, 0x55, 0x53, 0x56, 0x57, 0x41, 0x56};
+std::mutex g_scaleform_path_bridge_mutex{};
+void* g_scaleform_path_bridge_target{};
+std::array<std::uint8_t, 16> g_scaleform_path_bridge_patch{};
+bool g_scaleform_path_bridge_proven{};
 std::atomic<GameOptionsHandlerFn> g_original_game_options{nullptr};
 std::atomic<SubHandlerFn> g_original_sub{nullptr};
 std::atomic<TextResolverFn> g_original_text_resolver{nullptr};
@@ -87,6 +118,23 @@ TitleCaptureState g_title_capture{};
 constexpr std::size_t kPanelVisualCapacityOffset = 0xB14;
 constexpr std::size_t kPanelNativeCountOffset = 0x1AF0;
 constexpr std::uintptr_t kOptionSettingDialogVtableRva = 0x2B14888;
+
+bool read_scaleform_path_entry(
+    const void* target,
+    std::array<std::uint8_t, 16>& bytes) noexcept {
+    if (!target) return false;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        std::memcpy(bytes.data(), target, bytes.size());
+        return true;
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        bytes = {};
+        return false;
+    }
+#endif
+}
 
 struct BuiltinPanelSnapshot {
     void* vtable{};
@@ -125,6 +173,882 @@ BuiltinPanelSnapshot inspect_builtin_panel(void* page) noexcept {
 #endif
     return result;
 }
+
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+void __fastcall tab_content_category8_materializer(
+    void* page,
+    void* menu_option_data) noexcept;
+
+constexpr std::size_t kPanelSceneProxyOffset = 0x1200;
+constexpr std::size_t kSceneProxyWrapperFlagsOffset = 0x20;
+constexpr std::size_t kSceneProxyWrapperPayloadOffset = 0x28;
+constexpr std::uintptr_t kSceneObjProxyVtableRva = 0x2A97AF0;
+constexpr std::uintptr_t kSceneObjProxyGetValueRva = 0x74C930;
+
+struct TabCarrierIdentity {
+    void* panel{};
+    void* wrapper{};
+    void* payload{};
+    std::uint32_t wrapper_flags{};
+    std::size_t logical_page_index{
+        erui::detail::invalid_compiled_index};
+    std::uint8_t category{};
+    bool valid{};
+    bool committed{};
+};
+
+std::uint64_t g_tab_carrier_epoch{};
+
+TabCarrierIdentity inspect_tab_carrier(
+    void* page,
+    std::uint8_t category,
+    std::size_t logical_page_index) noexcept {
+    TabCarrierIdentity result{};
+    result.panel = page;
+    result.category = category;
+    result.logical_page_index = logical_page_index;
+    if (!page || !g_addresses.game_image_base ||
+        kSceneObjProxyGetValueRva >= g_addresses.game_image_size ||
+        kSceneObjProxyVtableRva >= g_addresses.game_image_size) {
+        return result;
+    }
+#if defined(_MSC_VER)
+    __try {
+#endif
+        const std::uintptr_t image = reinterpret_cast<std::uintptr_t>(
+            g_addresses.game_image_base);
+        auto* const proxy = static_cast<std::byte*>(page) +
+            kPanelSceneProxyOffset;
+        void* const proxy_vtable = *reinterpret_cast<void**>(proxy);
+        void* const expected_vtable = reinterpret_cast<void*>(
+            image + kSceneObjProxyVtableRva);
+        void* const getter = proxy_vtable
+            ? *reinterpret_cast<void**>(
+                  static_cast<std::byte*>(proxy_vtable) + sizeof(void*))
+            : nullptr;
+        if (proxy_vtable != expected_vtable ||
+            getter != reinterpret_cast<void*>(
+                image + kSceneObjProxyGetValueRva)) {
+            return result;
+        }
+        using GetterFn = void*(__fastcall*)(void*);
+        result.wrapper = reinterpret_cast<GetterFn>(getter)(proxy);
+        if (!result.wrapper) return result;
+        result.wrapper_flags = *reinterpret_cast<const std::uint32_t*>(
+            static_cast<const std::byte*>(result.wrapper) +
+                kSceneProxyWrapperFlagsOffset);
+        result.payload = *reinterpret_cast<void* const*>(
+            static_cast<const std::byte*>(result.wrapper) +
+                kSceneProxyWrapperPayloadOffset);
+        result.valid = result.payload != nullptr &&
+            (result.wrapper_flags & 0x8Fu) >= 2u;
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        result = {};
+        result.panel = page;
+        result.category = category;
+        result.logical_page_index = logical_page_index;
+    }
+#endif
+    return result;
+}
+
+// Graphics carrier V2. Category 8 is the sole recyclable
+// rows-only carrier. Category 5 is used only as synchronous native parking.
+TabCarrierIdentity g_tab_carrier{};
+std::size_t g_reusable_route{erui::detail::invalid_compiled_index};
+void* g_reusable_composite{};
+std::uint64_t g_reusable_activation_frame{};
+std::atomic_bool g_reusable_failed{};
+using TabCarrierParkingSwitchFn = bool(__cdecl*)(void*, std::int32_t);
+using TabCarrierQueueFn = void(__fastcall*)(void*, void*);
+
+std::size_t custom_tab_route_count() noexcept {
+    const auto& runtime = erui::detail::runtime_state();
+    return runtime.menu ? runtime.menu->tab_page_indices.size() : 0;
+}
+
+std::size_t native_graphics_route() noexcept {
+    return custom_tab_route_count();
+}
+
+std::size_t graphics_route_count() noexcept {
+    const std::size_t custom_count = custom_tab_route_count();
+    return custom_count == (std::numeric_limits<std::size_t>::max)()
+        ? custom_count
+        : custom_count + 1;
+}
+
+struct TabCarrierAllocatorTarget {
+    std::uintptr_t vtable;
+    std::uintptr_t method;
+    std::uint64_t entry;
+};
+
+// Exact DLAllocator descendants validated for Configuration panels in the
+// supported 2.7.1 executable. No unlisted vtable/queue pair is called.
+constexpr std::array<TabCarrierAllocatorTarget, 26>
+    kTabCarrierAllocatorTargets{{
+        {0x29D54F0,0x2657530,0xFF864788E9CA8B48},
+        {0x2B7D418,0xB97EC0,0x74894808245C8948},
+        {0x2BDE708,0xE14B60,0x8B4820EC83485340},
+        {0x2BDE8F0,0xE156B0,0xC74840EC83485740},
+        {0x2BDECA0,0xE16260,0x28C1834808498B48},
+        {0x2BDEA48,0xE15BA0,0x28C1834808498B48},
+        {0x2BDED78,0xE166D0,0xC74840EC83485740},
+        {0x2BDE818,0xE150C0,0xC74840EC83485740},
+        {0x2BDEB20,0xE15F30,0x28C1834808498B48},
+        {0x2BDEE50,0xE16CA0,0xC74840EC83485740},
+        {0x2BE1870,0xE1F250,0x8B4820EC83485340},
+        {0x2BE1A20,0xE1F7B0,0x8B4820EC83485340},
+        {0x2F26FA8,0x1C59C30,0x00262088E9CA8B48},
+        {0x2F273D0,0x1AF6110,0x5FA5EF08900000C2},
+        {0x30357D8,0x1B44400,0x28C1834808498B48},
+        {0x3051240,0x1C29FE0,0xA33CC7EC900000C2},
+        {0x30B0298,0x1EBCE90,0xEB17900000065BE9},
+        {0x30C0228,0x1F38D90,0xC74840EC83485740},
+        {0x30CA908,0x1F61F50,0x48018B4808498B48},
+        {0x30CAE70,0x1F64450,0xC74830EC83485740},
+        {0x30CFE80,0x1F81AA0,0x3176CC030E302AE9},
+        {0x30CFF58,0x1F81AB0,0x35A19002D12495E9},
+        {0x3278EA0,0x26398D0,0xC74830EC83485740},
+        {0x30C74A0,0x1A4900,0x28C1834808498B48},
+        {0x2BBFF38,0x1538B0,0xC74840EC83485740},
+        {0x2BE0F30,0x1F1A8D0,0x48018B4808498B48},
+    }};
+
+bool reusable_fault(const char* reason) noexcept {
+    g_reusable_failed.store(true, std::memory_order_release);
+    erui::detail::logf(erui::LogLevel::error,
+        "Native-tab Graphics carrier FAILED CLOSED: %s; custom transitions frozen, native input remains live",
+        reason);
+    return false;
+}
+
+bool exact_allocator_target(
+    std::uintptr_t image,
+    void* manager_vtable,
+    void* queue) noexcept {
+    for (const auto& target : kTabCarrierAllocatorTargets) {
+        if (manager_vtable == reinterpret_cast<void*>(
+                image + target.vtable) &&
+            queue == reinterpret_cast<void*>(image + target.method) &&
+            std::memcmp(queue, &target.entry, sizeof(target.entry)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool cached_identity_is_globally_unique(
+    void** slots,
+    std::size_t owner_slot,
+    const TabCarrierIdentity& owner,
+    const char* label) noexcept {
+    if (!slots || owner_slot >= 10 || !owner.valid ||
+        slots[owner_slot] != owner.panel || !owner.wrapper ||
+        !owner.payload) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Native-tab Graphics carrier identity audit rejected %s owner slot=%zu panel=%p wrapper=%p payload=%p valid=%d",
+            label ? label : "unknown", owner_slot, owner.panel,
+            owner.wrapper, owner.payload, owner.valid ? 1 : 0);
+        return false;
+    }
+    for (std::size_t slot = 0; slot < 10; ++slot) {
+        if (slot == owner_slot || !slots[slot]) continue;
+        const auto other = inspect_tab_carrier(
+            slots[slot], static_cast<std::uint8_t>(slot),
+            erui::detail::invalid_compiled_index);
+        const bool distinct = other.valid &&
+            other.panel != owner.panel &&
+            other.wrapper != owner.wrapper &&
+            other.payload != owner.payload;
+        if (!distinct) {
+            erui::detail::logf(erui::LogLevel::error,
+                "Native-tab Graphics carrier identity audit rejected %s ownerSlot=%zu owner=%p/%p/%p conflictingSlot=%zu other=%p/%p/%p valid=%d",
+                label ? label : "unknown", owner_slot,
+                owner.panel, owner.wrapper, owner.payload, slot,
+                other.panel, other.wrapper, other.payload,
+                other.valid ? 1 : 0);
+            return false;
+        }
+    }
+    return true;
+}
+
+void clear_retired_page_references(void* panel) noexcept {
+    if (!panel) return;
+    void* expected = panel;
+    const bool dialog_cleared = g_dialog_input_page.compare_exchange_strong(
+        expected, nullptr, std::memory_order_acq_rel,
+        std::memory_order_acquire);
+    expected = panel;
+    const bool root_cleared = g_last_page.compare_exchange_strong(
+        expected, nullptr, std::memory_order_acq_rel,
+        std::memory_order_acquire);
+
+    // A tab transition cannot legitimately overlap a pending subpage open.
+    // Cancel the request before destroying its possible parent page. Existing
+    // child bindings are left intact and are normally removed by native Back.
+    const bool pending_subpage =
+        g_submenu_navigation.pending_route().valid();
+    if (pending_subpage) g_submenu_navigation.cancel_request();
+    reset_color_picker_page_widgets(
+        panel, ColorPickerWidgetHost::subpage);
+    erui::detail::logf(erui::LogLevel::trace,
+        "Native-tab Graphics carrier cleared retiring page references panel=%p dialog=%d root=%d pendingSubpageCancelled=%d",
+        panel, dialog_cleared ? 1 : 0, root_cleared ? 1 : 0,
+        pending_subpage ? 1 : 0);
+}
+
+std::uint32_t graphics_carrier_version_v2_impl() noexcept {
+    return 2;
+}
+
+bool prepare_graphics_carrier_v2_impl(
+    void* composite,
+    std::size_t route,
+    std::uint64_t completed_frame,
+    std::int32_t* category,
+    TabCarrierParkingSwitchFn park_native) noexcept {
+    if (g_reusable_failed.load(std::memory_order_acquire)) return false;
+    const auto& runtime = erui::detail::runtime_state();
+    const std::size_t custom_count = custom_tab_route_count();
+    if (!composite || !category || !park_native || !runtime.menu ||
+        custom_count == 0 || route >= graphics_route_count() ||
+        (g_reusable_composite && composite != g_reusable_composite)) {
+        return reusable_fault(
+            "invalid composite, catalogue, route or output");
+    }
+    const auto image = reinterpret_cast<std::uintptr_t>(
+        g_addresses.game_image_base);
+    if (!image || g_addresses.game_image_size != 0x5E0DA00) {
+        return reusable_fault(
+            "retirement requires exact Elden Ring 2.7.1 image");
+    }
+
+#if defined(_MSC_VER)
+    __try {
+#endif
+        constexpr std::array<std::uint8_t, 16> manager_entry{
+            0x4C,0x63,0x05,0x81,0xF3,0xF6,0x02,0x33,
+            0xD2,0x4D,0x85,0xC0,0x7E,0x1E,0x48,0x8D};
+        constexpr std::array<std::uint8_t, 16> deactivate_entry{
+            0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,
+            0xEC,0x20,0x8B,0xDA,0x48,0x8B,0xF9,0xE8};
+        if (std::memcmp(reinterpret_cast<const void*>(image + 0xE1C080),
+                manager_entry.data(), manager_entry.size()) != 0 ||
+            std::memcmp(reinterpret_cast<const void*>(image + 0x953520),
+                deactivate_entry.data(), deactivate_entry.size()) != 0) {
+            return reusable_fault(
+                "retirement manager/deactivate bytes differed");
+        }
+
+        auto* const bytes = static_cast<std::byte*>(composite);
+        if (*reinterpret_cast<void**>(bytes) !=
+                reinterpret_cast<void*>(image + 0x2B0C950) ||
+            *reinterpret_cast<void**>(bytes - 0x1768) !=
+                reinterpret_cast<void*>(image + 0x2B16B48)) {
+            return reusable_fault(
+                "composite/top vtable differed from validated objects");
+        }
+
+        auto** const slots = reinterpret_cast<void**>(bytes + 0x68);
+        void* current = *reinterpret_cast<void**>(bytes + 0xB8);
+        g_reusable_composite = composite;
+        constexpr std::int32_t target = 8;
+        constexpr std::int32_t parking = 5;
+
+        if (g_reusable_route == route && slots[target]) {
+            const auto observed = inspect_tab_carrier(
+                slots[target], target,
+                g_tab_carrier.logical_page_index);
+            if (!g_tab_carrier.committed || !observed.valid ||
+                slots[target] != g_tab_carrier.panel ||
+                observed.wrapper != g_tab_carrier.wrapper ||
+                observed.payload != g_tab_carrier.payload ||
+                !cached_identity_is_globally_unique(
+                    slots, target, observed,
+                    "same-route Graphics carrier")) {
+                return reusable_fault(
+                    "cached route lost its exact committed Graphics carrier");
+            }
+            *category = target;
+            g_reusable_activation_frame = completed_frame;
+            return true;
+        }
+
+        void* const old_panel = slots[target];
+        if (old_panel) {
+            if (completed_frame <= g_reusable_activation_frame) {
+                return reusable_fault(
+                    "Graphics carrier retirement requires one completed frame");
+            }
+            const auto observed = inspect_tab_carrier(
+                old_panel, target,
+                g_tab_carrier.logical_page_index);
+            const auto panel = inspect_builtin_panel(old_panel);
+            if (!g_tab_carrier.committed || !observed.valid ||
+                !panel.valid || g_reusable_route >= graphics_route_count() ||
+                observed.panel != g_tab_carrier.panel ||
+                observed.wrapper != g_tab_carrier.wrapper ||
+                observed.payload != g_tab_carrier.payload ||
+                !cached_identity_is_globally_unique(
+                    slots, target, observed,
+                    "pre-retirement Graphics carrier")) {
+                return reusable_fault(
+                    "Graphics identity failed before native retirement");
+            }
+
+            using ManagerFn = void*(__fastcall*)(void*);
+            using DeactivateFn = void(__fastcall*)(void*, bool);
+            void* const manager =
+                reinterpret_cast<ManagerFn>(image + 0xE1C080)(old_panel);
+            if (!manager) return reusable_fault("retirement manager was null");
+            void* const deactivate = *reinterpret_cast<void**>(
+                static_cast<std::byte*>(panel.vtable) + 0x08);
+            void* const manager_vtable = *reinterpret_cast<void**>(manager);
+            void* const queue = manager_vtable
+                ? *reinterpret_cast<void**>(
+                      static_cast<std::byte*>(manager_vtable) + 0x68)
+                : nullptr;
+            if (deactivate != reinterpret_cast<void*>(image + 0x953520) ||
+                !manager_vtable || !queue ||
+                !exact_allocator_target(image, manager_vtable, queue)) {
+                return reusable_fault(
+                    "retirement allocator/deactivate target was not exact");
+            }
+
+            if (old_panel == current) {
+                void* const parking_before = slots[parking];
+                const auto parking_identity_before = inspect_tab_carrier(
+                    parking_before, parking,
+                    erui::detail::invalid_compiled_index);
+                if (parking_before &&
+                    (!inspect_builtin_panel(parking_before).valid ||
+                        !parking_identity_before.valid ||
+                        parking_before == old_panel ||
+                        parking_identity_before.wrapper == observed.wrapper ||
+                        parking_identity_before.payload == observed.payload ||
+                        !cached_identity_is_globally_unique(
+                            slots, parking, parking_identity_before,
+                            "cached Network parking panel"))) {
+                    return reusable_fault(
+                        "cached Network parking identity was invalid or aliased");
+                }
+                if (!park_native(composite, parking)) {
+                    return reusable_fault(
+                        "native Network parking switch/state isolation failed");
+                }
+                void* const parked_panel = slots[parking];
+                const auto parked = inspect_tab_carrier(
+                    parked_panel, parking,
+                    erui::detail::invalid_compiled_index);
+                const auto old_after = inspect_tab_carrier(
+                    old_panel, target,
+                    g_tab_carrier.logical_page_index);
+                if (!parked_panel || !parked.valid ||
+                    !inspect_builtin_panel(parked_panel).valid ||
+                    *reinterpret_cast<void**>(bytes + 0xB8) != parked_panel ||
+                    parked_panel == old_panel ||
+                    parked.wrapper == observed.wrapper ||
+                    parked.payload == observed.payload ||
+                    slots[target] != old_panel || !old_after.valid ||
+                    old_after.wrapper != observed.wrapper ||
+                    old_after.payload != observed.payload ||
+                    !cached_identity_is_globally_unique(
+                        slots, target, old_after,
+                        "parked Graphics carrier") ||
+                    !cached_identity_is_globally_unique(
+                        slots, parking, parked,
+                        "active Network parking panel") ||
+                    (parking_before &&
+                        (parked_panel != parking_before ||
+                            parked.wrapper != parking_identity_before.wrapper ||
+                            parked.payload != parking_identity_before.payload))) {
+                    return reusable_fault(
+                        "Network parking did not leave Graphics intact/inactive");
+                }
+                current = parked_panel;
+                erui::detail::logf(erui::LogLevel::trace,
+                    "Native-tab Graphics carrier parked frame=%llu route=%zu category=5 panel=%p wrapper=%p payload=%p cached=%d currentExact=1 graphicsInactive=1 stateCopySuppressed=1 synchronous=1",
+                    static_cast<unsigned long long>(completed_frame), route,
+                    parked_panel, parked.wrapper, parked.payload,
+                    parking_before != nullptr);
+            }
+
+            if (old_panel == *reinterpret_cast<void**>(bytes + 0xB8) ||
+                *reinterpret_cast<void**>(bytes + 0xB8) != current) {
+                return reusable_fault(
+                    "refused retirement because Graphics was current/current changed");
+            }
+            void* const parking_pre_retire = slots[parking];
+            const auto parking_pre_identity = inspect_tab_carrier(
+                parking_pre_retire, parking,
+                erui::detail::invalid_compiled_index);
+            if (parking_pre_retire &&
+                (!parking_pre_identity.valid ||
+                    !cached_identity_is_globally_unique(
+                        slots, parking, parking_pre_identity,
+                        "pre-retirement Network parking panel"))) {
+                return reusable_fault(
+                    "Network parking identity was not globally unique before retirement");
+            }
+            clear_retired_page_references(old_panel);
+            reinterpret_cast<DeactivateFn>(deactivate)(old_panel, false);
+            if (*reinterpret_cast<void**>(bytes + 0xB8) != current ||
+                slots[target] != old_panel) {
+                return reusable_fault(
+                    "current/cache changed during Graphics deactivation");
+            }
+            {
+                bool queue_returned{};
+#if defined(_MSC_VER)
+                __try {
+#endif
+                    reinterpret_cast<TabCarrierQueueFn>(queue)(
+                        manager, old_panel);
+                    queue_returned = true;
+#if defined(_MSC_VER)
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    // Ownership may already have transferred. Clear the sole
+                    // cache owner before failing so native teardown cannot
+                    // queue the same panel a second time.
+                    slots[target] = nullptr;
+                }
+#endif
+                const bool post_current_unchanged =
+                    *reinterpret_cast<void**>(bytes + 0xB8) == current;
+                const bool post_graphics_pointer_unchanged =
+                    slots[target] == old_panel;
+                const bool post_network_pointer_unchanged =
+                    slots[parking] == parking_pre_retire;
+                // From this point the allocator owns old_panel. Never inspect
+                // or dereference it again through slot 8.
+                slots[target] = nullptr;
+                g_tab_carrier = {};
+                ++g_tab_carrier_epoch;
+                if (g_tab_carrier_epoch == 0) g_tab_carrier_epoch = 1;
+                if (!queue_returned || !post_current_unchanged ||
+                    !post_graphics_pointer_unchanged ||
+                    !post_network_pointer_unchanged) {
+                    return reusable_fault(
+                        "post-queue raw cache/current invariants differed; slot 8 was cleared to prevent double retirement");
+                }
+                erui::detail::logf(erui::LogLevel::trace,
+                    "Native-tab Graphics carrier retired frame=%llu activationFrame=%llu ageFrames=%llu priorRoute=%zu nextRoute=%zu old=%p/%p/%p active=%p manager=%p managerVtable=%p deactivate=%p queue=%p allocatorExact=1 slot8Null=%d currentUntouched=%d networkUntouched=1",
+                    static_cast<unsigned long long>(completed_frame),
+                    static_cast<unsigned long long>(
+                        g_reusable_activation_frame),
+                    static_cast<unsigned long long>(
+                        completed_frame - g_reusable_activation_frame),
+                    g_reusable_route, route, old_panel, observed.wrapper,
+                    observed.payload, current, manager, manager_vtable,
+                    deactivate, queue, slots[target] == nullptr,
+                    post_current_unchanged);
+            }
+        } else if (g_tab_carrier.committed) {
+            return reusable_fault(
+                "empty Graphics cache retained committed identity");
+        }
+
+        g_reusable_route = route;
+        g_reusable_activation_frame = completed_frame;
+        *category = target;
+        erui::detail::logf(erui::LogLevel::trace,
+            "Native-tab Graphics carrier prepared frame=%llu route=%zu kind=%s current=%p slot8Empty=%d",
+            static_cast<unsigned long long>(completed_frame), route,
+            route == native_graphics_route() ? "native-graphics" : "custom",
+            current, slots[target] == nullptr);
+        return true;
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return reusable_fault(
+            "SEH during Graphics staging/retirement");
+    }
+#endif
+}
+
+bool verify_graphics_carrier_v2_impl(
+    void* composite,
+    std::size_t route,
+    std::int32_t category) noexcept {
+    if (g_reusable_failed.load(std::memory_order_acquire) ||
+        composite != g_reusable_composite ||
+        route >= graphics_route_count() || category != 8) return false;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        const auto& identity = g_tab_carrier;
+        const auto observed = inspect_tab_carrier(
+            identity.panel, 8, identity.logical_page_index);
+        const auto panel = inspect_builtin_panel(identity.panel);
+        auto* const bytes = static_cast<std::byte*>(composite);
+        const bool exact = identity.committed &&
+            g_reusable_route == route && observed.valid && panel.valid &&
+            observed.wrapper == identity.wrapper &&
+            observed.payload == identity.payload &&
+            *reinterpret_cast<void**>(bytes + 0xB8) == identity.panel &&
+            *reinterpret_cast<void**>(bytes + 0x68 + 8 * 8) ==
+                identity.panel &&
+            cached_identity_is_globally_unique(
+                reinterpret_cast<void**>(bytes + 0x68), 8, observed,
+                "activated Graphics carrier");
+        erui::detail::logf(
+            exact ? erui::LogLevel::trace : erui::LogLevel::error,
+            "Native-tab Graphics carrier activated route=%zu kind=%s category=8 panel=%p wrapper=%p payload=%p rows=%llu committed=%d currentExact=%d",
+            route,
+            route == native_graphics_route() ? "native-graphics" : "custom",
+            identity.panel, identity.wrapper, identity.payload,
+            static_cast<unsigned long long>(panel.native_count),
+            identity.committed, exact);
+        return exact || reusable_fault(
+            "activation did not commit requested Graphics route");
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return reusable_fault("SEH during Graphics activation verification");
+    }
+#endif
+}
+
+
+void log_tab_content_route_fault(const char* message) noexcept {
+    const std::uint32_t event =
+        g_tab_content_route_fault_log_count.fetch_add(
+            1, std::memory_order_relaxed) + 1;
+    if (event <= 8) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Native-tab Graphics-carrier route fault[%u]: %s",
+            static_cast<unsigned>(event), message);
+    }
+}
+
+void begin_tab_content_category8_route(
+    safetyhook::Context& context) noexcept {
+    if (!g_tab_content_callbacks_armed.load(std::memory_order_acquire) ||
+        g_reusable_failed.load(std::memory_order_acquire)) {
+        // A sticky carrier fault must degrade to Elden Ring's original
+        // Graphics construction. Replacing the callback and then letting the
+        // host materializer reject it would otherwise create an empty page.
+        return;
+    }
+    const std::uintptr_t image = reinterpret_cast<std::uintptr_t>(
+        g_addresses.game_image_base);
+    if (!image || kCategory8MaterializerRva >=
+            g_addresses.game_image_size) {
+        log_tab_content_route_fault("invalid image bounds");
+        return;
+    }
+    bool replaced{};
+    bool secondary_zeroed{};
+    std::uint8_t observed_selector{};
+    std::uintptr_t observed_primary_slot{};
+    std::uintptr_t observed_secondary_slot{};
+    std::uint8_t observed_enabled{};
+    std::uint8_t observed_reserved{};
+    std::uintptr_t observed_primary_callback{};
+    std::uint32_t observed_primary_metadata{};
+    std::uintptr_t observed_secondary_callback{};
+    std::uint32_t observed_secondary_metadata{};
+#if defined(_MSC_VER)
+    __try {
+#endif
+        auto* const stack = reinterpret_cast<std::byte*>(context.rsp);
+        observed_selector =
+            *reinterpret_cast<const std::uint8_t*>(stack + 0x20);
+        observed_primary_slot =
+            *reinterpret_cast<const std::uintptr_t*>(stack + 0x28);
+        observed_secondary_slot =
+            *reinterpret_cast<const std::uintptr_t*>(stack + 0x30);
+        observed_enabled =
+            *reinterpret_cast<const std::uint8_t*>(stack + 0x38);
+        observed_reserved =
+            *reinterpret_cast<const std::uint8_t*>(stack + 0x40);
+        auto* const secondary_callback =
+            reinterpret_cast<std::uintptr_t*>(
+            stack + 0x50);
+        auto* const secondary_metadata =
+            reinterpret_cast<std::uint32_t*>(stack + 0x58);
+        auto* const primary_callback =
+            reinterpret_cast<std::uintptr_t*>(
+            stack + 0x60);
+        auto* const primary_metadata =
+            reinterpret_cast<std::uint32_t*>(stack + 0x68);
+        observed_primary_callback = *primary_callback;
+        observed_primary_metadata = *primary_metadata;
+        observed_secondary_callback = *secondary_callback;
+        observed_secondary_metadata = *secondary_metadata;
+        // Both callback descriptors occupy 16 stack bytes, but the wrapper
+        // initializes only an eight-byte callback and four-byte metadata
+        // field. The final four bytes are padding and must neither be read as
+        // metadata nor mutated.
+        const bool exact = observed_selector == 11 &&
+            observed_primary_slot == context.rsp + 0x60 &&
+            observed_secondary_slot == context.rsp + 0x50 &&
+            observed_enabled == 1 && observed_reserved == 0 &&
+            observed_primary_callback ==
+                image + kCategory8MaterializerRva &&
+            observed_primary_metadata == 0 &&
+            observed_secondary_callback ==
+                image + kCategory8ExtraCallbackRva &&
+            observed_secondary_metadata == 0;
+        if (exact) {
+            *primary_callback = reinterpret_cast<std::uintptr_t>(
+                &tab_content_category8_materializer);
+            if (g_reusable_route != native_graphics_route()) {
+                // Selector 11 invokes this callback after row materialization.
+                // A custom route must use the generic post-init branch.
+                *secondary_callback = 0;
+                *secondary_metadata = 0;
+                secondary_zeroed = true;
+            }
+            replaced = true;
+        }
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        log_tab_content_route_fault("SEH reading callback locals");
+        return;
+    }
+#endif
+    if (!replaced) {
+        const std::uint32_t event =
+            g_tab_content_route_fault_log_count.fetch_add(
+                1, std::memory_order_relaxed) + 1;
+        if (event <= 8) {
+            erui::detail::logf(erui::LogLevel::error,
+                "Native-tab Graphics-carrier route fault[%u]: unexpected selector/callback stack-local contract observed={selector:%u primarySlot:%p secondarySlot:%p enabled:%u reserved:%u primary:%p/0x%08X secondary:%p/0x%08X}",
+                static_cast<unsigned>(event),
+                static_cast<unsigned>(observed_selector),
+                reinterpret_cast<void*>(observed_primary_slot),
+                reinterpret_cast<void*>(observed_secondary_slot),
+                static_cast<unsigned>(observed_enabled),
+                static_cast<unsigned>(observed_reserved),
+                reinterpret_cast<void*>(observed_primary_callback),
+                static_cast<unsigned>(observed_primary_metadata),
+                reinterpret_cast<void*>(observed_secondary_callback),
+                static_cast<unsigned>(observed_secondary_metadata));
+        }
+        return;
+    }
+    const std::uint32_t event =
+        g_tab_content_route_log_count.fetch_add(
+            1, std::memory_order_relaxed) + 1;
+    if (event <= 32) {
+        erui::detail::logf(erui::LogLevel::trace,
+            "Native-tab Graphics route begin[%u]: route=%zu kind=%s selector=11 primary=host-thunk secondary=%s",
+            static_cast<unsigned>(event), g_reusable_route,
+            g_reusable_route == native_graphics_route()
+                ? "native-graphics" : "custom",
+            secondary_zeroed ? "zero/generic-post-init" :
+                "native-0x95A820");
+    }
+}
+
+void materialize_native_graphics(void* page) noexcept {
+    const std::uintptr_t image = reinterpret_cast<std::uintptr_t>(
+        g_addresses.game_image_base);
+    if (!page || !image || kCategory8MaterializerRva >=
+            g_addresses.game_image_size) return;
+    reinterpret_cast<BuiltinPanelMaterializerFn>(
+        image + kCategory8MaterializerRva)(
+            page, static_cast<std::byte*>(page) + 0x1B38);
+}
+
+void __fastcall tab_content_category8_materializer(
+    void* page,
+    void* untrusted_argument2) noexcept {
+    (void)untrusted_argument2;
+    if (!page || g_reusable_failed.load(std::memory_order_acquire) ||
+        g_tab_carrier.committed) {
+        reusable_fault(
+            "materialization occurred without exact prior Graphics retirement");
+        return;
+    }
+    if (g_tab_carrier_epoch == 0) g_tab_carrier_epoch = 1;
+
+    const BuiltinPanelSnapshot before = inspect_builtin_panel(page);
+    const TabCarrierIdentity initial = inspect_tab_carrier(
+        page, 8, erui::detail::invalid_compiled_index);
+    if (!before.valid || before.native_count != 0 || !initial.valid) {
+        reusable_fault("fresh Graphics panel failed pre-mutation identity");
+        return;
+    }
+
+    if (g_reusable_route == native_graphics_route()) {
+        materialize_native_graphics(page);
+        const BuiltinPanelSnapshot after = inspect_builtin_panel(page);
+        TabCarrierIdentity identity = inspect_tab_carrier(
+            page, 8, erui::detail::invalid_compiled_index);
+        const bool committed = after.valid && after.native_count > 0 &&
+            after.native_count <= after.visual_capacity && identity.valid &&
+            identity.wrapper == initial.wrapper &&
+            identity.payload == initial.payload;
+        if (committed) {
+            identity.committed = true;
+            g_tab_carrier = identity;
+        }
+        erui::detail::logf(
+            committed ? erui::LogLevel::trace : erui::LogLevel::error,
+            "Native-tab Graphics carrier construct: epoch=%llu route=%zu kind=native-graphics page=%p wrapper=%p payload=%p before=%llu after=%llu visualRows=%u committed=%d extraCallback=native",
+            static_cast<unsigned long long>(g_tab_carrier_epoch),
+            g_reusable_route,
+            page, identity.wrapper, identity.payload,
+            static_cast<unsigned long long>(before.native_count),
+            static_cast<unsigned long long>(after.native_count),
+            static_cast<unsigned>(after.visual_capacity),
+            committed ? 1 : 0);
+        if (!committed) reusable_fault("native Graphics restoration failed");
+        return;
+    }
+
+    erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
+    if (!runtime.options.enable_row_injection || !runtime.menu ||
+        runtime.menu->tab_page_indices.empty() ||
+        g_reusable_route >= runtime.menu->tab_page_indices.size()) {
+        reusable_fault("custom Graphics route had no compiled tab page");
+        return;
+    }
+    const std::size_t logical_page_index =
+        runtime.menu->tab_page_indices[g_reusable_route];
+    if (logical_page_index >= runtime.menu->pages.size() ||
+        runtime.menu->pages[logical_page_index].kind != erui::PageKind::tab) {
+        reusable_fault("custom Graphics route resolved invalid tab page");
+        return;
+    }
+    const std::size_t logical_rows =
+        runtime.menu->pages[logical_page_index].rows.size();
+    const erui::detail::PageRoute route =
+        erui::detail::PageRoute::tab_main(
+            logical_page_index,
+            static_cast<std::uint8_t>(before.visual_capacity));
+    erui::detail::PageSlice expected_slice{};
+    if (!resolve_page_route_slice(*runtime.menu, route, expected_slice)) {
+        reusable_fault("custom Graphics route slice could not resolve");
+        return;
+    }
+    const std::size_t expected_native_rows = expected_slice.row_count +
+        (expected_slice.has_previous ? 1u : 0u) +
+        (expected_slice.has_next ? 1u : 0u);
+    if (expected_native_rows > before.visual_capacity) {
+        reusable_fault("custom rows exceeded Graphics capacity");
+        return;
+    }
+    const RowInjectionOutcome outcome = inject_page_route(
+        page, route, g_addresses);
+    const BuiltinPanelSnapshot after = inspect_builtin_panel(page);
+    TabCarrierIdentity identity = inspect_tab_carrier(
+        page, 8, logical_page_index);
+    const bool identity_stable = identity.valid &&
+        identity.wrapper == initial.wrapper &&
+        identity.payload == initial.payload;
+    const bool committed = after.valid && outcome.faulted == 0 &&
+        outcome.skipped == 0 && outcome.attempted == expected_native_rows &&
+        outcome.added == expected_native_rows &&
+        after.native_count == expected_native_rows &&
+        after.native_count <= after.visual_capacity && identity_stable;
+    if (committed) {
+        identity.committed = true;
+        g_tab_carrier = identity;
+        // Publish dialog/Back ownership only after the carrier identity and
+        // complete row injection have committed. A failed materialization
+        // must never leave input routed to an unowned category-8 page.
+        g_dialog_input_page.store(page, std::memory_order_release);
+    }
+    erui::detail::logf(
+        committed ? erui::LogLevel::trace : erui::LogLevel::error,
+        "Native-tab Graphics carrier construct: epoch=%llu route=%zu kind=custom page=%p wrapper=%p payload=%p logicalPage=%zu before=%llu after=%llu visualRows=%u logicalRows=%zu attempted=%u added=%u faulted=%u skipped=%u identityStable=%d committed=%d extraCallback=zero/generic-post-init",
+        static_cast<unsigned long long>(g_tab_carrier_epoch),
+        g_reusable_route, page, identity.wrapper, identity.payload,
+        logical_page_index,
+        static_cast<unsigned long long>(before.native_count),
+        static_cast<unsigned long long>(after.native_count),
+        static_cast<unsigned>(before.visual_capacity), logical_rows,
+        static_cast<unsigned>(outcome.attempted),
+        static_cast<unsigned>(outcome.added),
+        static_cast<unsigned>(outcome.faulted),
+        static_cast<unsigned>(outcome.skipped),
+        identity_stable ? 1 : 0, committed ? 1 : 0);
+    if (!committed) reusable_fault("custom Graphics materialization failed");
+}
+
+void __fastcall tab_content_composite_teardown_detour(
+    void* composite) noexcept {
+    const auto original = g_original_tab_content_composite_teardown.load(
+        std::memory_order_acquire);
+    if (!original) return;
+    if (!g_tab_content_callbacks_armed.load(std::memory_order_acquire)) {
+        original(composite);
+        return;
+    }
+    TabCarrierIdentity category8{};
+    bool slot_read{};
+    if (composite) {
+#if defined(_MSC_VER)
+        __try {
+#endif
+            void* const panel = *reinterpret_cast<void**>(
+                static_cast<std::byte*>(composite) + 0x68 + 8 * 8);
+            category8 = inspect_tab_carrier(
+                panel,
+                8, g_tab_carrier.logical_page_index);
+            slot_read = true;
+#if defined(_MSC_VER)
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+#endif
+    }
+    const bool tracked = g_tab_carrier.committed;
+    const bool exact_tracked = tracked && slot_read && category8.valid &&
+        composite == g_reusable_composite &&
+        category8.panel == g_tab_carrier.panel &&
+        category8.wrapper == g_tab_carrier.wrapper &&
+        category8.payload == g_tab_carrier.payload;
+    const bool clean_empty = !tracked && slot_read && !category8.panel &&
+        (!g_reusable_composite || composite == g_reusable_composite);
+    if (category8.panel) {
+        clear_retired_page_references(category8.panel);
+    }
+    original(composite);
+    bool cleared{};
+#if defined(_MSC_VER)
+    __try {
+#endif
+        cleared = composite && !*reinterpret_cast<void**>(
+            static_cast<std::byte*>(composite) + 0x68 + 8 * 8);
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+#endif
+    const bool exact_teardown = cleared &&
+        (exact_tracked || clean_empty);
+    erui::detail::logf(
+        exact_teardown ? erui::LogLevel::trace : erui::LogLevel::error,
+        "Native-tab Graphics carrier native teardown: epoch=%llu composite=%p route=%zu category8=%p/%p/%p tracked=%d exactTracked=%d cleanEmpty=%d slot8Null=%d networkRetiredByHost=0",
+        static_cast<unsigned long long>(g_tab_carrier_epoch),
+        composite, g_reusable_route, category8.panel, category8.wrapper,
+        category8.payload, tracked ? 1 : 0, exact_tracked ? 1 : 0,
+        clean_empty ? 1 : 0, cleared ? 1 : 0);
+    if (exact_teardown) {
+        g_tab_carrier = {};
+        g_reusable_route = native_graphics_route();
+        g_reusable_composite = nullptr;
+        g_reusable_activation_frame = 0;
+        // Exact native destruction is the sole recovery boundary for a
+        // sticky carrier fault. Until this point category 8 may still cache a
+        // custom or partially constructed panel and must not be treated as
+        // native Graphics.
+        g_reusable_failed.store(false, std::memory_order_release);
+        g_tab_content_teardown_generation.fetch_add(
+            1, std::memory_order_acq_rel);
+        ++g_tab_carrier_epoch;
+        if (g_tab_carrier_epoch == 0) {
+            g_tab_carrier_epoch = 1;
+        }
+    } else {
+        (void)reusable_fault(
+            "native teardown did not match the tracked Graphics identity; retained diagnostics were not reset");
+    }
+}
+
+#endif
 
 void inject_builtin_panel_rows(
     void* page,
@@ -466,6 +1390,10 @@ const char* route_kind_name(erui::detail::PageRouteKind kind) noexcept {
         return "built-in-continuation";
     case erui::detail::PageRouteKind::builtin_main:
         return "built-in-main";
+    case erui::detail::PageRouteKind::tab_continuation:
+        return "tab-continuation";
+    case erui::detail::PageRouteKind::tab_main:
+        return "tab-main";
     }
     return "unknown";
 }
@@ -676,7 +1604,7 @@ void __fastcall game_options_handler_detour(
     const std::uint32_t log_limit = erui::detail::diagnostics_enabled() ? 128u : 4u;
     if (injection <= log_limit || outcome.faulted != 0) {
         erui::detail::logf(
-            outcome.faulted == 0 ? erui::LogLevel::info : erui::LogLevel::error,
+            outcome.faulted == 0 ? erui::LogLevel::trace : erui::LogLevel::error,
             "injection[%u] page=%p route=%s logicalPage=%zu slice=%zu/%zu capacity=%u attempted=%u added=%u navigation=%u faulted=%u skipped=%u",
             static_cast<unsigned>(injection),
             page,
@@ -785,7 +1713,10 @@ void __fastcall sub_handler_detour(
         (route.kind ==
                 erui::detail::PageRouteKind::builtin_continuation &&
             runtime.menu->builtin_page_index(route.builtin_category) ==
-                route.logical_page_index);
+                route.logical_page_index) ||
+        (route.kind ==
+                erui::detail::PageRouteKind::tab_continuation &&
+            compiled_page.kind == erui::PageKind::tab);
     if (!route_matches_page) {
         erui::detail::logf(
             erui::LogLevel::error,
@@ -832,7 +1763,7 @@ void __fastcall sub_handler_detour(
     const std::uint32_t log_limit = runtime.options.enable_diagnostics ? 192u : 8u;
     if (injection <= log_limit || outcome.faulted != 0) {
         erui::detail::logf(
-            outcome.faulted == 0 ? erui::LogLevel::info : erui::LogLevel::error,
+            outcome.faulted == 0 ? erui::LogLevel::trace : erui::LogLevel::error,
             "physicalPageMaterialize[%u] page=%p source=%s route=%s logicalPage=%zu slice=%zu/%zu firstRow=%zu contentRows=%zu attempted=%u added=%u navigation=%u faulted=%u skipped=%u",
             static_cast<unsigned>(injection),
             page,
@@ -1041,6 +1972,164 @@ bool install_game_options_hook(const GameAddresses& addresses) noexcept {
     }
     return true;
 }
+
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+template <std::size_t Size>
+bool tab_content_bytes_match(
+    const std::uint8_t* address,
+    const std::array<std::uint8_t, Size>& expected) noexcept {
+    if (!address) return false;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        return std::memcmp(address, expected.data(), expected.size()) == 0;
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+#endif
+}
+
+bool tab_carrier_signatures_match(
+    const GameAddresses& addresses) noexcept {
+    // Category 8 (Graphics), Elden Ring 2.7.1.0. Native Graphics preserves
+    // both callbacks. Each 16-byte descriptor contains an eight-byte callback,
+    // four-byte metadata field and four bytes of padding. A validated custom
+    // route substitutes the callback at stack+0x60 and clears only the
+    // authored callback/metadata fields at stack+0x50.
+    constexpr std::array<std::uint8_t, 7> extra_callback{
+        0x48, 0x8D, 0x05, 0xF9, 0xD8, 0x01, 0x00};
+    constexpr std::array<std::uint8_t, 7> row_callback{
+        0x48, 0x8D, 0x05, 0x17, 0xF1, 0x01, 0x00};
+    constexpr std::array<std::uint8_t, 13> builder{
+        0x48, 0x8D, 0x8C, 0x24, 0x80, 0x00, 0x00, 0x00,
+        0xE8, 0xCB, 0x04, 0x00, 0x00};
+    constexpr std::array<std::uint8_t, 23> route{
+        0xC6, 0x44, 0x24, 0x20, 0x0B,
+        0x44, 0x0F, 0xB6, 0xCF, 0x4C, 0x8B, 0xC3,
+        0x48, 0x8B, 0xD0, 0x48, 0x8B, 0xCE,
+        0xE8, 0x95, 0x2D, 0x02, 0x00};
+    constexpr std::array<std::uint8_t, 16> teardown_entry{
+        0x48, 0x89, 0x4C, 0x24, 0x08, 0x55, 0x56, 0x57,
+        0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x30};
+    constexpr std::array<std::uint8_t, 16> manager_entry{
+        0x4C,0x63,0x05,0x81,0xF3,0xF6,0x02,0x33,
+        0xD2,0x4D,0x85,0xC0,0x7E,0x1E,0x48,0x8D};
+    constexpr std::array<std::uint8_t, 16> deactivate_entry{
+        0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,
+        0xEC,0x20,0x8B,0xDA,0x48,0x8B,0xF9,0xE8};
+    if (!addresses.game_image_base ||
+        addresses.game_image_size != 0x5E0DA00 ||
+        reinterpret_cast<void*>(addresses.graphics_panel_materializer) !=
+            addresses.game_image_base + kCategory8MaterializerRva) {
+        return false;
+    }
+
+    bool exact_image{};
+#if defined(_MSC_VER)
+    __try {
+#endif
+        const auto* const dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(
+            addresses.game_image_base);
+        if (dos->e_magic == IMAGE_DOS_SIGNATURE && dos->e_lfanew > 0 &&
+            static_cast<std::size_t>(dos->e_lfanew) +
+                    sizeof(IMAGE_NT_HEADERS64) <= addresses.game_image_size) {
+            const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+                addresses.game_image_base + dos->e_lfanew);
+            exact_image = nt->Signature == IMAGE_NT_SIGNATURE &&
+                nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
+                nt->FileHeader.TimeDateStamp == 0x6A96B418u &&
+                nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
+                nt->OptionalHeader.SizeOfImage == 0x5E0DA00u;
+        }
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        exact_image = false;
+    }
+#endif
+    if (!exact_image ||
+        !tab_content_bytes_match(
+            addresses.game_image_base + 0x93CF20, extra_callback) ||
+        !tab_content_bytes_match(
+            addresses.game_image_base + 0x93CF32, row_callback) ||
+        !tab_content_bytes_match(
+            addresses.game_image_base + 0x93CF58, builder) ||
+        !tab_content_bytes_match(
+            addresses.game_image_base + 0x93CF84, route) ||
+        !tab_content_bytes_match(
+            addresses.game_image_base + kCompositeTeardownRva,
+            teardown_entry) ||
+        !tab_content_bytes_match(
+            addresses.game_image_base + 0xE1C080, manager_entry) ||
+        !tab_content_bytes_match(
+            addresses.game_image_base + 0x953520, deactivate_entry)) {
+        return false;
+    }
+    return true;
+}
+
+bool install_tab_content_carrier_hooks(
+    const GameAddresses& addresses) noexcept {
+    if (g_tab_content_hooks_exposed.load(std::memory_order_acquire)) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Native-tab Graphics-carrier hooks were already exposed; refusing a second installation attempt");
+        return false;
+    }
+    if (!tab_carrier_signatures_match(addresses)) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Native-tab Graphics-carrier build/signatures differed; no carrier hooks installed");
+        return false;
+    }
+
+    auto pre8 = SafetyHookMid::create(
+        addresses.game_image_base + kCategory8PreRva,
+        &begin_tab_content_category8_route,
+        SafetyHookMid::StartDisabled);
+    if (!pre8) return false;
+    g_tab_content_category8_pre_hook = std::move(*pre8);
+
+    auto teardown = SafetyHookInline::create(
+        addresses.game_image_base + kCompositeTeardownRva,
+        reinterpret_cast<void*>(&tab_content_composite_teardown_detour),
+        SafetyHookInline::StartDisabled);
+    if (!teardown) {
+        g_tab_content_category8_pre_hook.reset();
+        return false;
+    }
+    g_tab_content_composite_teardown_hook = std::move(*teardown);
+    g_original_tab_content_composite_teardown.store(
+        g_tab_content_composite_teardown_hook
+            .original<TabCarrierCompositeTeardownFn>(),
+        std::memory_order_release);
+
+    // A callback may enter as soon as the first patch is published. From this
+    // point forward the hook objects and original trampoline are retained for
+    // the process lifetime. Until both patches are known enabled, the inline
+    // detour is exact pass-through and the mid hook is a no-op.
+    g_tab_content_callbacks_armed.store(false, std::memory_order_release);
+    g_tab_content_hooks_exposed.store(true, std::memory_order_release);
+    if (!g_tab_content_composite_teardown_hook.enable()) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Native-tab Graphics-carrier teardown hook could not be enabled; retaining the unarmed process-lifetime trampoline");
+        return false;
+    }
+    if (!g_tab_content_category8_pre_hook.enable()) {
+        erui::detail::logf(erui::LogLevel::error,
+            "Native-tab Graphics-carrier pre-hook could not be enabled; retaining unarmed process-lifetime hooks");
+        return false;
+    }
+    g_tab_content_callbacks_armed.store(true, std::memory_order_release);
+
+    erui::detail::logf(erui::LogLevel::info,
+        "Native-tab Graphics carrier installed category=8 selector=11 pre=+0x%llX nativeRows=+0x%llX extraCallback=+0x%llX policy={native:preserve custom:validated-zero} teardown=+0x%llX parking=stock-category5 synchronous=1",
+        static_cast<unsigned long long>(kCategory8PreRva),
+        static_cast<unsigned long long>(kCategory8MaterializerRva),
+        static_cast<unsigned long long>(kCategory8ExtraCallbackRva),
+        static_cast<unsigned long long>(kCompositeTeardownRva));
+    return true;
+}
+
+#endif
 
 template <typename Function>
 bool install_panel_materializer_hook(
@@ -1311,9 +2400,45 @@ TextHookInstallStatus install_text_hook(const GameAddresses& addresses) noexcept
 }
 
 void reset_hooks() noexcept {
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    if (g_tab_content_hooks_exposed.load(std::memory_order_acquire)) {
+        // Game callbacks do not participate in a host-side quiescence
+        // protocol. Resetting any part of this interdependent hook graph after
+        // carrier exposure could invalidate an in-flight trampoline or state
+        // it can reach, so the complete runtime remains pinned.
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Native UI hook reset refused after Graphics-carrier exposure; the complete runtime remains process-lifetime");
+        return;
+    }
+#endif
     remove_native_slider_presentation();
     set_color_picker_widget_path_bridge_available(false);
-    g_scaleform_path_resolver_hook.reset();
+    {
+        std::scoped_lock lock{g_scaleform_path_bridge_mutex};
+        // Invalidate the ownership proof before restoring executable bytes so
+        // a concurrent validator can never mistake a tearing-down hook for a
+        // live host-owned bridge.
+        g_scaleform_path_bridge_proven = false;
+        g_scaleform_path_bridge_target = nullptr;
+        g_scaleform_path_bridge_patch = {};
+        g_scaleform_path_resolver_hook.reset();
+    }
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    g_tab_content_category8_pre_hook.reset();
+    g_tab_content_composite_teardown_hook.reset();
+    g_original_tab_content_composite_teardown.store(
+        nullptr, std::memory_order_release);
+    g_tab_carrier = {};
+    g_reusable_route = erui::detail::invalid_compiled_index;
+    g_reusable_composite = nullptr;
+    g_reusable_activation_frame = 0;
+    g_reusable_failed.store(false, std::memory_order_release);
+    g_tab_carrier_epoch = 0;
+    g_tab_content_route_log_count.store(0, std::memory_order_release);
+    g_tab_content_route_fault_log_count.store(0, std::memory_order_release);
+    g_tab_content_callbacks_armed.store(false, std::memory_order_release);
+#endif
     reset_dialog_input_gates(false);
     remove_native_popup_choice_bridge();
     g_sub_hook.reset();
@@ -1377,6 +2502,122 @@ void reset_hooks() noexcept {
 
 } // namespace
 
+std::uint32_t native_tab_graphics_carrier_version() noexcept {
+    return graphics_carrier_version_v2_impl();
+}
+
+bool prepare_native_tab_graphics_carrier(
+    void* composite,
+    std::size_t route,
+    std::uint64_t completed_frame,
+    std::int32_t* category,
+    NativeTabParkingSwitchFn park_native) noexcept {
+    return prepare_graphics_carrier_v2_impl(
+        composite, route, completed_frame, category, park_native);
+}
+
+bool verify_native_tab_graphics_carrier(
+    void* composite,
+    std::size_t route,
+    std::int32_t category) noexcept {
+    return verify_graphics_carrier_v2_impl(composite, route, category);
+}
+
+#if defined(ER_NATIVE_UI_TAB_CONTENT_RESEARCH_PROBE)
+// The standalone viewport research DLL predates the in-process production
+// bridge and resolves these names dynamically. Keep that compatibility only
+// in an explicitly opted-in research host; release hosts do not export them.
+extern "C" __declspec(dllexport) std::uint32_t __cdecl
+ERUI_ResearchGraphicsCarrierVersionV2() noexcept {
+    return native_tab_graphics_carrier_version();
+}
+
+extern "C" __declspec(dllexport) bool __cdecl
+ERUI_ResearchPrepareGraphicsCarrierV2(
+    void* composite,
+    std::size_t route,
+    std::uint64_t completed_frame,
+    std::int32_t* category,
+    NativeTabParkingSwitchFn park_native) noexcept {
+    return prepare_native_tab_graphics_carrier(
+        composite, route, completed_frame, category, park_native);
+}
+
+extern "C" __declspec(dllexport) bool __cdecl
+ERUI_ResearchVerifyGraphicsCarrierV2(
+    void* composite,
+    std::size_t route,
+    std::int32_t category) noexcept {
+    return verify_native_tab_graphics_carrier(composite, route, category);
+}
+#endif
+
+bool preflight_native_tab_carrier(const GameAddresses& addresses) noexcept {
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    return tab_carrier_signatures_match(addresses);
+#else
+    (void)addresses;
+    return false;
+#endif
+}
+
+bool native_tab_graphics_carrier_installed() noexcept {
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    return g_tab_content_callbacks_armed.load(std::memory_order_acquire) &&
+        !g_reusable_failed.load(std::memory_order_acquire) &&
+        g_tab_content_category8_pre_hook.enabled() &&
+        g_tab_content_composite_teardown_hook.enabled() &&
+        g_original_tab_content_composite_teardown.load(
+            std::memory_order_acquire) != nullptr;
+#else
+    return false;
+#endif
+}
+
+bool native_scaleform_path_bridge_installed_at(
+    const void* target) noexcept {
+    std::scoped_lock lock{g_scaleform_path_bridge_mutex};
+    if (!target || !g_scaleform_path_bridge_proven ||
+        g_scaleform_path_bridge_target != target ||
+        !g_scaleform_path_resolver_hook.enabled() ||
+        g_scaleform_path_resolver_hook.target() != target ||
+        g_scaleform_path_resolver_hook.destination() !=
+            &observe_scaleform_path) {
+        return false;
+    }
+
+    const auto& original =
+        g_scaleform_path_resolver_hook.original_bytes();
+    if (original.empty() ||
+        original.size() > kScaleformPathResolverEntry271.size() ||
+        !std::equal(
+            original.begin(), original.end(),
+            kScaleformPathResolverEntry271.begin())) {
+        return false;
+    }
+
+    std::array<std::uint8_t, 16> live_patch{};
+    return read_scaleform_path_entry(target, live_patch) &&
+        live_patch == g_scaleform_path_bridge_patch;
+}
+
+bool native_tab_graphics_carrier_exposed() noexcept {
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    return g_tab_content_hooks_exposed.load(std::memory_order_acquire);
+#else
+    return false;
+#endif
+}
+
+std::uint64_t native_tab_graphics_carrier_teardown_generation() noexcept {
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    return g_tab_content_teardown_generation.load(
+        std::memory_order_acquire);
+#else
+    return 0;
+#endif
+}
+
 void request_navigate_page(
     void** parent_page_slot,
     erui::detail::PageRoute target,
@@ -1418,12 +2659,16 @@ void request_navigate_page(
         // does not re-enter the subpage handler that normally publishes the
         // page protected by the dialog input gates. Resolve that parent while
         // its binding is still live, then publish it only after Back succeeds.
-        void* const restored_page =
-            target.kind == erui::detail::PageRouteKind::root_main
-                ? g_last_page.load(std::memory_order_acquire)
-                : target.kind == erui::detail::PageRouteKind::builtin_main
-                ? g_submenu_navigation.parent_page(parent_page)
-                : g_submenu_navigation.native_page(target);
+        void* restored_page{};
+        if (target.kind == erui::detail::PageRouteKind::root_main) {
+            restored_page = g_last_page.load(std::memory_order_acquire);
+        } else if (
+            target.kind == erui::detail::PageRouteKind::builtin_main ||
+            target.kind == erui::detail::PageRouteKind::tab_main) {
+            restored_page = g_submenu_navigation.parent_page(parent_page);
+        } else {
+            restored_page = g_submenu_navigation.native_page(target);
+        }
         unsigned long seh_exception_code = 0;
         const bool invoked = invoke_native_back(
             g_addresses.native_back, parent_page, seh_exception_code);
@@ -1435,7 +2680,7 @@ void request_navigate_page(
             }
         }
         erui::detail::logf(
-            invoked ? erui::LogLevel::info : erui::LogLevel::error,
+            invoked ? erui::LogLevel::trace : erui::LogLevel::error,
             "paginationPrevious page=%p currentKind=%s currentLogical=%zu currentSlice=%zu targetKind=%s targetLogical=%zu targetSlice=%zu nativeBack=%p invoked=%d seh=0x%08lX",
             parent_page,
             route_kind_name(current.kind),
@@ -1490,7 +2735,7 @@ void request_navigate_page(
     }
 
     erui::detail::logf(
-        erui::LogLevel::info,
+        erui::LogLevel::trace,
         "submenuOpen[%llu] kind=%s parent=%p targetKind=%s logicalPage=%zu slice=%zu/%zu",
         static_cast<unsigned long long>(request),
         request_kind_name(kind),
@@ -1578,6 +2823,7 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         runtime.menu->root_plan(erui::detail::game_options_min_plan_capacity)
             .pages.slices.size() > 1;
     bool has_builtin_rows = false;
+    bool has_tab_overflow = false;
     if (runtime.menu) {
         for (std::uint8_t native_category = 1;
              native_category < runtime.menu->builtin_page_indices.size();
@@ -1589,10 +2835,21 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
                 break;
             }
         }
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+        for (const std::size_t page_index :
+             runtime.menu->tab_page_indices) {
+            if (page_index < runtime.menu->pages.size() &&
+                runtime.menu->pages[page_index].rows.size() >
+                    kTabCarrierMinimumPlanCapacity) {
+                has_tab_overflow = true;
+                break;
+            }
+        }
+#endif
     }
     const bool enable_submenus = enable_rows && runtime.menu &&
         (runtime.menu->modeled_submenu_count != 0 || root_overflow ||
-            has_builtin_rows);
+            has_builtin_rows || has_tab_overflow);
     const bool enable_popup_choices = enable_rows && runtime.menu &&
         runtime.menu->modeled_popup_choice_count != 0;
     const bool enable_text_inputs = enable_rows && runtime.menu &&
@@ -1633,6 +2890,24 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
                 binding_capacity += first.slice_count - 1;
             }
         }
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+        // Custom-tab main panels already exist in the Configuration cache;
+        // reserve bindings only for their native continuation subpages.
+        for (const std::size_t page_index :
+             runtime.menu->tab_page_indices) {
+            if (page_index >= runtime.menu->pages.size()) continue;
+            erui::detail::PageSlice first{};
+            if (erui::detail::resolve_paginated_slice(
+                    page_index,
+                    runtime.menu->pages[page_index].rows.size(),
+                    kTabCarrierMinimumPlanCapacity,
+                    erui::detail::native_subpage_capacity,
+                    0,
+                    first) && first.slice_count > 1) {
+                binding_capacity += first.slice_count - 1;
+            }
+        }
+#endif
         binding_capacity = std::max<std::size_t>(binding_capacity + 8, 16);
         if (!g_submenu_navigation.initialize(
                 runtime.menu->pages.size(),
@@ -1668,6 +2943,9 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
             reset_hooks();
             return HookInstallStatus::hook_failed;
         }
+        // Install the ordinary Graphics materializer first. The reusable
+        // carrier deliberately invokes the exact native Graphics entry, so a
+        // registered provider's Graphics rows must already be in that chain.
         install_builtin_panel_materializers(addresses);
         if (enable_submenus) {
             if (!addresses.sub_handler || !addresses.open_sub_page ||
@@ -1770,6 +3048,11 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
     const bool title_path_bridge_requested =
         enable_submenus && addresses.title_bridge_complete();
     const bool color_widget_path_bridge_requested = color_picker_installed;
+    bool exact_path_ownership_required{};
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    exact_path_ownership_required = runtime.menu &&
+        !runtime.menu->tab_page_indices.empty();
+#endif
     if (title_path_bridge_requested || color_widget_path_bridge_requested) {
         void* path_hook_target = reinterpret_cast<void*>(
             addresses.scaleform_path_resolver);
@@ -1777,18 +3060,80 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
             path_hook_target = color_picker_widget_path_hook_target();
         }
         if (path_hook_target) {
+            std::array<std::uint8_t, 16> entry_before_hook{};
+            const bool pristine_entry =
+                read_scaleform_path_entry(
+                    path_hook_target, entry_before_hook) &&
+                entry_before_hook == kScaleformPathResolverEntry271;
+            if (exact_path_ownership_required && !pristine_entry) {
+                erui::detail::logf(
+                    erui::LogLevel::error,
+                    "Shared Scaleform path target changed after native-tab preflight; refusing to chain or expose process-lifetime custom-tab hooks");
+                reset_hooks();
+                remove_native_dialog_transport();
+                return HookInstallStatus::hook_failed;
+            }
             auto path_result = SafetyHookMid::create(
                 path_hook_target,
                 &observe_scaleform_path);
             if (path_result) {
-                g_scaleform_path_resolver_hook = std::move(*path_result);
+                bool exact_ownership{};
+                {
+                    std::scoped_lock lock{
+                        g_scaleform_path_bridge_mutex};
+                    g_scaleform_path_bridge_proven = false;
+                    g_scaleform_path_bridge_target = nullptr;
+                    g_scaleform_path_bridge_patch = {};
+                    g_scaleform_path_resolver_hook =
+                        std::move(*path_result);
+
+                    const auto& original =
+                        g_scaleform_path_resolver_hook.original_bytes();
+                    std::array<std::uint8_t, 16> installed_patch{};
+                    const bool original_matches = !original.empty() &&
+                        original.size() <= entry_before_hook.size() &&
+                        std::equal(
+                            original.begin(), original.end(),
+                            entry_before_hook.begin());
+                    const bool patch_captured =
+                        read_scaleform_path_entry(
+                            path_hook_target, installed_patch) &&
+                        installed_patch != entry_before_hook;
+                    exact_ownership = pristine_entry &&
+                        g_scaleform_path_resolver_hook.enabled() &&
+                        g_scaleform_path_resolver_hook.target() ==
+                            static_cast<std::uint8_t*>(path_hook_target) &&
+                        g_scaleform_path_resolver_hook.destination() ==
+                            &observe_scaleform_path &&
+                        original_matches && patch_captured;
+                    if (exact_ownership) {
+                        g_scaleform_path_bridge_target = path_hook_target;
+                        g_scaleform_path_bridge_patch = installed_patch;
+                        g_scaleform_path_bridge_proven = true;
+                    } else if (exact_path_ownership_required) {
+                        // We are still before process-lifetime carrier
+                        // exposure. Restore the pristine entry immediately;
+                        // never pin an unproven shared hook.
+                        g_scaleform_path_resolver_hook.reset();
+                    }
+                }
+                if (exact_path_ownership_required && !exact_ownership) {
+                    set_color_picker_widget_path_bridge_available(false);
+                    erui::detail::logf(
+                        erui::LogLevel::error,
+                        "Shared Scaleform path bridge could not prove exact target ownership; custom-tab hooks were not exposed");
+                    reset_hooks();
+                    remove_native_dialog_transport();
+                    return HookInstallStatus::hook_failed;
+                }
                 set_color_picker_widget_path_bridge_available(
                     color_picker_installed);
                 erui::detail::logf(
                     erui::LogLevel::info,
-                    "Shared Scaleform path bridge installed (titles=%d colorWidget=%d)",
+                    "Shared Scaleform path bridge installed (titles=%d colorWidget=%d exactOwnership=%d)",
                     title_path_bridge_requested ? 1 : 0,
-                    color_widget_path_bridge_requested ? 1 : 0);
+                    color_widget_path_bridge_requested ? 1 : 0,
+                    exact_ownership ? 1 : 0);
             } else {
                 set_color_picker_widget_path_bridge_available(false);
                 erui::detail::logf(
@@ -1806,6 +3151,23 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
             erui::LogLevel::warning,
             "Scaleform title interfaces are incomplete; custom page titles are disabled while menu rows remain active");
     }
+
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    // Expose the process-lifetime Graphics carrier only after every other
+    // fallible menu-hook stage has completed. If either carrier enable is
+    // ambiguous, its unarmed pass-through hooks and the complete runtime are
+    // retained rather than rolling back executable trampolines in flight.
+    if (runtime.menu && !runtime.menu->tab_page_indices.empty()) {
+        g_reusable_route = native_graphics_route();
+        if (!install_tab_content_carrier_hooks(addresses)) {
+            erui::detail::logf(
+                erui::LogLevel::error,
+                "Custom tabs require the validated category-8 selector-11 Graphics carrier");
+            reset_hooks();
+            return HookInstallStatus::hook_failed;
+        }
+    }
+#endif
 
     erui::detail::logf(
         erui::LogLevel::info,

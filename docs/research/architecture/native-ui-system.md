@@ -54,14 +54,16 @@ of exposing raw Scaleform objects to client mods.
   reference to the separate Controller Settings screen.
 - **Confirmed:** A physical `Item_N_0` placement instantiates a shared generic
   row definition. Its `Widgets` object contains named presentation choices
-  such as Button, TextInput, ComboBox, and Slider. The optional ERNativeUI
-  patch adds a standalone ColorPicker sibling.
+  such as Button, TextInput, ComboBox, and Slider. ERNativeUI's structural
+  transformation adds a standalone ColorPicker sibling when it is missing.
 - **Confirmed:** `02_042_pc_graphicsetting.gfx` hosts the Advanced
   Settings-style physical page used for provider subpages and continuation
   slices.
-- **Confirmed:** The optional patch can expand validated Game and Camera
-  placements to 13 rows and add presentation resources for labels, text input,
-  and color swatches. `ERNativeUI.dll` does not parse or patch GFX at runtime.
+- **Confirmed:** The production transformer can complete validated ordinary
+  settings panels, repair action labels, and add the TextInput and ColorPicker
+  presentation resources. The host applies missing structure in memory at the
+  validated file-opening seam before Scaleform parses the movie; it does not
+  modify the source file on disk.
 - **Rejected:** Cloning `Item_N_0` registers another native row or callback.
   It changes visual capacity only.
 
@@ -75,6 +77,12 @@ and movie/tag lengths.
 - **Confirmed:** A native resolver builds `menu:/Win/%s.gfx` and then
   `menu:/%s.gfx`. Resident resources, an on-demand resource cache, and a
   movie-definition cache sit above the loader.
+- **Confirmed:** `CSScaleformFileOpener::OpenFile` returns a bounded
+  `MemoryFile` view for the two settings-movie paths. ERNativeUI first calls
+  the original opener, snapshots that view, structurally parses and validates
+  compatible bytes, publishes a retained transformed buffer, and verifies the
+  replacement fields. Any failure before publication keeps the original view;
+  a failed write attempts to restore its complete snapshot.
 - **Confirmed:** Elden Ring wraps a raw `GFx::MovieDef` in
   `CSScaleformMovieDef`, then retains it in `CSScaleformSwfPlayer` beside a raw
   movie pointer. A system frame path advances active players.
@@ -137,11 +145,12 @@ Bindings model instead.
   object is safe. The known wrapper is used because it constructs and owns the
   required action.
 
-The live visual capacity comes from the constructed native page rather than
-from a loose GFX parse. Available space is that capacity minus every row
-already materialized when the chained original returns. A full panel can have
-no room even for Next; that destination then fails locally instead of
-overflowing the native list.
+The page planner reads live visual capacity from the constructed native page,
+not from the earlier structural-parser result. This remains true when the
+file-opening layer completed compatible movie bytes before Scaleform built the
+page. Available space is that capacity minus every row already materialized
+when the chained original returns. A full panel can have no room even for Next;
+that destination then fails locally instead of overflowing the native list.
 
 ## 5. Existing-object Scaleform bridge
 
@@ -229,9 +238,9 @@ Use the highest layer that already owns the behavior:
 | Rows in supported settings panels | Native page materializer and row constructors | **Confirmed**, public API |
 | Subpages and pagination | Native child-page push and Back/task path | **Confirmed**, public API |
 | Existing title text | Scoped SceneObjProxy/TextField bridge | **Confirmed**, narrow current use |
-| Optional capacity or widget artwork | Offline structural GFX patch | **Confirmed**, optional presentation |
+| Settings capacity and widget artwork | In-memory structural completion at the validated file-opening seam; source-only offline tooling for inspection | **Confirmed**, production runtime transformation with fail-closed fallback |
 | Alerts and selection dialogs | Exact native descriptor/job lifecycle | **Confirmed**, public since API 1.0 |
-| Custom top-level Configuration tabs | Native category records plus a virtualized presentation window | **Hypothesis**, future research |
+| Custom top-level Configuration tabs | Logical catalogue, virtualized stock cells, immutable image resources, and a validated rows-only carrier | **Confirmed on 2.7.1.0**, implemented in the API 1.3 source; see the [case study](../case-studies/custom-tabs.md) |
 | Site of Grace entries | Independently recover that menu family | **Hypothesis**, future research |
 | Provider-loaded custom GFX | Full resource/movie/render/input owner | **Hypothesis**, future research |
 | Generic raw Scaleform API | Typed value, invocation, callback, and lifetime abstraction | **Hypothesis**, not a public feature |
@@ -247,10 +256,8 @@ historical exact-build seed set; current source remains the production truth.
    page and `CSScaleformSwfPlayer`.
 3. Complete capture/render registration around the Scaleform render bridge.
 4. The generic ordinary-row input route and an explicit thread/reentrancy map.
-5. Complete native tab record semantics, icon/text binding, overflow, and
-   destruction.
-6. Independent page/action maps for Site of Grace and other menu families.
-7. A proved Invoke/SetMember/object-creation wrapper only if a concrete
+5. Independent page/action maps for Site of Grace and other menu families.
+6. A proved Invoke/SetMember/object-creation wrapper only if a concrete
    feature requires it.
 
 The detailed supporting maps are:
@@ -260,3 +267,4 @@ The detailed supporting maps are:
 - [Input and event dispatch](input-and-event-dispatch.md)
 - [Native UI class hierarchy](../reference/native-ui-class-hierarchy.md)
 - [Scene-object bridge](../reference/scene-object-bridge.md)
+- [Custom tabs](../case-studies/custom-tabs.md)

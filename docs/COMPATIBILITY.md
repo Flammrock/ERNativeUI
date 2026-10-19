@@ -147,30 +147,29 @@ Input Bindings, and ColorPicker chains remained operational when Solid
 Uncapper was present, while the same entries followed their pristine paths
 when it was absent.
 
-The same patch also accounts for Solid Uncapper's already-materialized
-Game Options row when selecting the root pagination plan. With the vanilla
-six-row movie, four game rows plus Solid Uncapper leave one slot: an
-overflowing ERNativeUI menu places only Next there. With the optional 13-row
-movie, the same five existing rows leave eight slots. This prevents a provider
-or navigation row from being appended beyond the movie's actual placements.
-Both the original six-row layout and optional 13-row layout were
-live-validated with and without Solid Uncapper.
+The same integration also accounts for Solid Uncapper's already-materialized
+Game Options row when selecting the root pagination plan. ERNativeUI completes
+the supported Game Options panel to 13 rows before Scaleform consumes it. Four
+game rows plus Solid Uncapper then leave eight slots. This prevents a provider
+or navigation row from being appended beyond the completed movie's actual
+placements.
 
 Report the exact game and Solid Uncapper versions when describing a
 compatibility result.
 
-## Optional loose GFX and other asset mods
+## Modified GFX and other asset mods
 
-ERNativeUI's two `menu/win/*.gfx` files are optional presentation assets. Mod
-Engine 2 can expose only one final loose replacement for a given game path, so
-another mod shipping the same GFX may override ERNativeUI's capacity or custom
-widget presentation depending on the configured directories.
+ERNativeUI transforms the effective supported settings movies in memory after
+the game or mod loader selects them. No ERNativeUI loose GFX replacement is
+normally required. A third-party replacement remains compatible when its
+relevant panel and widget structure can be validated; ERNativeUI adds only the
+missing supported rows and presentation.
 
-The DLL still uses live native capacity and documented control fallbacks when
-the ERNativeUI asset is absent. To combine two edits to the same movie, start
-from the same game-version original and reproduce both structural changes in
-one reviewed output; do not rely on load order to merge binary GFX files. See
-[Presentation and optional GFX](guides/presentation-and-gfx.md).
+Mod Engine 2 can still expose only one loose replacement for a given path.
+Load order does not merge two independent binary edits. If the winning movie
+is malformed or its relevant structure is unrecognized, ERNativeUI leaves its
+bytes unchanged instead of guessing. See
+[Runtime GFX completion and presentation](guides/presentation-and-gfx.md).
 
 ## Seamless Co-op
 

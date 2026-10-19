@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
 
     auto connected = erui::connect();
     CHECK(connected.success());
-    CHECK(connected.value().api_version() == ERUI_API_VERSION_1_2);
+    CHECK(connected.value().api_version() == ERUI_API_VERSION_1_3);
     auto result = connected.value().register_menu(
         provider, [&](erui::Menu& menu) {
         capability_reported = menu.supports(erui::Capability::color_picker);
@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
             settings);
         });
     CHECK(result.success());
-    CHECK(result.value().api_version() == ERUI_API_VERSION_1_2);
+    CHECK(result.value().api_version() == ERUI_API_VERSION_1_3);
     CHECK(capability_reported);
     CHECK(result.value().supports(erui::Capability::color_picker));
     CHECK(row != ERUI_INVALID_ROW);

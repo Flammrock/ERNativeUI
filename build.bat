@@ -22,6 +22,10 @@ echo [ERNativeUI] Running tests...
 ctest --preset windows-release || exit /b 1
 
 echo [ERNativeUI] Installing the SDK and runtime tree...
+rem The install rules do not delete artifacts removed from newer packages.
+rem Recreate this generated tree so obsolete tools or loose GFX cannot survive
+rem from an earlier build.
+cmake -E remove_directory "%CD%\dist\ERNativeUI" || exit /b 1
 cmake --install build\preset-release --config Release --prefix "%CD%\dist\ERNativeUI" || exit /b 1
 
 echo.
@@ -29,7 +33,7 @@ echo Build, tests, and installation completed successfully.
 echo Runtime staging: %CD%\build\preset-release\deploy\Release
 echo Installed SDK:   %CD%\dist\ERNativeUI
 echo Host DLL:       %CD%\build\preset-release\Release\ERNativeUI.dll
-echo GFX patcher:    %CD%\build\preset-release\Release\ERNativeUIGfxPatcher.exe
+echo Developer tool: %CD%\build\preset-release\Release\ERNativeUIGfxPatcher.exe
 echo Screenshot DLL: %CD%\dist\ERNativeUI\bin\examples\ShowcaseScreenshotHelper.dll
 echo Screenshot INI: %CD%\dist\ERNativeUI\bin\examples\ShowcaseScreenshotHelper.ini
 exit /b 0

@@ -1,6 +1,6 @@
 # Current native hook and call inventory
 
-Status: **source-verified production inventory** for the current ERUI API 1.2
+Status: **source-verified production inventory** for the current ERUI API 1.3
 implementation. This page was reconciled against the current host, runtime,
 resolver, and feature backends; it is not copied from the historical symbol
 CSV or the earlier research notebooks.
@@ -19,7 +19,7 @@ use the public [C ABI](https://github.com/Flammrock/ERNativeUI/blob/main/include
 
 ## Reading the inventory
 
-The current source uses four resolution classes:
+The current source uses five resolution classes:
 
 | Class | Production rule |
 |---|---|
@@ -27,6 +27,7 @@ The current source uses four resolution classes:
 | Validated fallback | If an AOB is missing or ambiguous, accept the source fallback RVA only when it is in executable memory and matches the required local bytes or structure. It is never an unchecked fallback. |
 | Build-gated AOB | First select one recognized PE timestamp/image-size profile, then resolve each entry with a unique AOB or validated fallback. TextInput uses this class because it retains layout-coupled native state. |
 | Exact-RVA feature backend | Select one recognized PE timestamp/image-size profile, fetch every feature-local RVA from it, and validate the expected entry bytes plus required data anchors. ColorPicker and Input Bindings use this class. |
+| Exact-build subsystem | Admit one complete executable identity, then validate every coupled hook, object, resource, and transition seam before publishing the group. API 1.3 custom tabs currently use this class and admit only `2.7.1.0`. |
 
 The complete executable SHA-256 is recorded for research and release testing,
 but the injected runtime does not calculate the hash. Its recognized profiles
@@ -69,6 +70,7 @@ the current online [`host_dllmain.cpp`](https://github.com/Flammrock/ERNativeUI/
 | ColorPicker | Native alert transport, exact ColorPicker backend, and preview-producer hook are required. | If a ColorPicker row was declared, installation fails rather than silently omitting it. |
 | Input Bindings | Exact backend preparation and all nine binding hooks are required. | Installation fails and unpublished state is cleared. |
 | Page titles or standalone ColorPicker widget | The shared Scaleform path mid-hook is attempted. | Rows remain active. Titles are disabled; ColorPicker preserves ordinary button presentation when its standalone widget cannot be routed. |
+| Custom Configuration tabs | The exact 2.7.1.0 viewport, input-provenance, immutable-image, and Graphics-carrier interfaces are required after ordinary menu hooks are ready. | `ERUI_CAP_CUSTOM_TABS` remains unavailable on an unvalidated build. An install mismatch rejects the tab backend before publication; a later identity fault freezes further custom transitions while preserving native input and Back. |
 
 The base resolver completes before core hooks are installed. A missing required
 address therefore produces the explicit "no hooks installed" path. Later
@@ -161,6 +163,36 @@ hook. Current implementation anchors are
 The current source validates live page identity, counts, capacity, and route
 ownership again at the call site. Address resolution is not treated as proof
 that an arbitrary pointer is a compatible page.
+
+## API 1.3 custom Configuration tabs
+
+Custom tabs are not extra permanent native categories or panels. The host
+freezes an immutable logical catalogue, maps a contiguous window onto the
+eight validated stock tab cells, and materializes only the selected custom
+page through the rows-only Graphics carrier. This complete backend is enabled
+only for the exact Elden Ring `2.7.1.0` PE identity.
+
+The production boundary is split across two hook groups:
+
+| Group | Scope | Failure behavior |
+|---|---|---|
+| Graphics carrier hooks in `hooks.cpp` | Validate the category-8/selector-11 construction locals, choose native Graphics or one compiled custom page, observe composite teardown, and coordinate category 5 only as a synchronous Network parking target. Network is never modified or retired by ERNativeUI. | Carrier hooks install last in the ordinary menu group. A mismatch before exposure rejects installation; an identity fault after exposure is sticky and freezes custom carrier changes while native input and Back continue. |
+| Viewport and presentation hooks in `native_tabs.cpp` | Observe exact pointer versus L1/R1 provenance, serialize selection at the composite-frame boundary, rewrite and repaint both native tab layers, maintain overflow `...`, poll stationary pointer hover for mouse-only dwell, and route validated synthetic icon lookups through the existing native image binder. | The complete disabled group is validated before publication. Partial exposure remains pinned and unarmed rather than attempting unsafe rollback. |
+
+Each custom icon is copied into one 32x32 host-owned RGBA8 record. Requested
+rasters are published as a complete batch of independent Scaleform RawImage
+and image-resource identities; a failed batch falls back as a batch rather
+than publishing an aliased prefix. Ordinary public RGBA pixels are converted
+to the premultiplied native upload representation privately. The eight cells'
+front/back presentation hosts are fixed, while logical tab and resource state
+is allocated only for the tabs actually registered.
+
+Held L1/R1 keeps the game's native repeat and wrap. Pointer overflow uses a
+separate dwell state machine driven by the game's own cursor conversion and
+GridControl hit test, so repaint under a stationary cursor cannot cascade.
+The mapping, timing, ordering, resource ownership, carrier transaction, and
+live stress evidence are documented in
+[Native custom Configuration tabs](../case-studies/custom-tabs.md).
 
 ## Popup-choice rows
 
@@ -431,11 +463,17 @@ Uncapper.
 
 ## Teardown and callback boundary
 
-On normal runtime removal, Input Bindings is stopped before the menu hook set,
-then TextInput native strings are released. The menu hook reset disables the
-shared path bridge and dialog gates, removes popup-choice hooks, removes core
-page hooks, removes the MinHook text resolver, and clears navigation state.
-ColorPicker and the dialog transport are removed before the core reset.
+When the custom-tab backend was never exposed, normal runtime removal stops
+Input Bindings before the menu hook set, then releases TextInput native
+strings. The menu hook reset disables the shared path bridge and dialog gates,
+removes popup-choice hooks, removes core page hooks, removes the MinHook text
+resolver, and clears navigation state. ColorPicker and the dialog transport
+are removed before the core reset.
+
+After API 1.3 carrier or viewport hooks are exposed, hot removal is refused
+and the complete runtime remains pinned. Native callbacks may already borrow
+catalogue, image-resource, and transition storage, and there is no proved
+process-local drain handshake that makes unloading safe.
 
 Provider-facing callbacks do not execute from these native detours. Detours
 update bounded host state or enqueue events; the pinned host worker calls
@@ -462,12 +500,16 @@ For a game update, use this page as a checklist, not as an address database:
    postconditions;
 5. port every exact ColorPicker and Input Bindings entry, data anchor, vtable,
    field relationship, and teardown path;
-6. exercise each conditional install and its negative failure path; and
-7. repeat the in-game matrices in the linked case studies before changing the
+6. port the exact custom-tab viewport, input-provenance, image-resource, and
+   Graphics-carrier boundaries, then rerun its pure and live stress matrices;
+7. exercise each conditional install and its negative failure path; and
+8. repeat the in-game matrices in the linked case studies before changing the
    supported-build declaration.
 
 The historical [address map](../address-map/README.md) is a navigation aid for
 one prior analysis snapshot. Current production authority remains the source
 files linked throughout this document. Future targets such as Site of Grace
-integration, reusable built-in page styles, provider-loaded GFX, and custom
-tabs are intentionally absent: none has a production hook boundary yet.
+integration, reusable built-in page styles, and provider-loaded GFX are
+intentionally absent: none has a production hook boundary yet. API 1.3 custom
+tabs remain exact-build-gated rather than being generalized to every core
+profile listed above.

@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
 
     auto connected = erui::connect();
     CHECK(connected.success());
-    CHECK(connected.value().api_version() == ERUI_API_VERSION_1_2);
+    CHECK(connected.value().api_version() == ERUI_API_VERSION_1_3);
     CHECK(connected.value().supports(erui::Capability::numeric_slider));
     CHECK(connected.value().supports(erui::Capability::custom_slider));
 
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
                 settings);
         });
     CHECK(result.success());
-    CHECK(result.value().api_version() == ERUI_API_VERSION_1_2);
+    CHECK(result.value().api_version() == ERUI_API_VERSION_1_3);
     CHECK(result.value().supports(erui::Capability::numeric_slider));
     CHECK(result.value().supports(erui::Capability::custom_slider));
     CHECK(numeric_row != ERUI_INVALID_ROW);

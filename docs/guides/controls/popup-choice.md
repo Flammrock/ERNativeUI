@@ -178,7 +178,7 @@ table and check host support.
 |---|---|
 | First public API | 1.0 |
 | Capability | `erui::Capability::popup_choice` / `ERUI_CAP_POPUP_CHOICE` |
-| Optional GFX | Not required; the optional `02_040` asset supplies a matching left label on affected action rows |
+| GFX presentation | Runtime completion supplies the matching left label on affected action rows |
 | Enabled option | Not exposed |
 | Runtime value | Zero-based `std::uint8_t` option index |
 

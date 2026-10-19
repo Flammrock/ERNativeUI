@@ -190,7 +190,7 @@ table and check a capability in client code.
 |---|---|
 | First public API | 1.0 |
 | Capability | `erui::Capability::toggle` / `ERUI_CAP_TOGGLE` |
-| Optional GFX | None required |
+| GFX presentation | Uses the stock native toggle widget |
 | Runtime value | `std::uint8_t`, always normalized to `0` or `1` |
 
 ## Callback, value, and lifetime behavior

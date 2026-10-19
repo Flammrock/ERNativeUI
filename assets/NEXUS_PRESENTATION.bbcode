@@ -122,7 +122,7 @@ external_dlls = [
 
 Only one copy of ERNativeUI.dll should be loaded. The example DLLs included with ERNativeUI are optional demonstrations and are not dependencies for normal client mods.
 
-The package also contains optional GFX files for expanded page capacity and matching TextInput/ColorPicker presentation. The editors have functional native fallbacks, but already-full pages such as Camera Options need the expanded GFX capacity before provider content can be shown. Another mod that replaces the same GFX paths can conflict with these optional files.
+ERNativeUI completes supported settings GFX in memory while Elden Ring loads it, expanding ordinary settings pages and supplying matching TextInput/ColorPicker presentation without loose ERNativeUI GFX files. Structurally compatible GFX supplied by other mods remains supported; unrecognized layouts are kept unchanged rather than modified speculatively.
 
 [url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/player-installation.md][b]READ THE COMPLETE PLAYER INSTALLATION GUIDE[/b][/url]
 

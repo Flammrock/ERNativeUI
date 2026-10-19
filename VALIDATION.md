@@ -115,9 +115,10 @@ cmake --build build/preset-release --config Release --target package
 ```
 
 The resulting package must contain the MIT license, third-party notices, full
-dependency license texts, only the two documented optional patched GFX movies,
-and both `bin/examples/ShowcaseScreenshotHelper.dll` and its intentional
-source-controlled `ShowcaseScreenshotHelper.ini`. It must not contain an
+dependency license texts, and both
+`bin/examples/ShowcaseScreenshotHelper.dll` and its intentional
+source-controlled `ShowcaseScreenshotHelper.ini`. It must not contain loose
+GFX movies, `ERNativeUIGfxPatcher.exe`, the patcher's developer README, an
 import library, static library, unmodified or research-only game assets, a log,
 a runtime-generated provider configuration such as
 `mods/<provider_id>/config.ini`, an old archive, or a local build directory.
@@ -166,10 +167,13 @@ For the shipped showcase, verify:
     affecting another tab.
 11. Manual Back, reopening pages, mouse/controller input, and repeated menu
    visits do not duplicate rows or crash.
-12. Both vanilla six-row and optional patched 13-row Game Options GFX layouts
-    select the expected capacity in the log. Repeat with one compatible mod
-    row materialized first and verify the log subtracts that row from the free
-    slots rather than treating it as provider capacity.
+12. With no loose settings movie, confirm runtime GFX completion reports the
+    original and completed capacities and the constructed page exposes the
+    completed capacity. Repeat with a compatible independently modified movie
+    and verify completed structures remain unchanged while missing structures
+    are added. With one compatible mod row materialized first, verify the page
+    planner subtracts that row from the free slots rather than treating it as
+    provider capacity.
 13. Exercise the showcase alert matrix: all seven button layouts in both bottom
    and center placement. Verify controller/mouse page movement, row activation,
    and the page's native Back path remain blocked while popup actions work.
@@ -187,9 +191,11 @@ For the shipped showcase, verify:
 
 The 1.1.1 compatibility work was live-validated on both Elden Ring 2.7.0.0
 and 2.7.1.0, with Solid Uncapper 2.3 loaded first and without Solid Uncapper.
-Root pagination was also confirmed with the original six-row Game Options GFX
-and the optional 13-row GFX. Keep the checks below for future release
-regressions; static pattern matches alone do not prove the runtime hook chain.
+Root pagination was also historically confirmed with both the original
+six-row Game Options GFX and a separately transformed 13-row GFX. Current
+releases complete compatible settings movies in memory, so keep both the
+game-supplied and already-modified input checks below for future regressions;
+static pattern matches alone do not prove the runtime hook chain.
 
 - [x] On 2.7.1.0 without Solid Uncapper, confirm the exact profile is selected,
   the host reaches `ERNativeUI host ready`, and ERNativeUI rows and Input
@@ -217,15 +223,15 @@ regressions; static pattern matches alone do not prove the runtime hook chain.
 - [ ] With Solid Uncapper loaded, open both the root and subpage ColorPicker,
   accept different colors, and verify each bracketed swatch updates
   immediately and independently. Reopen both editors after accept and cancel.
-- [x] Remove the optional `02_040_optionsetting.gfx`. On the vanilla six-row
-  Game Options page, confirm four Elden Ring rows plus Solid Uncapper leave one
-  free slot. When ERNativeUI content overflows, that slot must contain Next
-  only; no provider row may be appended beyond it. Open Next, then verify
-  Previous restores the root correctly.
-- [x] Restore the optional 13-row `02_040_optionsetting.gfx`. Confirm the same
-  five already-materialized rows leave eight free slots. For overflowing
+- [ ] With no loose `02_040_optionsetting.gfx`, confirm runtime completion
+  expands the compatible game-supplied panel to 13 rows. The four Elden Ring
+  rows plus Solid Uncapper must leave eight free slots. For overflowing
   content, the first slice must contain seven provider rows plus Next, with no
-  fourteenth row. Verify Next/Previous and reopen behavior again.
+  fourteenth row. Verify Next/Previous and reopen behavior.
+- [ ] Supply a compatible independently modified `02_040_optionsetting.gfx`
+  that already has 13 rows. Confirm runtime completion preserves the existing
+  placements byte-for-byte, does not duplicate presentation definitions, and
+  produces the same pagination and reopen behavior.
 - [x] Repeat the supported-build startup and pagination regression on Elden
   Ring 2.7.0.0, both with Solid Uncapper 2.3 loaded first and without it.
 - [ ] Repeat navigation, TextInput, pagination, and one-/two-button dialog
@@ -256,11 +262,12 @@ plus a combining mark also consumes two units even if it appears as one glyph.
   Cancel; verify the previous value remains and no callback fires. Confirm a
   different value and verify exactly one callback fires with the new value,
   then reopen once more to verify persistence.
-- [ ] Repeat confirm and Cancel after Next/Previous pagination, with the
-  optional GFX files installed and absent. Verify focus returns to the owning
-  row, underlying navigation does not receive the editing input, and page
-  destruction/recreation does not retain a stale editor or borrowed callback
-  view.
+- [ ] Repeat confirm and Cancel after Next/Previous pagination first with the
+  game-supplied settings movies and then with compatible independently
+  modified movies. Verify runtime completion succeeds in both cases, focus
+  returns to the owning row, underlying navigation does not receive the
+  editing input, and page destruction/recreation does not retain a stale
+  editor or borrowed callback view.
 
 ### Input-binding live validation (API 1.1)
 
@@ -329,9 +336,10 @@ or log so callback counts can be checked without making input timing ambiguous.
 - [ ] Re-test an ordinary official controller row and an ordinary official
   keyboard/mouse row end to end: assign, Cancel, Clear, conflict display, save,
   close/reopen, and process restart must retain vanilla behavior.
-- [ ] Repeat with the optional GFX patches both installed and absent. Binding
-  screens must behave identically because their model extension requires no
-  `02_160_keyconfiguration.gfx` patch.
+- [ ] Repeat with the game-supplied settings movies and compatible
+  independently modified settings movies. Binding screens must behave
+  identically because their model extension requires no
+  `02_160_keyconfiguration.gfx` transformation.
 - [ ] Restore the original provider configuration after the game
   exits and confirm no client-generated provider configuration is included in
   an SDK or runtime package.

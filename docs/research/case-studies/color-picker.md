@@ -58,7 +58,7 @@ The resulting implementation combines three independent layers:
 |---|---|
 | Native settings action controller | Owns selection, mouse/controller activation, and the row callback. |
 | Character-creation modal job | Owns the palette, editor movie, input, accept/cancel, and native dialog lifetime. |
-| Optional `Widgets/ColorPicker` GFX sibling | Displays brackets and the current RGB swatch while the modal is closed. |
+| Host-completed `Widgets/ColorPicker` GFX sibling | Displays brackets and the current RGB swatch while the modal is closed. |
 
 There is no recovered generic OptionSetting "add color row" constructor.
 ERNativeUI reuses the proven action controller, but redirects that one
@@ -364,7 +364,7 @@ job poll, modal gates, or any other ColorPicker boundary.
 The path override is active only for the exact `Widgets/Button` lookup, exact
 source proxy, and thread-local color-row construction scope. The custom Button
 is hidden only after `Widgets/ColorPicker` and its `Color` child both pass
-preflight. A missing or incomplete optional GFX patch therefore preserves the
+preflight. Missing or incompatible completed GFX therefore preserves the
 ordinary action presentation instead of leaving a half-hidden row.
 
 API 1.1 exposes named RGB channels, logical row/provider handles, and a
@@ -372,14 +372,15 @@ confirmation-only callback. It is capability-gated and appended after the
 frozen API 1.0 table. Those ABI guarantees are tested independently of the
 ERNativeUI package release number.
 
-## Optional GFX boundary
+## GFX presentation boundary
 
-The native modal does not require the custom sibling. Without patched GFX, a
-ColorPicker is a functional ordinary action Button that opens the same native
-editor.
+The native modal does not require the custom sibling. If runtime GFX completion
+is unavailable or rejects an incompatible movie, ColorPicker remains a
+functional ordinary action Button that opens the same native editor.
 
-The bracketed idle swatch does require the optional transformations of
-`02_040_optionsetting.gfx` and `02_042_pc_graphicsetting.gfx`. The patcher
+The bracketed idle swatch requires the validated transformations of
+`02_040_optionsetting.gfx` and `02_042_pc_graphicsetting.gfx`. Production
+applies them in memory at the Scaleform file-opening seam; the offline patcher
 references Elden Ring's existing `MENU_FL_Cursor_EntWaku.tga` and
 `MENU_FL_ColorWaku.tga` resources without bundling their texture content. It
 recognizes and removes only the two complete earlier Button-backed prototype

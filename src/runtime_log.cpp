@@ -8,6 +8,7 @@ namespace erui::detail {
 namespace {
 
 std::atomic<LogSink> g_sink{nullptr};
+std::atomic_bool g_diagnostics_enabled{false};
 
 } // namespace
 
@@ -15,7 +16,18 @@ void set_log_sink(LogSink sink) noexcept {
     g_sink.store(sink, std::memory_order_release);
 }
 
+void set_diagnostic_logging(bool enabled) noexcept {
+    g_diagnostics_enabled.store(enabled, std::memory_order_release);
+}
+
+bool diagnostic_logging_enabled() noexcept {
+    return g_diagnostics_enabled.load(std::memory_order_acquire);
+}
+
 void logf(LogLevel level, const char* format, ...) noexcept {
+    if (!should_emit_log_level(level, diagnostic_logging_enabled())) {
+        return;
+    }
     LogSink sink = g_sink.load(std::memory_order_acquire);
     if (!sink || !format) {
         return;

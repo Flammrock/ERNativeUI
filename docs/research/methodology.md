@@ -119,9 +119,26 @@ focus target, callback, input route, or owner. A runtime feature needs both the
 presentation and native-control halves unless the existing game already owns
 one of them.
 
-The standalone GFX patcher is an offline, optional transformation. It writes
-a separate output and is not evidence that the host can create arbitrary
-Scaleform objects at runtime.
+The standalone GFX patcher is a source-built offline developer tool. It writes
+a separate output. Production may reuse the same structural transformer only
+after a separate native loading boundary is proved. ERNativeUI currently does
+so for two exact settings-movie paths: it calls the original file opener,
+validates the returned `MemoryFile`, completes compatible bytes in memory,
+retains the replacement for the required lifetime, and leaves the original
+view selected on failure. This bounded byte substitution is not evidence that
+the host can create arbitrary live Scaleform objects.
+
+For a runtime byte transform, additionally record and test:
+
+- exact path classification and rejection of near matches;
+- native file-object layout, length/cursor/refcount invariants, and byte caps;
+- one original call, one bounded snapshot, and complete restoration on a
+  failed replacement write;
+- parse, semantic-transform, serialization, and reparsing success before
+  publication;
+- idempotence for already-complete input and compatibility with independently
+  modified but structurally valid input; and
+- retained replacement ownership through every repeated open in the process.
 
 ## 5. Use bounded observation before intervention
 

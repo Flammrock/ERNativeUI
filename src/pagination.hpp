@@ -31,6 +31,8 @@ enum class PageRouteKind : std::uint8_t {
     root_main,
     builtin_continuation,
     builtin_main,
+    tab_continuation,
+    tab_main,
 };
 
 // Identifies one physical slice of a logical ERNativeUI page. root_main is a
@@ -99,6 +101,32 @@ struct PageRoute {
             .kind = PageRouteKind::builtin_main,
             .root_capacity = first_page_capacity,
             .builtin_category = native_category,
+            .logical_page_index = logical_page_index,
+            .slice_index = 0,
+        };
+    }
+
+    // A custom tab's main page is an already-existing native panel, while
+    // overflow slices are ordinary native subpages. root_capacity carries
+    // the live number of rows available on that first tab panel.
+    [[nodiscard]] static constexpr PageRoute tab_continuation(
+        std::size_t logical_page_index,
+        std::uint8_t first_page_capacity,
+        std::size_t slice_index) noexcept {
+        return {
+            .kind = PageRouteKind::tab_continuation,
+            .root_capacity = first_page_capacity,
+            .logical_page_index = logical_page_index,
+            .slice_index = slice_index,
+        };
+    }
+
+    [[nodiscard]] static constexpr PageRoute tab_main(
+        std::size_t logical_page_index,
+        std::uint8_t first_page_capacity) noexcept {
+        return {
+            .kind = PageRouteKind::tab_main,
+            .root_capacity = first_page_capacity,
             .logical_page_index = logical_page_index,
             .slice_index = 0,
         };
@@ -195,6 +223,9 @@ struct RootPagePlan {
         return left.root_capacity == right.root_capacity &&
             left.builtin_category == right.builtin_category;
     }
+    if (left.kind == PageRouteKind::tab_continuation) {
+        return left.root_capacity == right.root_capacity;
+    }
     return left.kind == PageRouteKind::submenu;
 }
 
@@ -220,6 +251,13 @@ struct RootPagePlan {
             target.logical_page_index == current.logical_page_index &&
             target.root_capacity == current.root_capacity &&
             target.builtin_category == current.builtin_category &&
+            target.slice_index == 0;
+    }
+    if (current.kind == PageRouteKind::tab_continuation &&
+        current.slice_index == 1) {
+        return target.kind == PageRouteKind::tab_main &&
+            target.logical_page_index == current.logical_page_index &&
+            target.root_capacity == current.root_capacity &&
             target.slice_index == 0;
     }
     return same_native_page_domain(current, target) &&

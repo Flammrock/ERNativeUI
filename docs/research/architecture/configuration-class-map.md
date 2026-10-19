@@ -319,17 +319,22 @@ vanilla once, validates the ordinary vtable and capacity/count fields, then
 adds provider rows. The sparse native categories are explicitly translated
 from the contiguous public enum.
 
-This evidence is sufficient to append rows to an existing panel. It does not
-complete the `MenuOptionCategory` record layout, justify replacing panels, or
-prove safe custom-tab ownership. The controlled live evidence is documented
-in [Settings pages and pagination](../case-studies/settings-pages-and-pagination.md).
+This evidence is sufficient to append rows to an existing panel. By itself it
+does not complete the `MenuOptionCategory` record layout, justify replacing
+panels, or prove safe custom-tab ownership. The controlled row-injection
+evidence is documented in
+[Settings pages and pagination](../case-studies/settings-pages-and-pagination.md);
+the later tab-specific evidence is documented in the
+[custom-tabs case study](../case-studies/custom-tabs.md).
 
-## What remains before custom tabs
+## Historical custom-tab gaps and their resolution
 
-A production custom-tab system still needs:
+This class map originally ended with the following unsolved requirements. They
+are retained because they explain why appending a category record was never a
+sufficient design:
 
 1. a complete `MenuOptionCategory` builder and paired destruction path;
-2. exact title, help, icon, and selection-field encoding;
+2. exact title, icon, and selection-field encoding;
 3. mapping from each record to `TabList`, `BackTabList`, and `WindowList`;
 4. L1/R1, mouse, wraparound, focus, and transition behavior for added entries;
 5. a policy for native capacity ten versus stock visual capacity nine;
@@ -343,7 +348,16 @@ A production custom-tab system still needs:
 Unchecked fixed-vector writes and fabricated `OptionSettingDialog` objects
 are rejected approaches.
 
-## Reproduce and close the remaining gaps
+API 1.3 closes these gaps without promising one native record or panel per
+client tab. Its immutable logical catalogue is projected through eight
+validated stock cells; both tab presentation layers are repainted; titles and
+RGBA8 icons are host-owned; native Graphics and client pages sequentially use
+one validated rows-only category-8 carrier; normal pagination owns overflow
+rows; and exact controller/pointer provenance preserves native navigation.
+The complete evidence, rejected prototypes, live matrix, and remaining build
+limits are in [Native custom Configuration tabs](../case-studies/custom-tabs.md).
+
+## Reproduce the historical layout analysis
 
 Import the exact build using the [Ghidra workflow](../tools/ghidra-workflow.md).
 Useful bounded seeds are:

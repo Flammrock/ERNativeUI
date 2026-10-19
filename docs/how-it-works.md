@@ -20,7 +20,7 @@ import library, call `LoadLibrary` for the host, or bundle a private host copy.
 
 ## Connect, then register
 
-An API 1.2 C++ client starts from a worker thread after `DllMain` has returned:
+An API 1.3 C++ client starts from a worker thread after `DllMain` has returned:
 
 ```cpp
 const auto connection = erui::connect();
@@ -45,14 +45,14 @@ const auto registration = connection.value().register_menu(
     });
 ```
 
-`connect()` requests the exact API 1.2 contract and waits for the host's
+`connect()` requests the exact API 1.3 contract and waits for the host's
 bounded startup-readiness process. It does not silently downgrade to an older API.
 A successful `Connection` owns a copy of the negotiated function table, so it
 is safe for normal value semantics inside the client.
 
-Clients built with the API 1.0 or 1.1 SDK continue to request their frozen
-function-table contract. Clients built with the API 1.2 SDK use the current
-table. No wrapper silently changes the API selected by its headers.
+Clients built with the API 1.0, 1.1, or 1.2 SDK continue to request their
+frozen function-table contract. Clients built with the API 1.3 SDK use the
+current table. No wrapper silently changes the API selected by its headers.
 
 ## Registration is declarative
 
@@ -91,6 +91,12 @@ content to the same destination; the host merges it in a stable order.
 that child through Elden Ring's native page stack, so focus, transition, and
 Back behavior remain native.
 
+API 1.3 `Menu::add_tab` creates a provider-owned top-level Configuration tab
+and returns the same logical `Page` abstraction. The client supplies identity,
+title and optional 32x32 RGBA8 artwork; the host owns tab-strip navigation,
+overflow and native presentation. See
+[Custom Configuration tabs](guides/custom-tabs.md).
+
 Mods declare as many logical rows as they need. At runtime ERNativeUI reads the
 available capacity of the concrete page and divides the logical content into
 physical slices. It supplies Next and Previous rows where necessary and uses
@@ -120,23 +126,26 @@ thread required by the mod's gameplay code. A callback value or string view
 described as borrowed must be copied before the callback returns if it is
 needed later.
 
-## Optional GFX patches
+## Runtime GFX completion
 
-ERNativeUI's behavior comes from native game interfaces; the DLL does not need
-to parse a loose GFX file at startup. The supplied GFX assets and patcher are
-optional presentation extensions. They can provide more visible row slots,
-repair the left label of action rows, and add the character-creation-style
-TextInput and ColorPicker presentation.
+ERNativeUI's behavior comes from native game interfaces. At the validated
+Scaleform file-opening boundary, the host also parses the effective supported
+settings movies and completes missing row placements and widget presentation
+before Scaleform consumes them. This provides expanded ordinary-page capacity
+and the TextInput and ColorPicker presentation without installing loose
+ERNativeUI GFX files.
 
-Without those loose assets, the host uses the capacity and widgets available
-in the player's game. Pagination adapts automatically, and supported controls
-retain their documented fallback presentation. A completely full built-in
-panel may have no room for even a Next row until its optional capacity patch is
-installed. The [feature overview](features.md) identifies such presentation
-and capacity requirements.
+The input may be vanilla or supplied by another mod. The transformer validates
+the relevant structure, preserves unrelated definitions, serializes and
+reparses its result, and publishes replacement bytes only after every check
+succeeds. An already-complete movie is unchanged. An unsupported or
+unrecognized layout continues with its original bytes rather than a guessed
+edit.
 
-The patcher transforms a user's own extracted GFX into a separate output; it
-does not patch `eldenring.exe` or the game's archives.
+Pagination still reads the resulting live capacity and adapts to rows already
+materialized by the game or another supported hook. See the
+[feature overview](features.md) and
+[runtime GFX guide](guides/presentation-and-gfx.md).
 
 ## Capabilities and failure behavior
 
@@ -158,11 +167,11 @@ optional and reports the error without disabling unrelated gameplay logic.
 - [Getting started for mod authors](getting-started/README.md) walks through
   setup, a first client DLL, deployment, and common integration errors.
 - [Supported features](features.md) answers what is available, in which API
-  version, and whether an optional GFX patch changes it.
+  version, and how runtime GFX completion affects its presentation.
 - [Versioning](versioning.md) separates SDK/release selection from runtime API
   negotiation and compatibility.
 - [Mod-author guides](guides/README.md) explain menus, controls, dialogs,
-  localization, input bindings, storage, and optional presentation by task.
+  localization, input bindings, storage, and runtime presentation by task.
 - [API reference](reference/README.md) records the exact lifecycle, ownership,
   threading, errors, limits, and compatibility contract.
 - [Mod template](../examples/template/README.md) is the best starting point

@@ -60,6 +60,32 @@ int check_v1_0_prefix(ERUI_GetApiFn get_api) {
     return 0;
 }
 
+#if defined(ERUI_API_VERSION_1_3)
+int check_v1_2_prefix(ERUI_GetApiFn get_api) {
+    struct alignas(ERUI_Api) Storage {
+        std::array<std::byte, sizeof(ERUI_Api) + 32> bytes{};
+    } storage;
+    auto* api = ::new (storage.bytes.data()) ERUI_Api{};
+    std::memset(
+        storage.bytes.data() + ERUI_API_V1_2_SIZE,
+        0xA5,
+        storage.bytes.size() - ERUI_API_V1_2_SIZE);
+    api->size = ERUI_API_V1_2_SIZE;
+
+    CHECK(get_api(ERUI_API_VERSION_1_2, api) == ERUI_OK);
+    CHECK(api->size == ERUI_API_V1_2_SIZE);
+    CHECK(api->api_version == ERUI_API_VERSION_1_2);
+    CHECK((api->capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0);
+    CHECK((api->capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0);
+    CHECK((api->capabilities & ERUI_CAP_CUSTOM_TABS) == 0);
+    CHECK(bytes_equal(
+        storage.bytes.data() + ERUI_API_V1_2_SIZE,
+        storage.bytes.size() - ERUI_API_V1_2_SIZE,
+        std::byte{0xA5}));
+    return 0;
+}
+#endif
+
 #if defined(ERUI_API_VERSION_1_2)
 int check_v1_1_prefix(ERUI_GetApiFn get_api) {
     struct alignas(ERUI_Api) Storage {
@@ -112,7 +138,9 @@ int check_selected_current(ERUI_GetApiFn get_api) {
     CHECK(api.api_version == ERUI_API_VERSION_CURRENT);
     CHECK(api.size >= ERUI_API_V1_0_SIZE);
 #if defined(ERUI_API_VERSION_1_1)
-#if defined(ERUI_API_VERSION_1_2)
+#if defined(ERUI_API_VERSION_1_3)
+    CHECK(api.size == ERUI_API_V1_3_SIZE);
+#elif defined(ERUI_API_VERSION_1_2)
     CHECK(api.size == ERUI_API_V1_2_SIZE);
 #else
     CHECK(api.size == ERUI_API_V1_1_SIZE);
@@ -148,6 +176,10 @@ int check_selected_current(ERUI_GetApiFn get_api) {
     CHECK(api.add_custom_slider != nullptr);
     CHECK(api.set_custom_slider_index != nullptr);
     CHECK(api.get_custom_slider_index != nullptr);
+#endif
+#if defined(ERUI_API_VERSION_1_3)
+    CHECK((api.capabilities & ERUI_CAP_CUSTOM_TABS) != 0);
+    CHECK(api.add_tab != nullptr);
 #endif
     return 0;
 }
@@ -205,6 +237,9 @@ int main(int argc, char** argv) {
         result = check_v1_0_prefix(host.get_api);
 #if defined(ERUI_API_VERSION_1_2)
         if (result == 0) result = check_v1_1_prefix(host.get_api);
+#endif
+#if defined(ERUI_API_VERSION_1_3)
+        if (result == 0) result = check_v1_2_prefix(host.get_api);
 #endif
         if (result == 0) result = check_selected_current(host.get_api);
     } else if (std::strcmp(argv[2], "old-host") == 0) {

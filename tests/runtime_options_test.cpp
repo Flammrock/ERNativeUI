@@ -1,4 +1,5 @@
 #include "runtime.hpp"
+#include "runtime_requirements.hpp"
 
 #include "test_assertions.hpp"
 #include <cstddef>
@@ -23,5 +24,21 @@ int main() {
     static_assert(erui::Capabilities{}.submenu_runtime);
     static_assert(erui::Capabilities{}.pagination_runtime);
     static_assert(erui::Capabilities{}.game_options_capacity_detection);
+
+    // A custom tab can be the only logical page that overflows. Its
+    // continuation is still materialized as a native subpage, so active
+    // pagination alone must request the submenu interfaces.
+    ERUI_TEST_CHECK(erui::detail::pagination_requires_submenus(
+        true, true, false, false));
+    ERUI_TEST_CHECK(erui::detail::pagination_requires_submenus(
+        true, false, true, false));
+    ERUI_TEST_CHECK(erui::detail::pagination_requires_submenus(
+        true, false, false, true));
+    ERUI_TEST_CHECK(erui::detail::pagination_requires_submenus(
+        true, false, false, false, true));
+    ERUI_TEST_CHECK(!erui::detail::pagination_requires_submenus(
+        true, false, false, false));
+    ERUI_TEST_CHECK(!erui::detail::pagination_requires_submenus(
+        false, true, true, true));
     return 0;
 }

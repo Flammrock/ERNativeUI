@@ -9,7 +9,7 @@
     {
       "name": "windows-release",
       "displayName": "Windows x64 Release",
-      "description": "Build the host, examples, GFX patcher, and test suite with the installed Visual Studio.",
+      "description": "Build the host, examples, developer GFX tooling, and test suite with the installed Visual Studio.",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/preset-release",
       "cacheVariables": {

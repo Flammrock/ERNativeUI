@@ -85,6 +85,11 @@ enum class Capability : ERUI_Capabilities {
     storage = ERUI_CAP_STORAGE,
     numeric_slider = ERUI_CAP_NUMERIC_SLIDER,
     custom_slider = ERUI_CAP_CUSTOM_SLIDER,
+    custom_tabs = ERUI_CAP_CUSTOM_TABS,
+};
+
+enum class TabIconFormat : ERUI_TabIconFormat {
+    rgba8 = ERUI_TAB_ICON_FORMAT_RGBA8,
 };
 
 enum class InputDevice : ERUI_InputDevices {
@@ -504,6 +509,28 @@ struct ProviderOptions {
     std::wstring display_name{};
     void* owner_module{};
     std::int32_t root_priority{100};
+};
+
+struct TabIconView {
+    // Exact 32x32, tightly packed, row-major RGBA8 pixels. The host copies
+    // the bytes during Menu::add_tab.
+    const std::uint8_t* pixels{};
+    std::size_t byte_count{};
+    TabIconFormat format{TabIconFormat::rgba8};
+};
+
+struct TabOptions {
+    // Stable provider-local ID. The diagnostic/order key is
+    // "provider_id/tab_id". This view and all other data are copied by
+    // Menu::add_tab before it returns.
+    std::string_view tab_id{};
+    // 1..ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS UTF-16 code units.
+    std::wstring_view title{};
+    // Lower values sort first. This is a hint rather than a physical slot;
+    // ERNativeUI.ini may provide a player override.
+    std::int32_t preferred_order{100};
+    // Empty selects ERNativeUI's fallback glyph.
+    TabIconView icon{};
 };
 
 struct SliderOptions {
@@ -1015,6 +1042,15 @@ inline bool valid_machine_identifier(std::string_view value) noexcept {
     return true;
 }
 
+inline bool valid_tab_icon(TabIconView icon) noexcept {
+    if (!icon.pixels && icon.byte_count == 0) return true;
+    if (!icon.pixels ||
+        icon.byte_count != ERUI_TAB_ICON_RGBA8_BYTE_COUNT) {
+        return false;
+    }
+    return icon.format == TabIconFormat::rgba8;
+}
+
 inline bool valid_storage_identifier(std::string_view value) noexcept {
     if (value.empty() ||
         value.size() > ERUI_STORAGE_MAX_IDENTIFIER_BYTES ||
@@ -1072,6 +1108,8 @@ inline const wchar_t* result_name(ERUI_Result result) noexcept {
     case ERUI_STORAGE_ALREADY_LOADED: return L"storage is already loaded";
     case ERUI_STORAGE_IO_ERROR: return L"storage I/O failed";
     case ERUI_STORAGE_FORMAT_ERROR: return L"storage data is malformed";
+    case ERUI_DUPLICATE_TAB_ID: return L"duplicate provider-local tab ID";
+    case ERUI_TAB_LIMIT_REACHED: return L"process-wide custom-tab limit reached";
     default: return L"unknown host result";
     }
 }
@@ -1130,7 +1168,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_BUILTIN_PAGES |
                     ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
                     ERUI_CAP_NUMERIC_SLIDER |
-                    ERUI_CAP_CUSTOM_SLIDER)) == 0;
+                    ERUI_CAP_CUSTOM_SLIDER |
+                    ERUI_CAP_CUSTOM_TABS)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -1151,7 +1190,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_INPUT_BINDINGS) != 0 &&
             (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
             (api.capabilities &
-                (ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER)) == 0;
+                (ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
+                    ERUI_CAP_CUSTOM_TABS)) == 0;
     }
     if (version == ERUI_API_VERSION_1_2) {
         return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
@@ -1169,6 +1209,32 @@ inline bool api_complete_for_version(
             api.add_numeric_slider && api.set_numeric_slider_value &&
             api.get_numeric_slider_value && api.add_custom_slider &&
             api.set_custom_slider_index && api.get_custom_slider_index &&
+            (api.capabilities & ERUI_CAP_TEXT_INPUT) != 0 &&
+            (api.capabilities & ERUI_CAP_COLOR_PICKER) != 0 &&
+            (api.capabilities & ERUI_CAP_BUILTIN_PAGES) != 0 &&
+            (api.capabilities & ERUI_CAP_INPUT_BINDINGS) != 0 &&
+            (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
+            (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
+            (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
+            (api.capabilities & ERUI_CAP_CUSTOM_TABS) == 0;
+    }
+    if (version == ERUI_API_VERSION_1_3) {
+        return api.size == ERUI_API_V1_3_SIZE && api.add_text_input &&
+            api.set_text_input_value && api.get_text_input_value &&
+            api.add_color_picker && api.set_color_picker_value &&
+            api.get_color_picker_value && api.get_builtin_page &&
+            api.add_input_section && api.add_input_action &&
+            api.set_assignments_changed_handler && api.set_action_inputs &&
+            api.get_action_inputs && api.get_action_default_inputs &&
+            api.reset_action_inputs && api.open_storage &&
+            api.storage_load && api.storage_save && api.storage_get_utf8 &&
+            api.storage_set_utf8 && api.storage_erase &&
+            api.storage_get_action_inputs && api.storage_set_action_inputs &&
+            api.storage_apply_assignment_changes && api.storage_get_info &&
+            api.add_numeric_slider && api.set_numeric_slider_value &&
+            api.get_numeric_slider_value && api.add_custom_slider &&
+            api.set_custom_slider_index && api.get_custom_slider_index &&
+            api.add_tab &&
             (api.capabilities & ERUI_CAP_TEXT_INPUT) != 0 &&
             (api.capabilities & ERUI_CAP_COLOR_PICKER) != 0 &&
             (api.capabilities & ERUI_CAP_BUILTIN_PAGES) != 0 &&
@@ -1210,15 +1276,15 @@ inline ApiConnectionResult connect_api(std::chrono::milliseconds timeout) {
             std::memcpy(&get_api, &symbol, sizeof(get_api));
             ERUI_Result status = request_api(
                 get_api,
-                ERUI_API_VERSION_1_2,
-                ERUI_API_V1_2_SIZE,
+                ERUI_API_VERSION_1_3,
+                ERUI_API_V1_3_SIZE,
                 result.api);
             if (status == ERUI_OK) {
                 if (!api_complete_for_version(
-                        result.api, ERUI_API_VERSION_1_2)) {
+                        result.api, ERUI_API_VERSION_1_3)) {
                     result.error = Error(ErrorCode::incompatible_api,
                         ERUI_UNSUPPORTED_VERSION,
-                        L"ERNativeUI returned an incomplete or incompatible API 1.2 table.");
+                        L"ERNativeUI returned an incomplete or incompatible API 1.3 table.");
                     return result;
                 }
                 result.connected = true;
@@ -1232,8 +1298,8 @@ inline ApiConnectionResult connect_api(std::chrono::milliseconds timeout) {
             if (status != ERUI_HOST_NOT_READY) {
                 result.error = Error(ErrorCode::incompatible_api, status,
                     status == ERUI_UNSUPPORTED_VERSION
-                        ? L"ERNativeUI API 1.2 is required; update ERNativeUI.dll."
-                        : std::wstring(L"ERNativeUI API 1.2 negotiation failed: ") +
+                        ? L"ERNativeUI API 1.3 is required; update ERNativeUI.dll."
+                        : std::wstring(L"ERNativeUI API 1.3 negotiation failed: ") +
                             result_name(status));
                 return result;
             }
@@ -1362,8 +1428,8 @@ class ConnectionResult;
 class Connection {
 public:
     [[nodiscard]] bool valid() const noexcept {
-        return api_.api_version == ERUI_API_VERSION_1_2 &&
-            api_.size == ERUI_API_V1_2_SIZE;
+        return api_.api_version == ERUI_API_VERSION_1_3 &&
+            api_.size == ERUI_API_V1_3_SIZE;
     }
     explicit operator bool() const noexcept { return valid(); }
     [[nodiscard]] bool supports(Capability capability) const noexcept {
@@ -1920,7 +1986,9 @@ public:
     Page& set_presentation(const PagePresentation& presentation) noexcept {
         if (!draft_ || !draft_->open() || draft_->failed_) return *this;
         if (!detail::view_size_fits(presentation.menu_title.size()) ||
-            !detail::view_size_fits(presentation.page_title.size())) {
+            !detail::view_size_fits(presentation.page_title.size()) ||
+            (custom_tab_ && presentation.page_title.size() >
+                ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS)) {
             draft_->record(ERUI_INVALID_ARGUMENT, L"set_page_presentation text");
             return *this;
         }
@@ -1962,8 +2030,10 @@ public:
 
 private:
     friend class Menu;
-    Page(std::shared_ptr<detail::Draft> draft, ERUI_PageHandle page) noexcept
-        : draft_(std::move(draft)), page_(page) {}
+    Page(std::shared_ptr<detail::Draft> draft,
+        ERUI_PageHandle page,
+        bool custom_tab = false) noexcept
+        : draft_(std::move(draft)), page_(page), custom_tab_(custom_tab) {}
 
     template <void (*Function)() noexcept>
     static void ERUI_CALL button_thunk(void*) noexcept { Function(); }
@@ -2121,6 +2191,7 @@ private:
 
     std::shared_ptr<detail::Draft> draft_{};
     ERUI_PageHandle page_{};
+    bool custom_tab_{};
 };
 
 class InputActionDevices;
@@ -3128,6 +3199,52 @@ private:
 class Menu {
 public:
     Page root() noexcept { return Page(draft_, draft_ ? draft_->root_ : 0); }
+    Page add_tab(const TabOptions& options) noexcept {
+        if (!draft_ || !draft_->open() || draft_->failed_) return {};
+        if (!draft_->api_.add_tab ||
+            (draft_->api_.capabilities & ERUI_CAP_CUSTOM_TABS) == 0) {
+            draft_->record(ERUI_NOT_SUPPORTED, L"add_tab");
+            return {};
+        }
+        if (!detail::valid_machine_identifier(options.tab_id) ||
+            options.title.empty() ||
+            options.title.size() >
+                ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS ||
+            !detail::view_size_fits(options.title.size()) ||
+            !detail::valid_tab_icon(options.icon)) {
+            draft_->record(ERUI_INVALID_ARGUMENT, L"add_tab");
+            return {};
+        }
+
+        ERUI_TabIconDesc icon{};
+        const ERUI_TabIconDesc* icon_pointer = nullptr;
+        if (options.icon.pixels) {
+            icon.size = sizeof(icon);
+            icon.format = static_cast<ERUI_TabIconFormat>(
+                options.icon.format);
+            icon.byte_count = ERUI_TAB_ICON_RGBA8_BYTE_COUNT;
+            icon.pixels = options.icon.pixels;
+            icon_pointer = &icon;
+        }
+
+        ERUI_TabDesc description{};
+        description.size = sizeof(description);
+        description.tab_id = detail::string_view(options.tab_id);
+        description.title = detail::utf16_view(options.title);
+        description.preferred_order = options.preferred_order;
+        description.icon = icon_pointer;
+
+        ERUI_PageHandle page_handle{ERUI_INVALID_PAGE};
+        const ERUI_Result result = draft_->api_.add_tab(
+            draft_->provider_, &description, &page_handle);
+        draft_->record(result, L"add_tab");
+        if (result == ERUI_OK && page_handle == ERUI_INVALID_PAGE) {
+            draft_->record(ERUI_INTERNAL_ERROR, L"add_tab");
+        }
+        return result == ERUI_OK && page_handle != ERUI_INVALID_PAGE
+            ? Page(draft_, page_handle, true)
+            : Page{};
+    }
     Page page(BuiltinPage builtin_page) noexcept {
         if (!draft_ || !draft_->open() || draft_->failed_) return {};
         if (!draft_->api_.get_builtin_page ||
@@ -3438,10 +3555,10 @@ RegistrationResult Connection::register_menu(
     RegistrationResult output{};
     try {
         if (!detail::api_complete_for_version(
-                api_, ERUI_API_VERSION_1_2)) {
+                api_, ERUI_API_VERSION_1_3)) {
             output.error_ = Error(ErrorCode::incompatible_api,
                 ERUI_UNSUPPORTED_VERSION,
-                L"A valid ERNativeUI API 1.2 connection is required.");
+                L"A valid ERNativeUI API 1.3 connection is required.");
             return output;
         }
         if (!detail::valid_machine_identifier(options.provider_id)) {

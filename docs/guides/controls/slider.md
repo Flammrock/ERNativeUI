@@ -183,7 +183,7 @@ table and check host support.
 |---|---|
 | First public API | 1.0 |
 | Capability | `erui::Capability::slider` / `ERUI_CAP_SLIDER` |
-| Optional GFX | None required |
+| GFX presentation | Uses the stock native slider widget |
 | Disabled behavior | Remains visible and uses Elden Ring's native disabled state |
 | Runtime value | `std::uint8_t` inside the declared range |
 

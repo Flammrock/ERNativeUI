@@ -6,15 +6,18 @@ the expected menu or callback behavior. Start by preserving the full C++
 `ERUI_Result`. “The menu did not appear” alone cannot distinguish host loading,
 API negotiation, provider validation, and native hook installation.
 
-ERNativeUI exposes three public API generations:
+ERNativeUI exposes four public API generations:
 
 - **Released API 1.0:** the frozen SDK shipped with ERNativeUI 1.0.0. Any
   client built with it remains supported by later 1.x hosts.
 - **Released API 1.1:** introduced with ERNativeUI 1.1.0. It provides explicit
   `erui::connect()`, TextInput, ColorPicker, additional built-in pages, input
   bindings, and provider storage.
-- **Current API 1.2:** introduced with ERNativeUI 1.2.0. It appends Numeric
+- **Released API 1.2:** introduced with ERNativeUI 1.2.0. It appends Numeric
   Slider and Custom Slider while preserving both earlier contracts.
+- **Current API 1.3:** appends client-owned top-level Configuration tabs and
+  preserves all three earlier contracts. Package-release versions and ERUI API
+  versions are independent; use an SDK and host that explicitly expose 1.3.
 
 See [Feature status](../features.md) for the exact boundary and
 [How ERNativeUI works](../how-it-works.md) for the lifecycle and ownership
@@ -93,54 +96,54 @@ selected.
   use their frozen lifecycle and should not be rewritten to imitate API 1.1
   negotiation.
 
-## `find_package(ERNativeUI 1.2.0)` rejects an installed SDK
+## `find_package(ERNativeUI ...)` rejects an installed SDK
 
 **Symptom**
 
-CMake finds ERNativeUI but says package version 1.2.0 is incompatible or
-unavailable.
+CMake finds ERNativeUI but says the requested package version is incompatible
+or unavailable.
 
 **Likely cause**
 
-The installed ERNativeUI package release is older than 1.2.0, its CMake files
-are missing, or `CMAKE_PREFIX_PATH` points at the wrong prefix. The `1.2.0` in
-`find_package` is a minimum release-package version; it is not public API
-negotiation.
+The installed ERNativeUI package release is older than the minimum named by
+the project, its CMake files are missing, or `CMAKE_PREFIX_PATH` points at the
+wrong prefix. A version in `find_package` constrains the release package; it
+does not negotiate the runtime ERUI API.
 
 **Fix**
 
-- Install the ERNativeUI 1.2.0 SDK or a later release that documents API 1.2
-  support, then point `CMAKE_PREFIX_PATH` at the directory containing its
-  `include`, `lib`, and `bin` children.
+- Install an SDK release that explicitly contains the public API and features
+  used by the client, then point `CMAKE_PREFIX_PATH` at the directory
+  containing its `include`, `lib`, and `bin` children.
 - Alternatively, set `ERNativeUI_DIR` to the exact
   `lib\cmake\ERNativeUI` directory containing
   `ERNativeUIConfig.cmake`. Use one discovery method, then delete the CMake
   build directory before retrying if it cached an older package location.
 - When working from source, use `add_subdirectory` or build the client inside
   the matched tree instead of pretending an older installed package is newer.
-- Do not remove the package-version requirement to hide a mismatched SDK. See
-  [Versioning](../versioning.md) for the two independent version lines.
+- Do not weaken a deliberate package-version requirement merely to hide a
+  mismatched SDK. See [Versioning](../versioning.md) for the two independent
+  version lines.
 
 ## The API version or capability is rejected
 
 **Symptom**
 
-- `ERUI_UNSUPPORTED_VERSION`, `ErrorCode::incompatible_api`, or “API 1.2 is
+- `ERUI_UNSUPPORTED_VERSION`, `ErrorCode::incompatible_api`, or “API 1.3 is
   required; update ERNativeUI.dll.”
 - A raw-C function pointer is null or an operation returns
   `ERUI_NOT_SUPPORTED`.
-- A current API 1.2 client works with the current host but not a host exposing
-  only API 1.0 or 1.1.
+- A current API 1.3 client works with the current host but not a host exposing
+  only API 1.0, 1.1, or 1.2.
 
 **Likely cause**
 
-Version negotiation selects a complete, exact function-table contract. The
-released API 1.0 prefix is 128 bytes, and API 1.1 is frozen at 320 bytes. The
-current API 1.2 table is 368 bytes.
-An API 1.2 client cannot use a host exposing only API 1.0 or 1.1, and the
-current C++ wrapper intentionally does not downgrade. Conversely, any client
-built with an earlier SDK is supported by later compatible 1.x hosts through
-its unchanged function-table contract.
+Version negotiation selects a complete, exact function-table contract. API
+1.0 is frozen at 128 bytes, API 1.1 at 320 bytes, API 1.2 at 368 bytes, and
+the current API 1.3 table is 376 bytes. An API 1.3 client cannot use a host
+exposing only an earlier table, and the current C++ wrapper intentionally does
+not downgrade. Conversely, any client built with an earlier SDK is supported
+by later compatible 1.x hosts through its unchanged function-table contract.
 
 **Fix**
 
@@ -156,8 +159,10 @@ its unchanged function-table contract.
   optional feature. Do not infer availability from a similarly named Elden
   Ring widget or from a non-null pointer belonging to another API version.
 - `ERUI_NOT_SUPPORTED` can also mean that a game-version-sensitive optional
-  native facility was unavailable; inspect the host log before blaming table
-  negotiation.
+  native facility was unavailable. In particular, a valid API 1.3 connection
+  may omit `ERUI_CAP_CUSTOM_TABS` when the installed executable has not passed
+  the custom-tab native validation. Inspect the capability and host log before
+  blaming table negotiation.
 
 ## Provider registration or commit fails
 
@@ -246,31 +251,27 @@ provider modules because native rows retain callbacks.
 
 **Likely cause**
 
-The optional loose GFX movies are absent, installed at the wrong Mod Engine 2
-root, or replaced by another mod. GFX presentation is separate from the native
-API. Most controls keep a functional fallback. The tested native Camera Options
-panel is exceptional: all authored slots are occupied, so it has no room for a
-custom row or even a Next row until capacity is expanded.
+The runtime GFX transformer did not recognize the effective settings movie,
+or the validated file-opening integration was unavailable for this Elden Ring
+build. Another asset mod may have changed a required panel or widget contract.
+ERNativeUI leaves unrecognized bytes unchanged instead of applying a guessed
+edit, so controls retain their safe fallback presentation and the host uses
+the capacity that actually loaded.
 
 **Fix**
 
-- Install the release's optional files at their original relative paths under
-  the active Mod Engine 2 mod directory:
-
-  ```text
-  menu/win/02_040_optionsetting.gfx
-  menu/win/02_042_pc_graphicsetting.gfx
-  ```
-
-- Use `02_040` for the 13-row Game/Camera capacity and shared action-label
-  presentation. Use both movies for matching root/subpage TextInput and
-  ColorPicker presentation.
-- Do not diagnose a missing frame or fallback action row as an API failure when
-  activation and callbacks still work.
-- If loose assets conflict, reproduce the narrow transformations from the
-  user's own extracted movie with the
-  [presentation and optional GFX guide](../guides/presentation-and-gfx.md).
-  The host never patches `eldenring.exe` or game archives.
+- Do not install an ERNativeUI loose GFX package; normal presentation is
+  completed by the DLL at runtime.
+- Enable logging, restart the game, and find the runtime GFX line for
+  `02_040_optionsetting.gfx` or `02_042_pc_graphicsetting.gfx`. It reports
+  whether the movie was transformed, already complete, or rejected.
+- Temporarily remove another mod's replacement for the affected movie. If the
+  vanilla movie succeeds, report the replacement and transformation failure
+  together so its structural compatibility can be reviewed.
+- Do not diagnose a fallback action row as an API failure when activation and
+  callbacks still work.
+- Read [runtime GFX completion and presentation](../guides/presentation-and-gfx.md)
+  for the supported capacities and fail-safe behavior.
 
 ## `ERNativeUI.log` is missing or contains old information
 

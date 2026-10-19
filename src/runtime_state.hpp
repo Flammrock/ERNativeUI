@@ -1,6 +1,7 @@
 #pragma once
 
 #include "menu_compiler.hpp"
+#include "native_tab_catalogue.hpp"
 
 #include "runtime.hpp"
 
@@ -12,6 +13,11 @@ namespace erui::detail {
 struct RuntimeState {
     RuntimeOptions options{};
     std::unique_ptr<CompiledMenu> menu{};
+    // Published only after the compiled menu and player tab configuration
+    // have passed the all-or-nothing catalogue validation gate. Keeping the
+    // immutable catalogue beside the compiled menu gives the native adapter
+    // stable storage for its full installed lifetime.
+    std::unique_ptr<const NativeTabCatalogue> tab_catalogue{};
     std::atomic_bool installed{false};
     std::atomic<std::uint64_t> custom_text_hits{0};
     std::atomic<std::uint32_t> diagnostic_value_logs{0};

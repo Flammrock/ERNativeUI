@@ -1547,7 +1547,7 @@ ERUI_Result request_color_picker(
         session->submitted.store(true, std::memory_order_release);
 
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::trace,
             "Color Picker scheduled: state=%p page=%p job=%p initial=0x%08X",
             &state,
             page,
@@ -1610,7 +1610,7 @@ void observe_color_picker_job_poll(
     }
 
     erui::detail::logf(
-        erui::LogLevel::info,
+        erui::LogLevel::trace,
         "Color Picker reached terminal native state: job=%p kind=%u color=0x%08X",
         job,
         static_cast<unsigned>(kind),

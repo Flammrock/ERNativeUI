@@ -13,6 +13,9 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID) {
         language.current = "english";
         (void)erui::host::settle_cached_steam_language(
             std::move(language));
+        if (!erui::host::registry().enable_custom_tabs_backend()) {
+            return FALSE;
+        }
         erui::host::registry().open_registration();
         erui::host::set_api_state(erui::host::ApiState::runtime_ready);
     }

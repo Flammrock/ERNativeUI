@@ -10,9 +10,11 @@ use the [documented ERNativeUI features](../features.md) through the public
 [C ABI](https://github.com/Flammrock/ERNativeUI/blob/main/include/ernativeui/erui.h) or
 [C++17 wrapper](https://github.com/Flammrock/ERNativeUI/blob/main/include/ernativeui/ERNativeUI.hpp).
 
-ERUI API 1.2 is the current public contract. A research item tagged for a
-later API is exploratory: it is neither a release promise nor permission to
-depend on an unfinished native boundary.
+ERUI API 1.3 is the current source contract. API and package releases are
+versioned separately; use the headers shipped with a release when targeting a
+published host. A research item tagged for a later API is exploratory: it is
+neither a release promise nor permission to depend on an unfinished native
+boundary.
 
 ## Evidence labels
 
@@ -54,7 +56,7 @@ launch's module base to obtain an RVA.
 |---|---|
 | How should an experiment be designed and promoted? | [Research methodology](methodology.md) |
 | How do GFX, Scaleform movies, native pages, input, and jobs fit together? | [Native UI system](architecture/native-ui-system.md) |
-| How is the Configuration tab host laid out, and what still blocks custom tabs? | [Configuration and OptionSetting class map](architecture/configuration-class-map.md) |
+| How is the native Configuration tab host laid out? | [Configuration and OptionSetting class map](architecture/configuration-class-map.md) |
 | How are GFX resources, MovieDefs, players, frame advance, and destruction connected? | [Scaleform movie lifecycle](architecture/scaleform-movie-lifecycle.md) |
 | How do ordinary rows, text editing, Back tasks, and popup jobs receive or suppress input? | [Native input and event dispatch](architecture/input-and-event-dispatch.md) |
 | Which native UI RTTI families and multiple-inheritance subobjects were recovered? | [Native UI class hierarchy](reference/native-ui-class-hierarchy.md) |
@@ -72,7 +74,8 @@ launch's module base to obtain an RVA.
 | How was the character-creation color editor reused safely? | [Color-picker case study](case-studies/color-picker.md) |
 | How were native binding rows, input codes, and activation dispatch recovered? | [Input-bindings case study](case-studies/input-bindings.md) |
 | How were signed, decimal, and arbitrary slider values implemented without replacing the native bar? | [Numeric and custom slider case study](case-studies/formatted-sliders.md) |
-| Why do TextInput and ColorPicker need optional patched GFX assets? | [GFX presentation case study](case-studies/gfx-presentation.md) |
+| How were client-owned top-level Configuration tabs, overflow navigation, and RGBA8 icons recovered? | [Custom-tabs case study](case-studies/custom-tabs.md) |
+| How are TextInput and ColorPicker presentation definitions completed at runtime? | [GFX presentation case study](case-studies/gfx-presentation.md) |
 | How is Steam language discovered without a game hook? | [Steam language case study](case-studies/steam-language.md) |
 
 ## Addresses are evidence, not interfaces

@@ -104,6 +104,10 @@ function(erui_add_abi_release release_token)
         OUTPUT_NAME ERNativeUI
         PREFIX ""
         RUNTIME_OUTPUT_DIRECTORY
+            "${CMAKE_BINARY_DIR}/abi/runtime/${release_token}"
+        ARCHIVE_OUTPUT_DIRECTORY
+            "${CMAKE_BINARY_DIR}/abi/runtime/${release_token}"
+        LIBRARY_OUTPUT_DIRECTORY
             "${CMAKE_BINARY_DIR}/abi/runtime/${release_token}")
 
     set(c_client "ERNativeUIAbiClient${release_upper}C")

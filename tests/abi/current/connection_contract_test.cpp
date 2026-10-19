@@ -78,13 +78,23 @@ int main(int argc, char** argv) {
     CHECK(get_snapshot != nullptr);
 
     {
+        ERUI_Api capability_gated{};
+        capability_gated.size = ERUI_API_V1_3_SIZE;
+        CHECK(host.get_api(ERUI_API_VERSION_1_3, &capability_gated) == ERUI_OK);
+        CHECK(capability_gated.add_tab != nullptr);
+        capability_gated.capabilities &= ~ERUI_CAP_CUSTOM_TABS;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_3));
+    }
+
+    {
         const auto config = configuration(2, ERUI_OK, ERUI_OK);
         CHECK(configure(&config) == ERUI_OK);
 
         auto connected = erui::connect(250ms);
         CHECK(connected.success());
         CHECK(connected.value().valid());
-        CHECK(connected.value().api_version() == ERUI_API_VERSION_1_2);
+        CHECK(connected.value().api_version() == ERUI_API_VERSION_1_3);
         CHECK(connected.value().supports(erui::Capability::numeric_slider));
         CHECK(connected.value().supports(erui::Capability::custom_slider));
         CHECK(connected.value().supports(erui::Capability::text_input));

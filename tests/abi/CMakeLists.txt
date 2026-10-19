@@ -122,6 +122,10 @@ if(WIN32)
         OUTPUT_NAME ERNativeUI
         PREFIX ""
         RUNTIME_OUTPUT_DIRECTORY
+            "${CMAKE_BINARY_DIR}/abi/runtime/connection"
+        ARCHIVE_OUTPUT_DIRECTORY
+            "${CMAKE_BINARY_DIR}/abi/runtime/connection"
+        LIBRARY_OUTPUT_DIRECTORY
             "${CMAKE_BINARY_DIR}/abi/runtime/connection")
 
     add_executable(ERNativeUIAbiCurrentConnectionContract
@@ -320,6 +324,52 @@ if(WIN32)
             /EHsc /Zc:__cplusplus)
     endif()
 
+    add_executable(ERNativeUIAbiCurrentCustomTabsContract
+        current/custom_tabs_contract_test.c
+        support/host_loader.c)
+    target_include_directories(
+        ERNativeUIAbiCurrentCustomTabsContract PRIVATE
+        "${ERNATIVEUI_ABI_REPOSITORY_ROOT}/include"
+        "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+    set_target_properties(ERNativeUIAbiCurrentCustomTabsContract PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS NO)
+    target_compile_definitions(
+        ERNativeUIAbiCurrentCustomTabsContract PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX)
+    add_dependencies(ERNativeUIAbiCurrentCustomTabsContract
+        ERNativeUIAbiConnectionHost)
+    add_test(NAME ERNativeUI.ABI.CustomTabs.CurrentC
+        COMMAND ERNativeUIAbiCurrentCustomTabsContract
+            "$<TARGET_FILE:ERNativeUIAbiConnectionHost>")
+
+    add_executable(ERNativeUIAbiCurrentCustomTabsWrapper
+        current/custom_tabs_wrapper_test.cpp
+        support/host_loader.c)
+    target_include_directories(
+        ERNativeUIAbiCurrentCustomTabsWrapper PRIVATE
+        "${ERNATIVEUI_ABI_REPOSITORY_ROOT}/include"
+        "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+    target_compile_features(
+        ERNativeUIAbiCurrentCustomTabsWrapper PRIVATE cxx_std_17)
+    set_target_properties(ERNativeUIAbiCurrentCustomTabsWrapper PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES)
+    target_compile_definitions(
+        ERNativeUIAbiCurrentCustomTabsWrapper PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(
+            ERNativeUIAbiCurrentCustomTabsWrapper PRIVATE
+            /EHsc /Zc:__cplusplus)
+    endif()
+    add_dependencies(ERNativeUIAbiCurrentCustomTabsWrapper
+        ERNativeUIAbiConnectionHost)
+    add_test(NAME ERNativeUI.ABI.CustomTabs.CurrentWrapper
+        COMMAND ERNativeUIAbiCurrentCustomTabsWrapper
+            "$<TARGET_FILE:ERNativeUIAbiConnectionHost>")
+
     if(TARGET ERNativeUIAbiHostCurrent)
         set(_erui_v1_0_include
             "${CMAKE_CURRENT_LIST_DIR}/releases/v1_0/include")
@@ -439,6 +489,48 @@ if(WIN32)
         add_test(NAME ERNativeUI.ABI.Compat.V1_1.CppToCurrent
             COMMAND ERNativeUIAbiV1_1ToCurrentCpp
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+
+        set(_erui_v1_2_include
+            "${CMAKE_CURRENT_LIST_DIR}/releases/v1_2/include")
+
+        add_executable(ERNativeUIAbiV1_2ToCurrentC
+            releases/v1_2/current_host_smoke_test.c
+            support/host_loader.c)
+        target_include_directories(ERNativeUIAbiV1_2ToCurrentC BEFORE PRIVATE
+            "${_erui_v1_2_include}"
+            "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+        set_target_properties(ERNativeUIAbiV1_2ToCurrentC PROPERTIES
+            C_STANDARD 11
+            C_STANDARD_REQUIRED YES
+            C_EXTENSIONS NO)
+        target_compile_definitions(ERNativeUIAbiV1_2ToCurrentC PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX)
+
+        add_executable(ERNativeUIAbiV1_2ToCurrentCpp
+            releases/v1_2/current_host_wrapper_smoke_test.cpp
+            support/host_loader.c)
+        target_include_directories(
+            ERNativeUIAbiV1_2ToCurrentCpp BEFORE PRIVATE
+            "${_erui_v1_2_include}"
+            "${ERNATIVEUI_ABI_SUPPORT_DIR}")
+        target_compile_features(ERNativeUIAbiV1_2ToCurrentCpp PRIVATE
+            cxx_std_17)
+        set_target_properties(ERNativeUIAbiV1_2ToCurrentCpp PROPERTIES
+            C_STANDARD 11
+            C_STANDARD_REQUIRED YES)
+        target_compile_definitions(ERNativeUIAbiV1_2ToCurrentCpp PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX)
+        if(MSVC)
+            target_compile_options(ERNativeUIAbiV1_2ToCurrentCpp PRIVATE
+                /EHsc /Zc:__cplusplus)
+        endif()
+
+        add_test(NAME ERNativeUI.ABI.Compat.V1_2.CToCurrent
+            COMMAND ERNativeUIAbiV1_2ToCurrentC
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+        add_test(NAME ERNativeUI.ABI.Compat.V1_2.CppToCurrent
+            COMMAND ERNativeUIAbiV1_2ToCurrentCpp
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
         add_test(NAME ERNativeUI.ABI.Negotiation.CurrentProduction
             COMMAND ERNativeUIAbiNegotiationCurrent
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>" current)
@@ -471,6 +563,12 @@ if(WIN32)
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
         add_test(NAME ERNativeUI.ABI.Sliders.CurrentProductionCpp
             COMMAND ERNativeUIAbiCurrentSliderWrapper
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+        add_test(NAME ERNativeUI.ABI.CustomTabs.CurrentProductionC
+            COMMAND ERNativeUIAbiCurrentCustomTabsContract
+                "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
+        add_test(NAME ERNativeUI.ABI.CustomTabs.CurrentProductionCpp
+            COMMAND ERNativeUIAbiCurrentCustomTabsWrapper
                 "$<TARGET_FILE:ERNativeUIAbiHostCurrent>")
     endif()
 endif()

@@ -6,10 +6,13 @@
 #include "logger.hpp"
 #include "module.hpp"
 #include "native_dialog.hpp"
+#include "native_gfx_loader.hpp"
 #include "native_input_bindings.hpp"
+#include "native_tabs.hpp"
 #include "color_picker.hpp"
 #include "runtime_log.hpp"
 #include "steam_language.hpp"
+#include "tab_configuration.hpp"
 
 #include "runtime.hpp"
 #include "resource.h"
@@ -25,7 +28,9 @@
 #include <memory>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -38,6 +43,29 @@ std::unique_ptr<erui::Menu> g_menu{};
 
 constexpr DWORD kSteamReadinessPollMs = 25;
 constexpr std::uint64_t kSteamReadinessLogMs = 2000;
+
+class UniqueWin32Handle final {
+public:
+    explicit UniqueWin32Handle(HANDLE handle = INVALID_HANDLE_VALUE) noexcept
+        : handle_(handle) {}
+
+    ~UniqueWin32Handle() noexcept {
+        if (handle_ != INVALID_HANDLE_VALUE && handle_ != nullptr) {
+            CloseHandle(handle_);
+        }
+    }
+
+    UniqueWin32Handle(const UniqueWin32Handle&) = delete;
+    UniqueWin32Handle& operator=(const UniqueWin32Handle&) = delete;
+
+    [[nodiscard]] HANDLE get() const noexcept { return handle_; }
+    [[nodiscard]] bool valid() const noexcept {
+        return handle_ != INVALID_HANDLE_VALUE && handle_ != nullptr;
+    }
+
+private:
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+};
 
 void fail_pending_startup_for_stop() noexcept {
     set_api_state(ApiState::failed);
@@ -133,6 +161,138 @@ bool ensure_default_ini(
     return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
+bool read_tab_configuration_file(
+    const std::filesystem::path& path,
+    std::string& output,
+    DWORD& error) noexcept {
+    output.clear();
+    error = ERROR_SUCCESS;
+    UniqueWin32Handle file(CreateFileW(
+        path.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr));
+    if (!file.valid()) {
+        error = GetLastError();
+        return false;
+    }
+
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(file.get(), &size) || size.QuadPart < 0) {
+        error = GetLastError();
+        return false;
+    }
+
+    try {
+        if (static_cast<unsigned long long>(size.QuadPart) >
+            erui::detail::kMaximumTabConfigurationBytes) {
+            // The pure parser owns the policy and diagnostic. A bounded
+            // sentinel is enough to report file_too_large without allocating
+            // attacker-sized input on the host worker.
+            output.assign(
+                erui::detail::kMaximumTabConfigurationBytes + 1,
+                '\0');
+            return true;
+        }
+        output.resize(static_cast<std::size_t>(size.QuadPart));
+    } catch (const std::bad_alloc&) {
+        error = ERROR_OUTOFMEMORY;
+        return false;
+    } catch (...) {
+        error = ERROR_GEN_FAILURE;
+        return false;
+    }
+    DWORD read{};
+    const bool success = output.empty() ||
+        (ReadFile(
+             file.get(),
+             output.data(),
+             static_cast<DWORD>(output.size()),
+             &read,
+             nullptr) != FALSE &&
+            read == static_cast<DWORD>(output.size()));
+    if (!success) error = GetLastError();
+    if (!success) output.clear();
+    return success;
+}
+
+bool write_utf8_file_atomically(
+    const std::filesystem::path& path,
+    std::string_view contents,
+    DWORD& error) noexcept {
+    error = ERROR_SUCCESS;
+    try {
+        std::filesystem::path temporary = path;
+        temporary += L".tmp." + std::to_wstring(GetCurrentProcessId());
+        bool flushed = false;
+        {
+            UniqueWin32Handle file(CreateFileW(
+                temporary.c_str(),
+                GENERIC_WRITE,
+                0,
+                nullptr,
+                CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr));
+            if (!file.valid()) {
+                error = GetLastError();
+                return false;
+            }
+
+            if (contents.size() > (std::numeric_limits<DWORD>::max)()) {
+                error = ERROR_FILE_TOO_LARGE;
+            } else {
+                DWORD written{};
+                bool wrote = contents.empty();
+                if (!contents.empty()) {
+                    if (WriteFile(
+                            file.get(),
+                            contents.data(),
+                            static_cast<DWORD>(contents.size()),
+                            &written,
+                            nullptr) == FALSE) {
+                        error = GetLastError();
+                    } else if (written !=
+                        static_cast<DWORD>(contents.size())) {
+                        error = ERROR_WRITE_FAULT;
+                    } else {
+                        wrote = true;
+                    }
+                }
+                if (!wrote) {
+                    if (error == ERROR_SUCCESS) error = ERROR_WRITE_FAULT;
+                } else {
+                    flushed = FlushFileBuffers(file.get()) != FALSE;
+                    if (!flushed) error = GetLastError();
+                }
+            }
+        }
+        if (!flushed) {
+            DeleteFileW(temporary.c_str());
+            return false;
+        }
+
+        if (MoveFileExW(
+                temporary.c_str(),
+                path.c_str(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE) {
+            error = GetLastError();
+            DeleteFileW(temporary.c_str());
+            return false;
+        }
+        return true;
+    } catch (const std::bad_alloc&) {
+        error = ERROR_OUTOFMEMORY;
+        return false;
+    } catch (...) {
+        error = ERROR_GEN_FAILURE;
+        return false;
+    }
+}
+
 const void* absolute_indirect_jump_target(const unsigned char* entry) noexcept {
     if (!entry || entry[0] != 0xFF || entry[1] != 0x25) return nullptr;
     std::int32_t displacement{};
@@ -183,11 +343,7 @@ const void* absolute_indirect_jump_target(const unsigned char* entry) noexcept {
 }
 
 void runtime_log_sink(erui::LogLevel level, const char* message) noexcept {
-    const char* name = "INFO";
-    if (level == erui::LogLevel::warning) name = "WARN";
-    else if (level == erui::LogLevel::error) name = "ERROR";
-    else if (level == erui::LogLevel::trace) name = "TRACE";
-    log::write("[ERNativeUI/%s] %s", name, message ? message : "");
+    log::write(level, "%s", message ? message : "");
 }
 
 DWORD run_host() noexcept {
@@ -200,20 +356,151 @@ DWORD run_host() noexcept {
         }
         const bool logging_enabled = read_ini(
             ini, L"Logging", L"EnableLog", 0) != 0;
-        if (logging_enabled) {
+        const bool diagnostics = read_ini(
+            ini, L"Diagnostics", L"EnableDiagnostics", 0) != 0;
+        const bool logging_ready = logging_enabled &&
             log::initialize(directory / L"ERNativeUI.log");
-        }
-        erui::detail::set_log_sink(&runtime_log_sink);
+        log::set_diagnostics_enabled(diagnostics);
+        erui::detail::set_diagnostic_logging(diagnostics);
+        erui::detail::set_log_sink(
+            logging_ready ? &runtime_log_sink : nullptr);
         log::write("============================================================");
         log::write("ERNativeUI host v%s starting", ER_NATIVE_UI_BUILD_VERSION);
         log::write("Offline / EAC-disabled use only; hot unloading is unsupported");
+
+        std::string tab_configuration_bytes{};
+        DWORD tab_configuration_error{};
+        erui::detail::TabConfiguration tab_configuration{};
+        if (read_tab_configuration_file(
+                ini,
+                tab_configuration_bytes,
+                tab_configuration_error)) {
+            tab_configuration = erui::detail::parse_tab_configuration(
+                tab_configuration_bytes);
+        } else {
+            log::write(
+                erui::LogLevel::warning,
+                "Could not read exact-case tab configuration from ERNativeUI.ini (Win32 error=%lu); using tab defaults",
+                static_cast<unsigned long>(tab_configuration_error));
+            tab_configuration = erui::detail::parse_tab_configuration({});
+        }
+        const auto tab_warning_count = static_cast<std::size_t>(std::count_if(
+            tab_configuration.diagnostics.begin(),
+            tab_configuration.diagnostics.end(),
+            [](const erui::detail::TabConfigurationDiagnostic& diagnostic) {
+                return diagnostic.severity ==
+                    erui::detail::TabConfigurationSeverity::warning;
+            }));
+        const auto tab_error_count = static_cast<std::size_t>(std::count_if(
+            tab_configuration.diagnostics.begin(),
+            tab_configuration.diagnostics.end(),
+            [](const erui::detail::TabConfigurationDiagnostic& diagnostic) {
+                return diagnostic.severity ==
+                    erui::detail::TabConfigurationSeverity::error;
+            }));
+        log::write(
+            "Tab configuration: minimumSlots=%u margin=%u mouseDwell=%u delays=%llu/%llu decay=%llu minimum=%llu ms overrides=%zu diagnostics=%zu warning/%zu error",
+            static_cast<unsigned>(
+                tab_configuration.settings.minimum_tab_slots),
+            static_cast<unsigned>(
+                tab_configuration.settings.navigation_margin),
+            tab_configuration.settings.mouse_dwell_enabled ? 1U : 0U,
+            static_cast<unsigned long long>(
+                tab_configuration.settings.mouse_dwell_timing
+                    .initial_delay_ms),
+            static_cast<unsigned long long>(
+                tab_configuration.settings.mouse_dwell_timing
+                    .repeat_delay_ms),
+            static_cast<unsigned long long>(
+                tab_configuration.settings.mouse_dwell_timing
+                    .repeat_decay_ms),
+            static_cast<unsigned long long>(
+                tab_configuration.settings.mouse_dwell_timing
+                    .minimum_repeat_delay_ms),
+            tab_configuration.order_overrides.size(),
+            tab_warning_count,
+            tab_error_count);
+        // Registry ordering and the installed native catalogue must consume
+        // the same immutable settings. Keep this local copy for the runtime
+        // handoff after registration freezes.
+        registry().set_tab_configuration(tab_configuration);
 
         HMODULE pinned_host{};
         if (!GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                     GET_MODULE_HANDLE_EX_FLAG_PIN,
                 reinterpret_cast<LPCWSTR>(g_module), &pinned_host)) {
-            log::write("WARN: host module could not be pinned; do not hot-unload it");
+            log::write(
+                erui::LogLevel::warning,
+                "Host module could not be pinned; do not hot-unload it");
+        } else {
+            erui::native::ModuleView game{};
+            if (!game.initialize(GetModuleHandleW(nullptr))) {
+                log::write(
+                    erui::LogLevel::warning,
+                    "Runtime GFX completion is unavailable because the game image could not be inspected");
+            } else {
+                std::uint16_t gfx_minimum_tab_slots =
+                    static_cast<std::uint16_t>(
+                        tab_configuration.settings.minimum_tab_slots);
+#if defined(ER_NATIVE_UI_GFX_TAB_GROWTH_RESEARCH_HOST)
+                // This build isolates Scaleform growth from the native-record
+                // experiment. Configuration, the logical catalogue, and the
+                // game's active tab count remain at eight; only the movie
+                // transformer authors the requested dormant cells.
+#if !defined(ER_NATIVE_UI_TAB_SLOT_RESEARCH_TARGET)
+#error "The GFX tab-growth research host requires a tab-slot target"
+#endif
+                static_assert(
+                    ER_NATIVE_UI_TAB_SLOT_RESEARCH_TARGET == 9 ||
+                    ER_NATIVE_UI_TAB_SLOT_RESEARCH_TARGET == 10);
+                gfx_minimum_tab_slots = static_cast<std::uint16_t>(
+                    ER_NATIVE_UI_TAB_SLOT_RESEARCH_TARGET);
+                log::write(
+                    erui::LogLevel::warning,
+                    "RESEARCH GFX tab-growth host active: configuration/native tabs remain at %u; Scaleform minimum forced to %u",
+                    static_cast<unsigned>(
+                        tab_configuration.settings.minimum_tab_slots),
+                    static_cast<unsigned>(gfx_minimum_tab_slots));
+#endif
+                const erui::native::NativeGfxLoaderInstallStatus gfx_status =
+                    erui::native::install_native_gfx_loader(
+                        game, gfx_minimum_tab_slots);
+                if (gfx_status !=
+                        erui::native::NativeGfxLoaderInstallStatus::installed &&
+                    gfx_status != erui::native::
+                        NativeGfxLoaderInstallStatus::already_installed) {
+                    log::write(
+                        erui::LogLevel::warning,
+                        "Runtime GFX completion is unavailable (%s); loaded GFX files will remain unchanged",
+                        erui::native::native_gfx_loader_install_status_name(
+                            gfx_status));
+                }
+            }
+        }
+
+        const erui::native::NativeTabsPreflightStatus tab_preflight =
+            erui::native::preflight_native_tabs();
+        if (tab_preflight ==
+                erui::native::NativeTabsPreflightStatus::available) {
+            if (!registry().enable_custom_tabs_backend()) {
+                log::write(
+                    erui::LogLevel::fatal,
+                    "Native custom-tab backend passed preflight but could not be published before registration opened");
+                set_api_state(ApiState::failed);
+                return 1;
+            }
+            log::write(
+                "Native custom-tab backend preflight passed; API 1.3 custom tabs are available");
+        } else if (tab_preflight ==
+                erui::native::NativeTabsPreflightStatus::unsupported_game) {
+            log::write(
+                erui::LogLevel::warning,
+                "Native custom-tab backend is unavailable for this game executable; API 1.3 remains negotiable without ERUI_CAP_CUSTOM_TABS");
+        } else {
+            log::write(
+                erui::LogLevel::warning,
+                "Native custom-tab backend interface validation failed; API 1.3 remains negotiable without ERUI_CAP_CUSTOM_TABS");
         }
 
         HMODULE const solid_uncapper_module =
@@ -230,7 +517,8 @@ DWORD run_host() noexcept {
             erui::native::ModuleView game{};
             if (!game.initialize(GetModuleHandleW(nullptr))) {
                 log::write(
-                    "ERROR: could not inspect the game image before Solid Uncapper initialization");
+                    erui::LogLevel::fatal,
+                    "Could not inspect the game image before Solid Uncapper initialization");
                 set_api_state(ApiState::failed);
                 return 1;
             }
@@ -238,19 +526,22 @@ DWORD run_host() noexcept {
                     capture_color_picker_visibility_before_third_party_hooks(
                         game)) {
                 log::write(
-                    "WARN: Color Picker visibility interface could not be captured early; menus without ColorPicker rows may remain available");
+                    erui::LogLevel::warning,
+                    "Color Picker visibility interface could not be captured early; menus without ColorPicker rows may remain available");
             }
             const bool captured_input_bindings =
                 erui::native::capture_native_input_bindings_before_third_party_hooks();
             if (!captured_input_bindings) {
                 log::write(
-                    "WARN: native input-binding interfaces could not be captured early; menus without custom bindings may remain available");
+                    erui::LogLevel::warning,
+                    "Native input-binding interfaces could not be captured early; menus without custom bindings may remain available");
             }
             if (!erui::native::resolve_game_addresses(
                     game, early_addresses,
                     true, true, true, true, true, false, true)) {
                 log::write(
-                    "ERROR: could not capture native interfaces before Solid Uncapper initialization");
+                    erui::LogLevel::fatal,
+                    "Could not capture native interfaces before Solid Uncapper initialization");
                 set_api_state(ApiState::failed);
                 return 1;
             }
@@ -265,7 +556,8 @@ DWORD run_host() noexcept {
                  index < shared_entries.size(); ++index) {
                 if (absolute_indirect_jump_target(shared_entries[index])) {
                     log::write(
-                        "ERROR: shared native interface %zu was detoured before its pristine entry could be captured",
+                        erui::LogLevel::fatal,
+                        "Shared native interface %zu was detoured before its pristine entry could be captured",
                         index);
                     set_api_state(ApiState::failed);
                     return 1;
@@ -302,14 +594,13 @@ DWORD run_host() noexcept {
                 0, 30000));
         const auto cooldown = static_cast<std::uint32_t>(std::clamp(
             read_ini(ini, L"Runtime", L"InjectionCooldownMs", 250), 0, 5000));
-        const bool diagnostics = read_ini(
-            ini, L"Diagnostics", L"EnableDiagnostics", 0) != 0;
         LocalizationLanguageSetting language_setting =
             parse_localization_language(read_ini_text(
                 ini, L"Localization", L"Language", L"auto"));
         if (language_setting.mode == LocalizationLanguageMode::invalid) {
             log::write(
-                "WARN: invalid Localization.Language setting; using automatic Steam game-language detection");
+                erui::LogLevel::warning,
+                "Invalid Localization.Language setting; using automatic Steam game-language detection");
             language_setting = {
                 LocalizationLanguageMode::automatic,
                 {}};
@@ -417,7 +708,8 @@ DWORD run_host() noexcept {
                 static_cast<unsigned long long>(language_wait_elapsed));
         } else if (startup_language_result == ERUI_NOT_SUPPORTED) {
             log::write(
-                "WARN: Steam language is terminally unavailable after %llu ms (failure=%u: %s); connections remain available and language queries will report unsupported",
+                erui::LogLevel::warning,
+                "Steam language is terminally unavailable after %llu ms (failure=%u: %s); connections remain available and language queries will report unsupported",
                 static_cast<unsigned long long>(language_wait_elapsed),
                 static_cast<unsigned>(startup_failure),
                 startup_failure_text);
@@ -448,6 +740,30 @@ DWORD run_host() noexcept {
             static_cast<unsigned long long>(registry().generation()),
             registry().committed_provider_count(),
             registry().committed_root_row_count());
+        if (logging_enabled) {
+            const erui::detail::TabDiagnosticsReport tab_report =
+                registry().tab_diagnostics_report();
+            const std::string tab_report_text =
+                erui::detail::serialize_tab_diagnostics_report(tab_report);
+            DWORD tab_report_error{};
+            const std::filesystem::path tab_report_path =
+                directory / L"ERNativeUI-tabs.log";
+            if (write_utf8_file_atomically(
+                    tab_report_path,
+                    tab_report_text,
+                    tab_report_error)) {
+                log::write(
+                    "Tab diagnostics written: customTabs=%zu staleOverrides=%zu orderComplete=%u path=ERNativeUI-tabs.log",
+                    tab_report.ordered_tabs.size(),
+                    tab_report.stale_overrides.size(),
+                    tab_report.order_complete ? 1U : 0U);
+            } else {
+                log::write(
+                    erui::LogLevel::warning,
+                    "Could not write ERNativeUI-tabs.log (Win32 error=%lu)",
+                    static_cast<unsigned long>(tab_report_error));
+            }
+        }
 
         if (solid_uncapper_loaded) {
             // DLL load order does not serialize worker-thread initialization.
@@ -506,7 +822,8 @@ DWORD run_host() noexcept {
 
             if (changed_count != 0 && changed_count != targets.size()) {
                 log::write(
-                    "ERROR: Solid Uncapper installed only %zu/3 shared hooks; refusing a partial chain",
+                    erui::LogLevel::fatal,
+                    "Solid Uncapper installed only %zu/3 shared hooks; refusing a partial chain",
                     changed_count);
                 set_api_state(ApiState::failed);
                 return 1;
@@ -517,7 +834,8 @@ DWORD run_host() noexcept {
                 if (!solid_uncapper.initialize(
                         solid_uncapper_module)) {
                     log::write(
-                        "ERROR: could not inspect Solid Uncapper image for hook ownership");
+                        erui::LogLevel::fatal,
+                        "Could not inspect Solid Uncapper image for hook ownership");
                     set_api_state(ApiState::failed);
                     return 1;
                 }
@@ -527,7 +845,8 @@ DWORD run_host() noexcept {
                     if (!destination || !solid_uncapper.contains(destination) ||
                         !solid_uncapper.is_executable(destination)) {
                         log::write(
-                            "ERROR: shared menu hook %zu has an unsupported or foreign detour",
+                            erui::LogLevel::fatal,
+                            "Shared menu hook %zu has an unsupported or foreign detour",
                             index);
                         set_api_state(ApiState::failed);
                         return 1;
@@ -563,7 +882,8 @@ DWORD run_host() noexcept {
                         !solid_uncapper.contains(destination) ||
                         !solid_uncapper.is_executable(destination)) {
                         log::write(
-                            "WARN: Solid Uncapper formatted-slider chain was not approved; API 1.2 formatted sliders will be unavailable if requested");
+                            erui::LogLevel::warning,
+                            "Solid Uncapper formatted-slider chain was not approved; API 1.2 formatted sliders will be unavailable if requested");
                         early_addresses.slider_refresh = nullptr;
                     } else {
                         log::write(
@@ -576,13 +896,15 @@ DWORD run_host() noexcept {
             } else {
                 early_addresses.slider_refresh = nullptr;
                 log::write(
-                    "WARN: SliderCtrl refresh was not captured early; API 1.2 formatted sliders will be unavailable with Solid Uncapper");
+                    erui::LogLevel::warning,
+                    "SliderCtrl refresh was not captured early; API 1.2 formatted sliders will be unavailable with Solid Uncapper");
             }
 
             if (!erui::native::approve_captured_native_input_bindings(
                     solid_uncapper_module)) {
                 log::write(
-                    "WARN: Solid Uncapper input-binding chain was not approved; installation can continue only when no client registered custom bindings");
+                    erui::LogLevel::warning,
+                    "Solid Uncapper input-binding chain was not approved; installation can continue only when no client registered custom bindings");
             } else {
                 log::write(
                     "Solid Uncapper compatibility: input-binding chain approved");
@@ -590,7 +912,8 @@ DWORD run_host() noexcept {
             if (!erui::native::approve_captured_color_picker_visibility(
                     solid_uncapper_module)) {
                 log::write(
-                    "WARN: Solid Uncapper Color Picker chain was not approved; installation can continue only when no client registered ColorPicker rows");
+                    erui::LogLevel::warning,
+                    "Solid Uncapper Color Picker chain was not approved; installation can continue only when no client registered ColorPicker rows");
             } else {
                 log::write(
                     "Solid Uncapper compatibility: Color Picker chain approved");
@@ -606,13 +929,16 @@ DWORD run_host() noexcept {
         // live page object's validated capacity.
         options.game_options_visual_capacity = 6;
         options.injection_cooldown_ms = cooldown;
-        options.log_sink = &runtime_log_sink;
+        options.log_sink = logging_ready ? &runtime_log_sink : nullptr;
         const erui::InstallResult installed = solid_uncapper_loaded
-            ? erui::install_with_resolved_addresses(
-                *g_menu, options, early_addresses)
-            : erui::install(*g_menu, options);
+            ? erui::install_with_resolved_addresses_and_tab_configuration(
+                *g_menu, options, early_addresses, tab_configuration)
+            : erui::install_with_tab_configuration(
+                *g_menu, options, tab_configuration);
         if (!installed.success()) {
-            log::write("ERROR: native runtime installation failed (%u)",
+            log::write(
+                erui::LogLevel::fatal,
+                "Native runtime installation failed (%u)",
                 static_cast<unsigned>(installed.error));
             set_api_state(ApiState::failed);
             return 1;
@@ -644,9 +970,14 @@ DWORD run_host() noexcept {
         }
         return 0;
     } catch (const std::exception& exception) {
-        log::write("ERROR: host bootstrap exception: %s", exception.what());
+        log::write(
+            erui::LogLevel::fatal,
+            "Host bootstrap exception: %s",
+            exception.what());
     } catch (...) {
-        log::write("ERROR: host bootstrap unknown exception");
+        log::write(
+            erui::LogLevel::fatal,
+            "Host bootstrap unknown exception");
     }
     set_api_state(ApiState::failed);
     if (steam_language_readiness() == SteamLanguageReadiness::pending) {

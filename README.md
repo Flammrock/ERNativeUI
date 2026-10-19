@@ -170,6 +170,8 @@ options, screenshots, and links to its native implementation research.
 
 ## More than controls
 
+- Give a mod its own top-level Configuration tab with a localized title and
+  custom RGBA8 icon. [Learn about custom tabs](docs/guides/custom-tabs.md).
 - Add ordinary rows to supported built-in Configuration pages, including
   Game Options, Camera Options, Display, Sound, Network, Keyboard/Mouse, and
   Graphics. [Learn about menus and pages](docs/guides/menus-and-pages.md).
@@ -185,9 +187,10 @@ options, screenshots, and links to its native implementation research.
 - Load, mutate, and explicitly save provider-owned configuration, or use the
   header-only input-assignment codec with another storage system.
   [Learn about storage](docs/guides/storage.md).
-- Optionally install reproducible GFX presentation patches for expanded page
-  capacity and enhanced TextInput and ColorPicker presentation.
-  [Learn about GFX presentation](docs/guides/presentation-and-gfx.md).
+- Let the host complete supported settings GFX at runtime for expanded page
+  capacity and native TextInput and ColorPicker presentation. Structurally
+  compatible GFX supplied by other mods remains supported.
+  [Learn about runtime GFX completion](docs/guides/presentation-and-gfx.md).
 
 The complete supported surface, minimum API versions, capabilities, and limits
 live in the [feature matrix](docs/features.md).
@@ -234,7 +237,8 @@ MSVC, clang-cl, and MinGW-w64 client mods can use the same stable host ABI.
 - Host and committed client DLLs must remain loaded until process exit.
 
 See [Game and mod compatibility](docs/COMPATIBILITY.md) for exact tested
-versions, optional GFX conflicts, Solid Uncapper setup, and useful bug reports.
+versions, modified-GFX compatibility, Solid Uncapper setup, and useful bug
+reports.
 
 <p align="center">
   <img src="assets/ernativeui-separator-2.png" alt="">

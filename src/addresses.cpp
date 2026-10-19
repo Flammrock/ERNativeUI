@@ -239,7 +239,7 @@ std::uint8_t* resolve_direct(
     const ScanResult scan = game.scan_executable(scan_pattern);
     if (scan.address && scan.matches == 1) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s = %p (AOB, RVA 0x%" PRIXPTR ")",
             name,
             static_cast<void*>(scan.address),
@@ -250,13 +250,13 @@ std::uint8_t* resolve_direct(
 
     if (scan.matches > 1) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s AOB was ambiguous (%zu matches)",
             name,
             scan.matches);
     } else {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s AOB was not found",
             name);
     }
@@ -266,7 +266,7 @@ std::uint8_t* resolve_direct(
         (fallback_validation.empty() || game.matches(fallback, fallback_validation));
     if (valid) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s = %p (validated fallback RVA 0x%" PRIXPTR ")",
             name,
             static_cast<void*>(fallback),
@@ -293,7 +293,7 @@ std::uint8_t* resolve_call_target(
     if (scan.address && scan.matches == 1) {
         if (auto* target = resolve_rel32_call(game, scan.address + call_offset)) {
             erui::detail::logf(
-                erui::LogLevel::info,
+                erui::LogLevel::verbose,
                 "Address %-22s = %p (AOB call target, RVA 0x%" PRIXPTR ")",
                 name,
                 static_cast<void*>(target),
@@ -302,18 +302,18 @@ std::uint8_t* resolve_call_target(
             return target;
         }
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s callsite matched but rel32 resolution failed",
             name);
     } else if (scan.matches > 1) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s callsite AOB was ambiguous (%zu matches)",
             name,
             scan.matches);
     } else {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s callsite AOB was not found",
             name);
     }
@@ -331,7 +331,7 @@ std::uint8_t* resolve_call_target(
         game.is_executable(fallback) && game.matches(fallback, fallback_validation);
     if (valid) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s = %p (validated fallback RVA 0x%" PRIXPTR ")",
             name,
             static_cast<void*>(fallback),
@@ -356,7 +356,7 @@ std::uint8_t* resolve_optional_direct(
     const ScanResult scan = game.scan_executable(scan_pattern);
     if (scan.address && scan.matches == 1) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s = %p (AOB, RVA 0x%" PRIXPTR ")",
             name,
             static_cast<void*>(scan.address),
@@ -370,7 +370,7 @@ std::uint8_t* resolve_optional_direct(
         game.is_executable(fallback) && game.matches(fallback, fallback_validation);
     if (valid) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s = %p (validated fallback RVA 0x%" PRIXPTR ")",
             name,
             static_cast<void*>(fallback),
@@ -397,7 +397,7 @@ std::uint8_t* resolve_optional_call_target(
         if (auto* target = resolve_rel32_call(
                 game, scan.address + call_offset)) {
             erui::detail::logf(
-                erui::LogLevel::info,
+                erui::LogLevel::verbose,
                 "Optional address %-13s = %p (AOB call target, RVA 0x%" PRIXPTR ")",
                 name,
                 static_cast<void*>(target),
@@ -467,7 +467,7 @@ void** resolve_callable_vtable(
 
     if (matches == 1) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s = %p (callable vtable scan, RVA 0x%" PRIXPTR ")",
             name,
             static_cast<void*>(match),
@@ -479,7 +479,7 @@ void** resolve_callable_vtable(
     auto** fallback = reinterpret_cast<void**>(game.at_rva(fallback_rva));
     if (valid_callable_vtable(game, fallback, invoke)) {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address %-22s = %p (validated fallback RVA 0x%" PRIXPTR ")",
             name,
             static_cast<void*>(fallback),
@@ -649,7 +649,7 @@ bool resolve_game_addresses(
                     kScaleformResultDestructorPattern));
         } else {
             erui::detail::logf(
-                erui::LogLevel::info,
+                erui::LogLevel::verbose,
                 "Address resolution: no native submenu rows declared");
 
             // API 1.2 formatted sliders reuse the same narrow Scaleform text
@@ -776,7 +776,7 @@ bool resolve_game_addresses(
                 kAddButtonPrologue));
         } else {
             erui::detail::logf(
-                erui::LogLevel::info,
+                erui::LogLevel::verbose,
                 "Address resolution: no native button rows declared");
         }
 
@@ -840,12 +840,12 @@ bool resolve_game_addresses(
             }
         } else {
             erui::detail::logf(
-                erui::LogLevel::info,
+                erui::LogLevel::verbose,
                 "Address resolution: no popup-choice rows declared");
         }
     } else {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address resolution: native row path disabled");
     }
 
@@ -854,7 +854,7 @@ bool resolve_game_addresses(
             resolve_text_resolver(game));
     } else {
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "Address resolution: custom text hook disabled");
     }
 
@@ -869,14 +869,14 @@ bool resolve_game_addresses(
                 game.image_size());
         } else {
             erui::detail::logf(
-                erui::LogLevel::info,
+                erui::LogLevel::verbose,
                 "Address resolution: no compatible TextInput path for this game image");
         }
     } else {
         const std::string_view build_name =
             elden_ring_build_name(game_build);
         erui::detail::logf(
-            erui::LogLevel::info,
+            erui::LogLevel::verbose,
             "TextInput address profile selected: Elden Ring %.*s",
             static_cast<int>(build_name.size()),
             build_name.data());

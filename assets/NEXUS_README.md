@@ -8,8 +8,7 @@ ordinary client mods.
 ## Requirements
 
 - Elden Ring for Windows x64, run offline with Easy Anti-Cheat disabled.
-- Mod Engine 2 or another compatible DLL loader; a loose-file loader is needed
-  only for the optional GFX presentation.
+- Mod Engine 2 or another compatible DLL loader.
 - An ERNativeUI release that explicitly supports your Elden Ring executable.
   Check the [release notes](https://github.com/Flammrock/ERNativeUI/releases)
   after every game update.
@@ -32,24 +31,16 @@ To try the full demonstration, add
 `mod\ERNativeUI\examples\TarnishedUIShowcase.dll` after the host. Do not load
 the example DLLs unless you want their example menus.
 
-## Optional GFX presentation
+## Runtime GFX completion
 
-The bundled `menu/win/*.gfx` files add expanded settings capacity and native
-TextInput/ColorPicker presentation. Core menu behavior has native fallbacks,
-so this directory is optional. To enable it, add the extracted ERNativeUI
-directory to the existing mod-loader list:
+ERNativeUI expands supported settings pages and supplies its TextInput and
+ColorPicker presentation in memory while the game loads the effective GFX.
+No loose ERNativeUI GFX files or mod-loader entry are normally required.
 
-```toml
-[extension.mod_loader]
-enabled = true
-mods = [
-    { enabled = true, name = "ERNativeUI", path = "mod\\ERNativeUI" },
-]
-```
-
-Another mod can replace the same GFX paths; Mod Engine 2 does not merge binary
-GFX edits. Read [Presentation and optional GFX](https://github.com/Flammrock/ERNativeUI/blob/main/docs/guides/presentation-and-gfx.md)
-before combining such mods.
+Structurally compatible GFX replacements from other mods remain supported.
+Unrecognized layouts are left unchanged instead of being patched by guesswork.
+Read [Runtime GFX completion and presentation](https://github.com/Flammrock/ERNativeUI/blob/main/docs/guides/presentation-and-gfx.md)
+when combining ERNativeUI with another mod that replaces the same movies.
 
 ## Configuration
 

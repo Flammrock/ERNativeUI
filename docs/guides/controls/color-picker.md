@@ -169,13 +169,14 @@ table and check host support.
 |---|---|
 | First public API | 1.1 |
 | Capability | `erui::Capability::color_picker` / `ERUI_CAP_COLOR_PICKER` |
-| Optional GFX | `02_040` and `02_042` provide the standalone bracketed live swatch |
+| GFX presentation | ERNativeUI completes the standalone bracketed live swatch at runtime |
 | Disabled behavior | `enabled = false` omits the row because this action path has no proven disabled appearance |
 | Runtime value | `erui::Color` with byte-sized red, green, and blue channels |
 
-The native color editor remains functional without the optional GFX files,
-but the settings row will not have the matching character-creation swatch.
-See [Presentation and optional GFX assets](../presentation-and-gfx.md).
+No loose GFX file is required. If an asset mod supplies an unrecognized
+settings movie, ERNativeUI keeps that movie unchanged and ColorPicker retains
+its functional action-row fallback. See
+[Runtime GFX completion and presentation](../presentation-and-gfx.md).
 
 ## Value and confirmation behavior
 
@@ -202,7 +203,7 @@ for input.
 - Expecting `enabled = false` to display a grey swatch; it removes the row.
 - Blocking inside the change callback while waiting for another modal to
   finish.
-- Treating the optional GFX skin as necessary for editor functionality.
+- Treating the row presentation as necessary for editor functionality.
 
 [Controls index](README.md) |
 [Reverse-engineering reference](../../research/case-studies/color-picker.md) |

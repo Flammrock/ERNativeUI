@@ -8,8 +8,9 @@ individual example when you want a smaller project.
 |---|---|---|
 | [Localized Greeting](localized_greeting/README.md) | Learn the connection, language fallback, one row, and one native dialog | Yes, as a small demonstration |
 | [Tarnished UI Showcase](tarnished_ui_showcase/README.md) | Exercise the complete current menu, dialog, input, storage, and localization surface | Yes, for integration testing |
-| [Showcase Screenshot Helper](showcase_screenshot_helper/README.md) | Select one isolated English control from an INI and capture documentation that matches a minimal example | Only while preparing documentation |
+| [Showcase Screenshot Helper](showcase_screenshot_helper/README.md) | Select one isolated English control or custom tab from an INI and capture documentation that matches a minimal example | Only while preparing documentation |
 | [Client-mod template](template/README.md) | Start a real mod from extensively commented source | No; copy and rename it first |
+| [Custom Tabs Stress](custom_tabs_stress/README.md) | Exercise a fixed 50-tab API 1.3 workload, transparent custom RGBA8 icons, independent state, and pagination | Only as an isolated stress/integration test |
 
 In every case, Mod Engine 2 must load the shared `ERNativeUI.dll` before the
 client DLL. See the [SDK setup guide](../docs/getting-started/setup.md) for

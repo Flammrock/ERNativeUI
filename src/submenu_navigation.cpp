@@ -18,6 +18,7 @@ bool route_is_bindable(
     return route.valid() &&
         route.kind != PageRouteKind::root_main &&
         route.kind != PageRouteKind::builtin_main &&
+        route.kind != PageRouteKind::tab_main &&
         route.logical_page_index < logical_page_count;
 }
 

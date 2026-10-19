@@ -120,6 +120,20 @@ static_assert(noexcept(numeric_slider_changed(
 static_assert(noexcept(custom_slider_changed(
     std::declval<const erui::CustomSliderChange&>())));
 #endif
+#if defined(ERUI_API_VERSION_1_3)
+static_assert(sizeof(ERUI_TabIconDesc) == 32);
+static_assert(sizeof(ERUI_TabDesc) == 64);
+static_assert(std::is_trivially_copyable<ERUI_TabIconDesc>::value);
+static_assert(std::is_trivially_copyable<ERUI_TabDesc>::value);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::custom_tabs) == ERUI_CAP_CUSTOM_TABS);
+static_assert(static_cast<ERUI_TabIconFormat>(
+    erui::TabIconFormat::rgba8) == ERUI_TAB_ICON_FORMAT_RGBA8);
+static_assert(std::is_same<
+    decltype(std::declval<erui::Menu&>().add_tab(
+        std::declval<const erui::TabOptions&>())),
+    erui::Page>::value);
+#endif
 #endif
 
 } // namespace
@@ -268,6 +282,20 @@ int main() {
     if (custom_change.provider != 31 || custom_change.row != 43 ||
         custom_change.index != 6 || custom_change.value_count != 7) return 32;
     if (ERUI_API_V1_2_SIZE != 368u) return 33;
+#if defined(ERUI_API_VERSION_1_3)
+    std::uint8_t tab_pixels[ERUI_TAB_ICON_RGBA8_BYTE_COUNT]{};
+    for (std::size_t offset = 3; offset < sizeof(tab_pixels); offset += 4) {
+        tab_pixels[offset] = 255u;
+    }
+    erui::TabOptions tab_options{};
+    tab_options.tab_id = "settings";
+    tab_options.title = L"Settings";
+    tab_options.preferred_order = 42;
+    tab_options.icon = {tab_pixels, sizeof(tab_pixels)};
+    tab_options.icon.format = erui::TabIconFormat::rgba8;
+    if (page.valid()) return 34;
+    if (ERUI_API_V1_3_SIZE != 376u) return 35;
+#endif
 #endif
 #endif
     return 0;

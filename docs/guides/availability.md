@@ -9,7 +9,7 @@ feature entered the public API and which capability represents it.
 |---|---|
 | First public API | The first ERNativeUI binary API that contains the feature |
 | Capability | The named feature bit advertised by the connected host DLL |
-| Optional GFX | Whether bundled GFX files improve or enable the presentation |
+| GFX presentation | Whether ERNativeUI completes presentation for the control at runtime |
 | Runtime value | The kind of value, if any, owned by the control after commit |
 
 The public API version and the ERNativeUI release version are different
@@ -28,6 +28,7 @@ erui::Capability::text_input
 erui::Capability::color_picker
 erui::Capability::numeric_slider
 erui::Capability::custom_slider
+erui::Capability::custom_tabs
 ```
 
 Check the `ConnectionResult` before reading its `Connection`, then use
@@ -82,10 +83,12 @@ const bool available_after_commit =
 Here, `menu` has type `erui::Menu` and `registration` has type
 `erui::Registration`.
 
-The current C++17 wrapper negotiates API 1.2 as one complete contract, so a
-successful connection normally reports all API 1.2 capabilities. Explicit
-checks still document a mod's requirements and keep call sites understandable
-if capabilities become optional in a later API.
+The current C++17 wrapper negotiates API 1.3 as one complete function-table
+contract. Most capabilities describe always-present parts of that table, but
+some native integrations remain independently gated. In particular, a valid
+connection can omit `Capability::custom_tabs` when the installed game build
+has not passed the required native validation. Check the capability before
+calling `Menu::add_tab`.
 
 Prefer `supports(erui::Capability::...)` over comparing API version numbers.
 The capability states the requirement directly.
@@ -94,14 +97,16 @@ The capability states the requirement directly.
 
 A capability describes the public DLL interface. It does not guarantee that:
 
-- an optional GFX file is installed;
+- the effective settings GFX retains a structure supported by the runtime
+  transformer;
 - a specific Elden Ring executable is compatible with the current host;
 - every native address required by the registered menu can be resolved; or
 - another mod has not introduced an incompatible hook.
 
-Those conditions are validated separately by the host. Registration and
-runtime errors must still be handled, and the host log is the detailed source
-when native installation fails.
+Those conditions are validated separately by the host. An unrecognized GFX
+layout is kept unchanged and uses the documented fallback presentation.
+Registration and runtime errors must still be handled, and the host log is the
+detailed source when native installation fails.
 
 ## If a capability is unavailable
 

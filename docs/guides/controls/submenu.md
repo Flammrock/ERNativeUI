@@ -150,7 +150,7 @@ table and check host support.
 |---|---|
 | First public API | 1.0 |
 | Capability | `erui::Capability::submenu` / `ERUI_CAP_SUBMENU` |
-| Optional GFX | Not required for navigation; the optional `02_040` asset supplies a matching left-label field on Game/Camera action rows |
+| GFX presentation | Runtime completion supplies the matching left-label field on affected action rows; navigation does not depend on it |
 | Runtime value | None; the call returns a child `erui::Page` builder |
 
 ## Navigation and lifetime behavior
