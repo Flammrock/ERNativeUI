@@ -9,6 +9,8 @@ namespace {
 
 using erui::detail::Rgba8RetirementLimits;
 using erui::detail::Rgba8RetirementPolicyStatus;
+using erui::detail::Rgba8RapidEpochHandoffState;
+using erui::detail::can_begin_vector_only_epoch_during_rgba8_retirement;
 using erui::detail::plan_rgba8_host_removal;
 using erui::detail::plan_rgba8_retirement_reconciliation;
 
@@ -87,6 +89,79 @@ void test_retirement_reconciliation_moves_only_downward() {
     ERUI_TEST_CHECK(complete.retirement_debt_after == 0U);
 }
 
+void test_rapid_epoch_handoff_requires_complete_ownership_proof() {
+    const Rgba8RapidEpochHandoffState eligible{
+        .exact_waiting_for_renderer_retirement = true,
+        .physical_geometry_matches = true,
+        .active_injected_hosts_empty = true,
+        .staged_injected_hosts_empty = true,
+        .active_rgba_hosts_empty = true,
+        .staged_rgba_hosts_empty = true,
+        .active_asset_ledger_empty = true,
+        .staged_asset_ledger_empty = true,
+        .transaction_active = false,
+        .transaction_failed = false,
+        .destructive_runtime_failure = false,
+    };
+    ERUI_TEST_CHECK(
+        can_begin_vector_only_epoch_during_rgba8_retirement(eligible));
+
+    Rgba8RapidEpochHandoffState rejected = eligible;
+    rejected.exact_waiting_for_renderer_retirement = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.physical_geometry_matches = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.active_injected_hosts_empty = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.staged_injected_hosts_empty = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.active_rgba_hosts_empty = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.staged_rgba_hosts_empty = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.active_asset_ledger_empty = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.staged_asset_ledger_empty = false;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.transaction_active = true;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.transaction_failed = true;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+
+    rejected = eligible;
+    rejected.destructive_runtime_failure = true;
+    ERUI_TEST_CHECK(
+        !can_begin_vector_only_epoch_during_rgba8_retirement(rejected));
+}
+
 void test_host_removal_rejects_invalid_counts_and_bounds() {
     ERUI_TEST_CHECK(plan_rgba8_host_removal(
         1U, 0U, 2U, 1U, {0U, 20U}).status ==
@@ -157,6 +232,7 @@ int main() {
     test_two_delayed_host_removals_accumulate_debt();
     test_prior_debt_can_retire_during_a_later_host_removal();
     test_retirement_reconciliation_moves_only_downward();
+    test_rapid_epoch_handoff_requires_complete_ownership_proof();
     test_host_removal_rejects_invalid_counts_and_bounds();
     test_reconciliation_rejects_invalid_counts_and_bounds();
     return 0;

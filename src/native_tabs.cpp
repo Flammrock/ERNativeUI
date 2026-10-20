@@ -47,6 +47,7 @@ using erui::detail::TabDirection;
 using erui::detail::DeferredTabPresentationRefresh;
 using erui::detail::DeferredTabPresentationRefreshPoll;
 using erui::detail::Rgba8HostRemovalPlan;
+using erui::detail::Rgba8RapidEpochHandoffState;
 using erui::detail::Rgba8RetirementLimits;
 using erui::detail::TabOverflowIndicator;
 using erui::detail::TabPointerDwell;
@@ -64,7 +65,9 @@ using erui::detail::native_tab_active_slot_target;
 using erui::detail::plan_rgba8_host_removal;
 using erui::detail::plan_rgba8_retirement_reconciliation;
 using erui::detail::plan_native_tab_slot_growth;
+using erui::detail::can_begin_vector_only_epoch_during_rgba8_retirement;
 using erui::detail::should_cancel_pointer_dwell_for_composite_input;
+using erui::detail::should_use_transparent_initial_raster_placeholder;
 using erui::detail::tab_overflow_indicator;
 using erui::detail::tab_overflow_indicators_changed;
 using erui::detail::tab_transition_input_action;
@@ -1181,6 +1184,7 @@ struct PendingAliasedIcon {
     VectorIconKind kind{VectorIconKind::none};
     RepaintContext context{};
     bool direct_rgba8{};
+    bool transparent_vector_placeholder{};
     std::size_t rgba8_index{invalid_tab_index};
     std::size_t logical{invalid_tab_index};
     std::uint64_t checksum{};
@@ -1791,6 +1795,10 @@ thread_local bool g_blocking_composite_input{};
 thread_local PanelStateIsolationExpectation g_state_isolation_expectation{};
 thread_local bool g_resolving_icon_alias{};
 thread_local RepaintContext g_repaint_context{};
+// True only while the desired cells of a new Configuration epoch are being
+// presented. Rollback repainting deliberately runs outside this scope so a
+// failed initial publication always restores the visible vector fallback.
+thread_local bool g_initial_target_repaint{};
 // The alias lookup and image binding are adjacent calls in the validated
 // presenter. Mark the exact resource, icon kind, and repaint cell, then
 // consume the marker at the next image-bind call on the same UI thread.
@@ -3593,11 +3601,13 @@ void** __fastcall texture_lookup_detour(
     // presenter creates and consumes its own binder-local reference, then
     // releases this lookup reference after the bind returns. Our permanent
     // root therefore remains at refcount 1 between presentations.
-    const bool exact_repaint_context = g_repaint_context.active &&
-        g_repaint_context.top && g_runtime.active &&
+    const bool exact_repaint_coordinate = g_repaint_context.active &&
+        g_repaint_context.top &&
         g_repaint_context.top == g_runtime.top &&
         g_repaint_context.layer != TabLayer::none &&
         g_repaint_context.physical < active_physical_tab_count();
+    const bool exact_repaint_context = exact_repaint_coordinate &&
+        g_runtime.active;
     const std::size_t logical = g_repaint_context.logical;
     const bool logical_resolved = exact_repaint_context &&
         logical < active_logical_tab_count();
@@ -3606,6 +3616,22 @@ void** __fastcall texture_lookup_detour(
         logical_resolved && logical == kStockLogicalTabCount + rgba8_index;
     const bool effective_raster = exact_catalogue_icon &&
         catalogue_icon_has_effective_raster(rgba8_index);
+    const bool exact_initial_logical_raster =
+        kind == VectorIconKind::cross && exact_repaint_coordinate &&
+        rgba8_index < active_custom_tab_count() &&
+        logical < active_logical_tab_count() &&
+        logical == kStockLogicalTabCount + rgba8_index &&
+        catalogue_icon_requires_raster(rgba8_index);
+    const bool transparent_vector_placeholder =
+        should_use_transparent_initial_raster_placeholder({
+            g_initial_target_repaint,
+            g_runtime.active,
+            g_repaint_context.top == g_runtime.top,
+            exact_repaint_coordinate,
+            exact_initial_logical_raster,
+            exact_initial_logical_raster &&
+                catalogue_icon_has_effective_raster(rgba8_index),
+        });
     void* const retained_resource = rgba8_index < active_custom_tab_count()
         ? g_retained_rgba8_resources[rgba8_index].load(
               std::memory_order_acquire)
@@ -3744,6 +3770,7 @@ void** __fastcall texture_lookup_detour(
                 kind,
                 g_repaint_context,
                 true,
+                false,
                 rgba8_index,
                 logical,
                 retained_checksum,
@@ -3790,6 +3817,7 @@ void** __fastcall texture_lookup_detour(
             kind,
             g_repaint_context,
             false,
+            transparent_vector_placeholder,
             rgba8_index,
             logical,
             retained_checksum,
@@ -3800,7 +3828,7 @@ void** __fastcall texture_lookup_detour(
         g_alias_log_count.fetch_add(1, std::memory_order_relaxed) + 1;
     if (event <= kMaximumAliasLogs) {
         log_line(
-            "iconAlias[%u] epoch=%llu kind=%u rgbaIcon=%zu logical=%zu exactCatalogue=%u context={active:%u layer:%u physical:%zu} %ls -> %ls resource=%p",
+            "iconAlias[%u] epoch=%llu kind=%u rgbaIcon=%zu logical=%zu exactCatalogue=%u transparentPlaceholder=%u context={active:%u layer:%u physical:%zu} %ls -> %ls resource=%p",
             static_cast<unsigned>(event),
             static_cast<unsigned long long>(
                 g_runtime.presentation_epoch),
@@ -3808,6 +3836,7 @@ void** __fastcall texture_lookup_detour(
             rgba8_index,
             logical,
             exact_catalogue_icon ? 1U : 0U,
+            transparent_vector_placeholder ? 1U : 0U,
             g_repaint_context.active ? 1U : 0U,
             static_cast<unsigned>(g_repaint_context.layer),
             g_repaint_context.physical,
@@ -5140,6 +5169,7 @@ Rgba8ShapeAttachProbeResult probe_dynamic_rgba8_shape_attachment(
 ShapeAttachProbeResult probe_dynamic_shape_attachment(
     std::uint32_t attempt,
     VectorIconKind icon_kind,
+    bool transparent_cross,
     void* target_value,
     void* movie_root,
     void* create_object_slot,
@@ -5380,12 +5410,14 @@ ShapeAttachProbeResult probe_dynamic_shape_attachment(
 
     unsigned long paint_seh{};
     std::uint32_t painted_rectangles{};
+    const double primary_cross_alpha = transparent_cross ? 0.0 : 0.92;
+    const double center_cross_alpha = transparent_cross ? 0.0 : 0.96;
     if (exact_graphics && sane_extents &&
         icon_kind == VectorIconKind::cross) {
         if (draw_graphics_rectangle(
                 graphics_view,
                 0x42E8F5U,
-                0.92,
+                primary_cross_alpha,
                 overlay_width * 0.42,
                 overlay_height * 0.08,
                 overlay_width * 0.16,
@@ -5396,7 +5428,7 @@ ShapeAttachProbeResult probe_dynamic_shape_attachment(
         if (painted_rectangles == 1 && draw_graphics_rectangle(
                 graphics_view,
                 0xFFC857U,
-                0.92,
+                primary_cross_alpha,
                 overlay_width * 0.12,
                 overlay_height * 0.42,
                 overlay_width * 0.76,
@@ -5407,7 +5439,7 @@ ShapeAttachProbeResult probe_dynamic_shape_attachment(
         if (painted_rectangles == 2 && draw_graphics_rectangle(
                 graphics_view,
                 0xD95CFFU,
-                0.96,
+                center_cross_alpha,
                 overlay_width * 0.36,
                 overlay_height * 0.36,
                 overlay_width * 0.28,
@@ -5669,12 +5701,13 @@ ShapeAttachProbeResult probe_dynamic_shape_attachment(
 
     if (attempt <= kMaximumShapeAttachLogs) {
         log_line(
-            "shapeAttach[%u] kind=%u context=%u layer=%u physical=%zu exactParent=%u exactTarget=%u reused=%u ctor=%u ctorSeh=0x%08lX createSeh=0x%08lX exactDynamic=%u graphics={constructed:%u exact:%u seh:0x%08lX} sourceRect={%.3f,%.3f,%.3f,%.3f sane:%u} overlayRect={%.3f,%.3f,%.3f,%.3f} painted={rects:%u final:%u seh:0x%08lX}",
+            "shapeAttach[%u] kind=%u context=%u layer=%u physical=%zu transparentPlaceholder=%u exactParent=%u exactTarget=%u reused=%u ctor=%u ctorSeh=0x%08lX createSeh=0x%08lX exactDynamic=%u graphics={constructed:%u exact:%u seh:0x%08lX} sourceRect={%.3f,%.3f,%.3f,%.3f sane:%u} overlayRect={%.3f,%.3f,%.3f,%.3f} painted={rects:%u final:%u seh:0x%08lX}",
             static_cast<unsigned>(attempt),
             static_cast<unsigned>(icon_kind),
             g_repaint_context.active ? 1U : 0U,
             static_cast<unsigned>(g_repaint_context.layer),
             g_repaint_context.physical,
+            transparent_cross ? 1U : 0U,
             exact_parent ? 1U : 0U,
             exact_target ? 1U : 0U,
             reusable_shape ? 1U : 0U,
@@ -6855,6 +6888,7 @@ bool __fastcall image_bind_detour(
         attachment = probe_dynamic_shape_attachment(
             attach_attempt,
             pending.kind,
+            pending.transparent_vector_placeholder,
             scaleform_value,
             target_movie_root,
             target_movie_root_create_object_slot,
@@ -11098,6 +11132,82 @@ InjectedIconsClearResult clear_injected_icons(
     return clear_result;
 }
 
+// Scaleform may publish the next Configuration movie while renderer-side
+// RawImage references from the preceding movie are still retiring.  The old
+// Shapes have already been detached at this point, so exact retirement debt
+// is the only ownership allowed to cross that movie boundary.  A new movie may
+// present vector-only placeholders during that short interval; attaching a
+// retained RGBA resource remains blocked by arm_catalogue_presentation_refresh
+// until every debt reaches zero.
+[[nodiscard]] bool accept_vector_only_epoch_clear_result(
+    void* top,
+    InjectedIconsClearResult clear_result,
+    const char* phase) noexcept {
+    if (clear_result == InjectedIconsClearResult::cleared) return true;
+
+    LiveTabGeometry geometry{};
+    const bool geometry_read = read_live_tab_geometry(top, geometry);
+    bool active_assets_empty = true;
+    bool staged_assets_empty = true;
+    if (g_rgba8_host_assets.size() !=
+        g_staged_rgba8_host_assets.size()) {
+        active_assets_empty = false;
+        staged_assets_empty = false;
+    } else {
+        for (std::size_t bit = 0;
+             bit < g_rgba8_host_assets.size();
+             ++bit) {
+            active_assets_empty = active_assets_empty &&
+                g_rgba8_host_assets[bit].load(
+                    std::memory_order_acquire) == 0U;
+            staged_assets_empty = staged_assets_empty &&
+                g_staged_rgba8_host_assets[bit].load(
+                    std::memory_order_acquire) == 0U;
+        }
+    }
+
+    const InPlaceRgba8RebindTransaction& transaction =
+        g_in_place_rgba8_rebind_transaction;
+    const Rgba8RapidEpochHandoffState proof{
+        .exact_waiting_for_renderer_retirement =
+            clear_result == InjectedIconsClearResult::
+                waiting_for_renderer_retirement,
+        .physical_geometry_matches = geometry_read &&
+            geometry.active == active_physical_tab_count(),
+        .active_injected_hosts_empty =
+            g_injected_icon_hosts.load(std::memory_order_acquire) == 0U,
+        .staged_injected_hosts_empty =
+            g_staged_injected_icon_hosts.load(
+                std::memory_order_acquire) == 0U,
+        .active_rgba_hosts_empty =
+            g_rgba8_icon_hosts.load(std::memory_order_acquire) == 0U,
+        .staged_rgba_hosts_empty =
+            g_staged_rgba8_icon_hosts.load(
+                std::memory_order_acquire) == 0U,
+        .active_asset_ledger_empty = active_assets_empty,
+        .staged_asset_ledger_empty = staged_assets_empty,
+        .transaction_active = transaction.active,
+        .transaction_failed = transaction.failed,
+        .destructive_runtime_failure =
+            g_runtime.destructive_transition_failed,
+    };
+    if (!can_begin_vector_only_epoch_during_rgba8_retirement(proof)) {
+        return false;
+    }
+
+    // No display object remains associated with the old movie fingerprint or
+    // either property bank.  Retirement debt deliberately remains untouched:
+    // it is the exact renderer ownership that the deferred RGBA handoff waits
+    // to observe reaching zero.
+    g_injected_movie_fingerprint = {};
+    g_icon_bank_b_hosts.store(0, std::memory_order_release);
+    log_line(
+        "RGBA8 rapid epoch handoff accepted phase=%s active=%zu vectorOnly=1 retirementPending=1",
+        phase ? phase : "unspecified",
+        geometry.active);
+    return true;
+}
+
 bool sample_current_movie_fingerprint(
     void* top,
     InjectedMovieFingerprint& fingerprint) noexcept {
@@ -11571,9 +11681,15 @@ void invoke_refresh_title(void* top) noexcept {
 
 bool restore_previous_mapping(
     void* top,
-    const std::array<RecordFields, kPhysicalTabCapacity>& previous) noexcept {
-    const bool overlays_cleared = clear_injected_icons(top) ==
-        InjectedIconsClearResult::cleared;
+    const std::array<RecordFields, kPhysicalTabCapacity>& previous,
+    bool allow_vector_only_epoch_during_retirement = false) noexcept {
+    const InjectedIconsClearResult clear_result = clear_injected_icons(
+        top, allow_vector_only_epoch_during_retirement);
+    const bool overlays_cleared =
+        allow_vector_only_epoch_during_retirement
+        ? accept_vector_only_epoch_clear_result(
+              top, clear_result, "initial-mapping-rollback")
+        : clear_result == InjectedIconsClearResult::cleared;
     const bool records_restored = overlays_cleared &&
         write_record_fields(top, previous);
     ResolvedTabLayers rollback_layers{};
@@ -11811,7 +11927,8 @@ bool restore_previous_mapping(
 bool apply_mapping(
     void* top,
     const TabViewport& viewport,
-    ResolvedTabLayers& layers) noexcept {
+    ResolvedTabLayers& layers,
+    bool allow_transparent_initial_raster_placeholder = false) noexcept {
     std::array<RecordFields, kPhysicalTabCapacity> previous{};
     std::array<RecordFields, kPhysicalTabCapacity> desired{};
     if (!snapshot_record_fields(top, previous) ||
@@ -12515,8 +12632,15 @@ bool apply_mapping(
     // Script-created children survive native timeline repainting. Remove every
     // tracked child while its current parent mapping is still valid, then let
     // the desired repaint recreate only the custom icons it actually needs.
-    if (clear_injected_icons(top) !=
-        InjectedIconsClearResult::cleared) {
+    const InjectedIconsClearResult initial_clear_result =
+        clear_injected_icons(
+            top, allow_transparent_initial_raster_placeholder);
+    const bool initial_clear_accepted =
+        allow_transparent_initial_raster_placeholder
+        ? accept_vector_only_epoch_clear_result(
+              top, initial_clear_result, "initial-mapping")
+        : initial_clear_result == InjectedIconsClearResult::cleared;
+    if (!initial_clear_accepted) {
         destroy_tab_layers(layers);
         log_failure(
             "slot remapping aborted because injected icons could not be cleared");
@@ -12525,7 +12649,10 @@ bool apply_mapping(
 
     if (!write_record_fields(top, desired)) {
         destroy_tab_layers(layers);
-        if (!restore_previous_mapping(top, previous)) {
+        if (!restore_previous_mapping(
+                top,
+                previous,
+                allow_transparent_initial_raster_placeholder)) {
             // write_record_fields() is deliberately guarded per field and
             // can therefore fail after publishing a prefix. If the rollback
             // also fails, some live records may still borrow title pointers
@@ -12539,11 +12666,21 @@ bool apply_mapping(
         }
         return false;
     }
-    if (!repaint_tab_layers(top, viewport, layers)) {
+    const bool repainted = [&]() noexcept {
+        if (!allow_transparent_initial_raster_placeholder) {
+            return repaint_tab_layers(top, viewport, layers);
+        }
+        ScopedBooleanTrue initial_target_repaint{g_initial_target_repaint};
+        return repaint_tab_layers(top, viewport, layers);
+    }();
+    if (!repainted) {
         // Some desired-pass cells may already have consumed their temporary
         // proxies. Re-resolve a complete pair of layers for rollback so native
         // records and visible cells agree.
-        if (!restore_previous_mapping(top, previous)) {
+        if (!restore_previous_mapping(
+                top,
+                previous,
+                allow_transparent_initial_raster_placeholder)) {
             g_rgba8_publication_disabled.store(
                 true, std::memory_order_release);
             g_runtime.destructive_transition_failed = true;
@@ -13276,7 +13413,8 @@ bool initialize_runtime(
             "Viewport initialization found a surviving injected-icon ledger; reconciling it before publishing a new catalogue");
         const InjectedIconsClearResult clear_result =
             clear_injected_icons(top, true);
-        if (clear_result != InjectedIconsClearResult::cleared) {
+        if (!accept_vector_only_epoch_clear_result(
+                top, clear_result, "runtime-initialization")) {
             if (clear_result == InjectedIconsClearResult::failed) {
                 log_failure(
                     "Viewport initialization refused to overwrite a surviving injected-icon ledger");
@@ -13449,7 +13587,7 @@ bool initialize_runtime(
         reset_runtime();
         return false;
     }
-    if (!apply_mapping(top, g_runtime.viewport, layers)) {
+    if (!apply_mapping(top, g_runtime.viewport, layers, true)) {
         if (g_runtime.destructive_transition_failed) {
             // A partial initial write followed by an unprovable rollback can
             // leave native records borrowing this catalogue. Mark the epoch
@@ -13470,11 +13608,12 @@ bool initialize_runtime(
     g_runtime.active = true;
 
     // Raster resources are process-owned, while every Configuration movie
-    // has a fresh display tree. Initial publication intentionally uses the
-    // safe vector fallback because RuntimeState is not active until the
-    // mapping is complete. Schedule one ownership-checked presentation pass
-    // for every new movie epoch so an already-published RGBA8 catalogue is
-    // rebound after close/reopen just as it is after first publication.
+    // has a fresh display tree. RuntimeState remains inactive until the
+    // mapping is complete, so initial publication always uses the proven
+    // vector-Shape ownership route. When an exact raster survives from an
+    // earlier epoch that Shape is transparent; otherwise it remains the
+    // visible failure-safe cross. Schedule one ownership-checked presentation
+    // pass for every new movie epoch to perform the normal raster handoff.
     const bool presentation_refresh_requested =
         !g_rgba8_publication_disabled.load(std::memory_order_acquire) &&
         g_runtime.catalogue_presentation_refresh.request_if_needed(
@@ -13612,7 +13751,10 @@ bool ensure_runtime(void* top) noexcept {
                 reset_pointer_dwell("same-address movie epoch changed");
                 const InjectedIconsClearResult clear_result =
                     clear_injected_icons(top, true);
-                if (clear_result != InjectedIconsClearResult::cleared) {
+                if (!accept_vector_only_epoch_clear_result(
+                        top,
+                        clear_result,
+                        "same-address-movie-change")) {
                     if (clear_result == InjectedIconsClearResult::failed) {
                         log_failure(
                             "same-address movie change could not reconcile the retained icon ledger; viewport remains suspended");
@@ -13642,7 +13784,10 @@ bool ensure_runtime(void* top) noexcept {
                 reset_pointer_dwell("configuration epoch reset");
                 const InjectedIconsClearResult clear_result =
                     clear_injected_icons(top, true);
-                if (clear_result != InjectedIconsClearResult::cleared) {
+                if (!accept_vector_only_epoch_clear_result(
+                        top,
+                        clear_result,
+                        "same-address-stock-reset")) {
                     if (clear_result == InjectedIconsClearResult::failed) {
                         log_failure(
                             "same-address stock reset could not clear tracked custom icons; viewport remains suspended");
@@ -13683,7 +13828,8 @@ bool ensure_runtime(void* top) noexcept {
         // bit. Every partial or unexpected state still fails closed.
         const InjectedIconsClearResult clear_result =
             clear_injected_icons(top, true);
-        if (clear_result != InjectedIconsClearResult::cleared) {
+        if (!accept_vector_only_epoch_clear_result(
+                top, clear_result, "configuration-instance-change")) {
             if (clear_result == InjectedIconsClearResult::failed) {
                 log_failure(
                     "Configuration instance changed but retained tab-strip icons could not be cleared through the new top; viewport remains suspended");

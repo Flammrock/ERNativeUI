@@ -871,6 +871,51 @@ void test_initial_stress_presentation_by_physical_capacity() {
         ten_slots, stock_tab_count));
 }
 
+void test_transparent_initial_raster_placeholder_policy() {
+    using namespace erui::detail;
+
+    const InitialRasterPlaceholderEligibility eligible{
+        true,
+        false,
+        true,
+        true,
+        true,
+        true,
+    };
+    ERUI_TEST_CHECK(
+        should_use_transparent_initial_raster_placeholder(eligible));
+
+    InitialRasterPlaceholderEligibility rejected = eligible;
+    rejected.initial_mapping_publication = false;
+    ERUI_TEST_CHECK(
+        !should_use_transparent_initial_raster_placeholder(rejected));
+
+    rejected = eligible;
+    rejected.runtime_active = true;
+    ERUI_TEST_CHECK(
+        !should_use_transparent_initial_raster_placeholder(rejected));
+
+    rejected = eligible;
+    rejected.exact_runtime_top = false;
+    ERUI_TEST_CHECK(
+        !should_use_transparent_initial_raster_placeholder(rejected));
+
+    rejected = eligible;
+    rejected.exact_repaint_coordinate = false;
+    ERUI_TEST_CHECK(
+        !should_use_transparent_initial_raster_placeholder(rejected));
+
+    rejected = eligible;
+    rejected.exact_logical_raster = false;
+    ERUI_TEST_CHECK(
+        !should_use_transparent_initial_raster_placeholder(rejected));
+
+    rejected = eligible;
+    rejected.effective_raster = false;
+    ERUI_TEST_CHECK(
+        !should_use_transparent_initial_raster_placeholder(rejected));
+}
+
 void test_deferred_initial_presentation_refresh_is_one_shot() {
     using namespace erui::detail;
 
@@ -1198,6 +1243,7 @@ int main() {
     test_wrap_and_direct_selection();
     test_final_stress_configuration_traversal();
     test_initial_stress_presentation_by_physical_capacity();
+    test_transparent_initial_raster_placeholder_policy();
     test_deferred_initial_presentation_refresh_is_one_shot();
     test_public_capacity_traversal();
     test_size_max_boundaries();

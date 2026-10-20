@@ -62,6 +62,45 @@ struct Rgba8RetirementReconciliationPlan final {
     }
 };
 
+// A newly created Configuration movie may become observable before RawImage
+// references from the preceding movie have retired on the renderer thread.
+// Starting the new epoch with vector-only placeholders is safe only after the
+// old display-tree ownership has been reduced to exact retirement debt.  This
+// policy deliberately describes proof already collected by the runtime; it
+// performs no ownership transition itself.
+//
+// Keep every ledger gate independent.  A zero RGBA mask is not sufficient if
+// an injected-host bit or asset association survived, and an inactive
+// transaction is not sufficient if a previous transaction failed terminally.
+struct Rgba8RapidEpochHandoffState final {
+    bool exact_waiting_for_renderer_retirement{};
+    bool physical_geometry_matches{};
+    bool active_injected_hosts_empty{};
+    bool staged_injected_hosts_empty{};
+    bool active_rgba_hosts_empty{};
+    bool staged_rgba_hosts_empty{};
+    bool active_asset_ledger_empty{};
+    bool staged_asset_ledger_empty{};
+    bool transaction_active{};
+    bool transaction_failed{};
+    bool destructive_runtime_failure{};
+};
+
+[[nodiscard]] constexpr bool
+can_begin_vector_only_epoch_during_rgba8_retirement(
+    const Rgba8RapidEpochHandoffState& state) noexcept {
+    return state.exact_waiting_for_renderer_retirement &&
+        state.physical_geometry_matches &&
+        state.active_injected_hosts_empty &&
+        state.staged_injected_hosts_empty &&
+        state.active_rgba_hosts_empty &&
+        state.staged_rgba_hosts_empty &&
+        state.active_asset_ledger_empty &&
+        state.staged_asset_ledger_empty &&
+        !state.transaction_active && !state.transaction_failed &&
+        !state.destructive_runtime_failure;
+}
+
 [[nodiscard]] constexpr bool rgba8_retirement_limits_valid(
     Rgba8RetirementLimits limits) noexcept {
     return limits.maximum_live_hosts != 0U &&

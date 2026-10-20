@@ -7,6 +7,32 @@
 
 namespace erui::detail {
 
+// Initial tab publication runs before the Configuration runtime becomes
+// active. When an exact raster resource already survives from an earlier
+// Configuration epoch, keep the normal tracked Shape handoff but make that
+// temporary Shape invisible. This prevents the vector fallback from flashing
+// for one frame while preserving the established ownership transition.
+//
+// Every condition is explicit so the first process opening, an imprecise
+// repaint coordinate, or a disabled/incomplete raster catalogue continues to
+// use the durable visible fallback.
+struct InitialRasterPlaceholderEligibility final {
+    bool initial_mapping_publication{};
+    bool runtime_active{};
+    bool exact_runtime_top{};
+    bool exact_repaint_coordinate{};
+    bool exact_logical_raster{};
+    bool effective_raster{};
+};
+
+[[nodiscard]] inline bool
+should_use_transparent_initial_raster_placeholder(
+    const InitialRasterPlaceholderEligibility& state) noexcept {
+    return state.initial_mapping_publication && !state.runtime_active &&
+        state.exact_runtime_top && state.exact_repaint_coordinate &&
+        state.exact_logical_raster && state.effective_raster;
+}
+
 // An overflow marker replaces the mapped tab's real icon. Only a custom tab
 // whose mapped cell is not an overflow marker needs a follow-up presentation
 // pass when its raster resource becomes available after the initial paint.
