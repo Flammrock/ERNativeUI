@@ -11,8 +11,8 @@ are byte-identical to the first API 1.2 release, `ERNativeUI-v1.2.0`.
 | Commit | `24eede7613c3df32712ee2300073e1f1b0f43fdb` |
 | `erui.h` Git blob | `28d941c5045a35b705032bbdfe471d86905f586e` |
 | `ERNativeUI.hpp` Git blob | `d18c87cda115de69bf4436d33a8127a6d704fae1` |
-| `erui.h` SHA-256 | `ca97015839cca40ea3989198c5c2d2c6331ce8f6b621c85e3d0b0bfc1ba37d65` |
-| `ERNativeUI.hpp` SHA-256 | `b2e5dc17f36145bdecfe4bad29eb2714c08e97b98a874a3b1b9451cc261ca79b` |
+| `erui.h` SHA-256 | `a530cc51ab7331260494d25afd7dfb475a5faa3557ee2433f044d4b93b39ddfb` |
+| `ERNativeUI.hpp` SHA-256 | `03f07daeacc7ef976a3f736ef4d678fabe3f6e39fc2069b28b0841fb6449c4b5` |
 
 The Git identities can be independently verified with:
 
