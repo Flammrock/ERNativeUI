@@ -139,18 +139,19 @@ that table; they are not substitutes for checking an operation's
 | 1.0 prefix retained by API 1.1, 1.2, and 1.3 | Toggle, slider, button, submenu, pagination, host-owned row values, page presentation, alerts, inline choice, popup choice, game language |
 | Added in 1.1 | TextInput, ColorPicker, built-in pages, input bindings, provider storage |
 | Added in 1.2 | Numeric Slider and Custom Slider |
-| Added in 1.3 | Custom top-level Configuration tabs |
+| Added in 1.3 | Custom top-level Configuration tabs and title-screen text |
 
 In C++, query `connection.supports(erui::Capability::text_input)` or
 `menu.supports(...)` before capability-scoped code. The corresponding raw-C
 test checks both the `ERUI_CAP_*` bit and its function-table pointer.
 
-The current C++ wrapper accepts API 1.3 only when `add_tab`, the complete
-Numeric Slider and Custom Slider blocks, and the retained API 1.1 surface are
-present. The custom-tab capability itself remains game-build-sensitive, so a
-valid API 1.3 connection can omit `ERUI_CAP_CUSTOM_TABS`. Checks near
-individual builders document their dependency and guard bad tables; they are
-not an automatic downgrade path to a partial table or an older API.
+The current C++ wrapper accepts API 1.3 only when `add_tab`,
+`add_title_screen_text`, the complete Numeric Slider and Custom Slider blocks,
+and the retained API 1.1 surface are present. The custom-tab and title-screen
+text capabilities remain game-build-sensitive, so a valid API 1.3 connection
+can omit either capability. Checks near individual builders document their
+dependency and guard bad tables; they are not an automatic downgrade path to
+a partial table or an older API.
 
 A capability says the host implements the public surface. A game-build-
 sensitive operation can still return `ERUI_NOT_SUPPORTED`, or final native
@@ -160,7 +161,7 @@ installation can fail with `ERUI_HOST_FAILED`. Always handle results.
 
 | Object or data | Owner and required lifetime |
 |---|---|
-| IDs, visible text, choice arrays, custom-tab icon descriptors/pixels, initial values, storage paths, alert messages | Borrowed for the call and copied by the host before it returns |
+| IDs, visible text, title-screen lines, choice arrays, custom-tab icon descriptors/pixels, initial values, storage paths, alert messages | Borrowed for the call and copied by the host before it returns |
 | `Menu`, `Page`, `InputBindings`, and `InputSection` C++ builders | Valid only inside the `register_menu` builder; escaped copies close when that callback ends |
 | Row, input-action, and storage handles | Opaque provider-owned identities; retain their C++ wrappers only after registration succeeds |
 | Row callbacks, input-action callbacks, assignment handler, and their external `user_data` | Client-owned and valid until process exit after commit |
@@ -257,6 +258,7 @@ where recovery or logging is still meaningful.
 | `ERUI_STORAGE_FORMAT_ERROR` | Stored or serialized input is malformed |
 | `ERUI_DUPLICATE_TAB_ID` | A custom tab repeats an ID already used by its provider |
 | `ERUI_TAB_LIMIT_REACHED` | Committing or staging custom tabs would exceed the 1,024-tab process limit |
+| `ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED` | Committing or staging title-screen text would exceed the 16-line process limit |
 
 `ERUI_OK` has operation-specific timing. In particular, `alert()` returning
 `ERUI_OK` means the request entered the FIFO, not that the player dismissed
@@ -352,6 +354,8 @@ service behind it.
 | Custom-tab ID | 1..255 ASCII bytes, provider-local and using the machine-ID grammar |
 | Custom-tab title | 1..95 valid UTF-16 code units |
 | Custom-tab icon | Exact 32x32 row-major RGBA8, 4,096 bytes, or no icon for the fallback glyph |
+| Committed title-screen text | 16 lines process-wide |
+| One title-screen line | 1..255 valid UTF-16 code units; CR, LF, U+0085, U+2028, and U+2029 are rejected |
 | Input sections | 4,096 per provider and 4,096 process-wide |
 | Input actions | 4,096 per provider and 4,096 process-wide |
 | Provider ID or action ID | 1..255 ASCII bytes; letters, digits, `.`, `_`, `-` only |
@@ -373,7 +377,7 @@ service behind it.
 | API 1.0 function-table prefix on Windows x64 | `ERUI_API_V1_0_SIZE`, 128 bytes |
 | API 1.1 function-table prefix on Windows x64 | `ERUI_API_V1_1_SIZE`, 320 bytes |
 | API 1.2 function-table prefix on Windows x64 | `ERUI_API_V1_2_SIZE`, 368 bytes |
-| API 1.3 function-table prefix on Windows x64 | `ERUI_API_V1_3_SIZE`, 376 bytes |
+| API 1.3 function-table prefix on Windows x64 | `ERUI_API_V1_3_SIZE`, 384 bytes |
 | Numeric or Custom Slider logical positions | 2 through 256 per row |
 | Numeric Slider decimal places | 0 through 9 |
 | Custom Slider display value | 64 valid UTF-16 code units per position |
@@ -451,10 +455,11 @@ numeric literal.
 | `ERUI_StorageKey` | 48 |
 | `ERUI_TabIconDesc` | 32 |
 | `ERUI_TabDesc` | 64 |
+| `ERUI_TitleScreenTextDesc` | 40 |
 | API 1.0 function-table prefix | 128 |
 | API 1.1 function-table prefix | 320 |
 | API 1.2 function-table prefix | 368 |
-| API 1.3 function-table prefix | 376 |
+| API 1.3 function-table prefix | 384 |
 
 The complete offset and guard-page assertions live in
 [`tests/abi/current/c_layout_test.c`](https://github.com/Flammrock/ERNativeUI/blob/main/tests/abi/current/c_layout_test.c).
@@ -486,8 +491,8 @@ unless its release documentation explicitly retains them. See
 
 The API 1.0 prefix remains byte-for-byte frozen at 128 bytes. API 1.1 remains
 frozen at its published prefix size. API 1.2 appends its entries after API 1.1,
-and API 1.3 appends `add_tab` after the frozen API 1.2 prefix; no earlier field
-is reordered.
+and API 1.3 appends `add_tab` and `add_title_screen_text` after the frozen API
+1.2 prefix; no earlier field is reordered.
 The host writes only the selected supported prefix within the caller-declared
 table size. Fixed-width integers, size-prefixed POD structures, `ERUI_CALL`
 (`__cdecl`), and opaque handles keep MSVC, clang-cl, MinGW-w64, C, and C++

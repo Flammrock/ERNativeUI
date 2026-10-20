@@ -30,13 +30,15 @@ Function resolve(HMODULE module, const char* name) noexcept {
 ERUI_TestConnectionConfig configuration(
     std::uint32_t not_ready_responses,
     ERUI_Result terminal_result,
-    ERUI_Result language_result) noexcept {
+    ERUI_Result language_result,
+    std::uint32_t disabled_features = 0) noexcept {
     ERUI_TestConnectionConfig result{};
     result.size = sizeof(result);
     result.version = ERUI_TEST_CONNECTION_CONTROL_VERSION;
     result.not_ready_responses = not_ready_responses;
     result.terminal_result = terminal_result;
     result.language_result = language_result;
+    result.reserved[0] = disabled_features;
     return result;
 }
 
@@ -82,9 +84,39 @@ int main(int argc, char** argv) {
         capability_gated.size = ERUI_API_V1_3_SIZE;
         CHECK(host.get_api(ERUI_API_VERSION_1_3, &capability_gated) == ERUI_OK);
         CHECK(capability_gated.add_tab != nullptr);
-        capability_gated.capabilities &= ~ERUI_CAP_CUSTOM_TABS;
+        CHECK(capability_gated.add_title_screen_text != nullptr);
+        capability_gated.capabilities &=
+            ~(ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT);
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_3));
+    }
+
+    {
+        const auto config = configuration(0, ERUI_OK, ERUI_OK,
+            ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT);
+        CHECK(configure(&config) == ERUI_OK);
+        auto connected = erui::connect(0ms);
+        CHECK(connected.success());
+        CHECK(!connected.value().supports(
+            erui::Capability::title_screen_text));
+
+        erui::ProviderOptions provider{};
+        provider.provider_id = "tests.title-text-capability-absent";
+        provider.display_name = L"Title text capability absent";
+        provider.owner_module = GetModuleHandleW(nullptr);
+        const auto registered = connected.value().register_menu(
+            provider,
+            [](erui::Menu& menu) noexcept {
+                menu.add_title_screen_text(
+                    erui::TitleScreenCorner::top_left,
+                    {L"Must not reach the host"});
+            });
+        CHECK(!registered.success());
+        CHECK(registered.error().native_result() == ERUI_NOT_SUPPORTED);
+        const auto observed = snapshot(get_snapshot);
+        CHECK(observed.register_calls == 1);
+        CHECK(observed.commit_calls == 0);
+        CHECK(observed.abort_calls == 1);
     }
 
     {
@@ -102,6 +134,8 @@ int main(int argc, char** argv) {
         CHECK(connected.value().supports(erui::Capability::builtin_pages));
         CHECK(connected.value().supports(erui::Capability::input_bindings));
         CHECK(connected.value().supports(erui::Capability::storage));
+        CHECK(connected.value().supports(
+            erui::Capability::title_screen_text));
 
         auto observed = snapshot(get_snapshot);
         CHECK(observed.get_api_calls == 3);

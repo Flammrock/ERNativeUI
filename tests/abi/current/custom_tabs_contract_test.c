@@ -33,6 +33,8 @@ int main(int argc, char** argv) {
     static const uint16_t tab_title[] = {
         'C','l','i','e','n','t',' ','S','e','t','t','i','n','g','s'};
     static const uint16_t row_label[] = {'E','n','a','b','l','e','d'};
+    static const uint16_t title_line[] = {
+        'C',' ','A','P','I',' ','t','i','t','l','e',' ','l','i','n','e'};
     uint8_t pixels[ERUI_TAB_ICON_RGBA8_BYTE_COUNT];
     ERUI_LoadedTestHost host;
     ERUI_Api api;
@@ -57,6 +59,8 @@ int main(int argc, char** argv) {
     CHECK(api.size == ERUI_API_V1_3_SIZE);
     CHECK((api.capabilities & ERUI_CAP_CUSTOM_TABS) != 0u);
     CHECK(api.add_tab != NULL);
+    CHECK((api.capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) != 0u);
+    CHECK(api.add_title_screen_text != NULL);
 
     memset(&provider_description, 0, sizeof(provider_description));
     provider_description.size = sizeof(provider_description);
@@ -69,6 +73,69 @@ int main(int argc, char** argv) {
         (uint32_t)(sizeof(provider_name) / sizeof(provider_name[0])));
     CHECK(api.register_provider(
         &provider_description, &provider, &root) == ERUI_OK);
+
+    {
+        ERUI_TitleScreenTextDesc title_text;
+        uint16_t maximum_line[ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS];
+        uint16_t separated_line[3] = {'A', 0, 'B'};
+        uint32_t index;
+        memset(&title_text, 0, sizeof(title_text));
+        title_text.size = sizeof(title_text);
+        title_text.text = utf16_view(
+            title_line,
+            (uint32_t)(sizeof(title_line) / sizeof(title_line[0])));
+        CHECK(api.add_title_screen_text(provider, &title_text) ==
+            ERUI_INVALID_ARGUMENT);
+
+        title_text.corner = ERUI_TITLE_SCREEN_CORNER_TOP_LEFT;
+        CHECK(api.add_title_screen_text(provider, &title_text) == ERUI_OK);
+
+        title_text.flags = ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR;
+        title_text.corner = ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT;
+        title_text.color.red = 216u;
+        title_text.color.green = 167u;
+        title_text.color.blue = 103u;
+        CHECK(api.add_title_screen_text(provider, &title_text) == ERUI_OK);
+
+        title_text.size = sizeof(title_text) - 1u;
+        CHECK(api.add_title_screen_text(provider, &title_text) ==
+            ERUI_INVALID_ARGUMENT);
+        title_text.size = sizeof(title_text);
+        title_text.flags = 0;
+        memset(&title_text.color, 0, sizeof(title_text.color));
+        for (index = 0; index < ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS;
+             ++index) {
+            maximum_line[index] = 'M';
+        }
+        title_text.text = utf16_view(
+            maximum_line, ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS);
+        title_text.corner = ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT;
+        CHECK(api.add_title_screen_text(provider, &title_text) == ERUI_OK);
+
+        title_text.text = utf16_view(
+            title_line,
+            (uint32_t)(sizeof(title_line) / sizeof(title_line[0])));
+        title_text.corner = ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT;
+        CHECK(api.add_title_screen_text(provider, &title_text) == ERUI_OK);
+        title_text.corner = 5u;
+        CHECK(api.add_title_screen_text(provider, &title_text) ==
+            ERUI_INVALID_ARGUMENT);
+        title_text.corner = UINT32_MAX;
+        CHECK(api.add_title_screen_text(provider, &title_text) ==
+            ERUI_INVALID_ARGUMENT);
+
+        title_text.text = utf16_view(separated_line, 3u);
+        title_text.corner = ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT;
+        separated_line[1] = UINT16_C(0x0085);
+        CHECK(api.add_title_screen_text(provider, &title_text) ==
+            ERUI_INVALID_ARGUMENT);
+        separated_line[1] = UINT16_C(0x2028);
+        CHECK(api.add_title_screen_text(provider, &title_text) ==
+            ERUI_INVALID_ARGUMENT);
+        separated_line[1] = UINT16_C(0x2029);
+        CHECK(api.add_title_screen_text(provider, &title_text) ==
+            ERUI_INVALID_ARGUMENT);
+    }
 
     {
         uint16_t oversized_title[

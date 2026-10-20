@@ -592,6 +592,300 @@ void verify_provider_identifier_contract() {
     ERUI_TEST_CHECK(registry.abort_provider(legacy_handle) == ERUI_OK);
 }
 
+void verify_title_screen_text_registration_contract() {
+    // A copied 1.3 entry point fails closed without touching its descriptor
+    // until an authoritative title-GFX backend has been published.
+    {
+        erui::host::Registry unavailable{};
+        unavailable.open_registration();
+        ERUI_TEST_CHECK(unavailable.add_title_screen_text(
+            ERUI_INVALID_PROVIDER, nullptr) == ERUI_NOT_SUPPORTED);
+    }
+
+    // Even with the backend available, legacy providers cannot use a 1.3-only
+    // descriptor or entry point.
+    {
+        erui::host::Registry legacy{};
+        ERUI_TEST_CHECK(legacy.enable_title_screen_text_backend());
+        legacy.open_registration();
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_2;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii("title-text.legacy");
+        provider.display_name = utf16(L"Legacy title text");
+        ERUI_ProviderHandle handle{};
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(legacy.register_provider(
+            ERUI_API_VERSION_1_2, &provider, &handle, &root) == ERUI_OK);
+        ERUI_TEST_CHECK(legacy.add_title_screen_text(handle, nullptr) ==
+            ERUI_NOT_SUPPORTED);
+    }
+
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_title_screen_text_backend());
+    registry.open_registration();
+
+    const auto register_provider = [&](const char* id,
+                                       std::int32_t priority,
+                                       ERUI_ProviderHandle& handle) {
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_3;
+        provider.root_priority = priority;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii(id);
+        provider.display_name = utf16(L"Title-screen text");
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_3, &provider, &handle, &root) == ERUI_OK);
+    };
+
+    ERUI_ProviderHandle provider_z{};
+    ERUI_ProviderHandle provider_a{};
+    register_provider("title-text.z", 100, provider_z);
+    register_provider("title-text.a", 50, provider_a);
+
+    std::wstring copied = L"Z first";
+    ERUI_TitleScreenTextDesc line{};
+    line.size = sizeof(line);
+    line.text = utf16(copied);
+    line.corner = ERUI_TITLE_SCREEN_CORNER_TOP_LEFT;
+    ERUI_TEST_CHECK(registry.add_title_screen_text(provider_z, &line) ==
+        ERUI_OK);
+    copied.assign(L"mutated");
+
+    ERUI_TitleScreenTextDesc colored{};
+    colored.size = sizeof(colored);
+    colored.flags = ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR;
+    colored.text = utf16(L"Z second");
+    colored.color = {216u, 167u, 103u, 0u};
+    colored.corner = ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT;
+    ERUI_TEST_CHECK(registry.add_title_screen_text(provider_z, &colored) ==
+        ERUI_OK);
+
+    ERUI_TitleScreenTextDesc first_provider{};
+    first_provider.size = sizeof(first_provider);
+    first_provider.text = utf16(L"A first");
+    first_provider.color = {1u, 2u, 3u, 0u};
+    first_provider.corner = ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT;
+    ERUI_TEST_CHECK(registry.add_title_screen_text(
+        provider_a, &first_provider) == ERUI_OK);
+
+    const auto reject = [&](ERUI_TitleScreenTextDesc invalid) {
+        ERUI_TEST_CHECK(registry.add_title_screen_text(
+            provider_z, &invalid) == ERUI_INVALID_ARGUMENT);
+    };
+    ERUI_TitleScreenTextDesc invalid = line;
+    invalid.size = sizeof(invalid) - 1u;
+    reject(invalid);
+    invalid = line;
+    invalid.text = {};
+    reject(invalid);
+    invalid = line;
+    invalid.text = utf16(L"two\nlines");
+    reject(invalid);
+    invalid.text = utf16(L"two\rlines");
+    reject(invalid);
+    for (const wchar_t separator : {
+             static_cast<wchar_t>(0x0085u),
+             static_cast<wchar_t>(0x2028u),
+             static_cast<wchar_t>(0x2029u)}) {
+        const std::array<wchar_t, 3> separated{L'A', separator, L'B'};
+        invalid.text = utf16(std::wstring_view(
+            separated.data(), separated.size()));
+        reject(invalid);
+    }
+    const std::array<wchar_t, 3> embedded_nul{L'A', L'\0', L'B'};
+    invalid.text = utf16(std::wstring_view(
+        embedded_nul.data(), embedded_nul.size()));
+    reject(invalid);
+    const std::array<wchar_t, 1> lone_high{
+        static_cast<wchar_t>(0xD800u)};
+    invalid.text = utf16(std::wstring_view(
+        lone_high.data(), lone_high.size()));
+    reject(invalid);
+    const std::array<wchar_t, 1> lone_low{
+        static_cast<wchar_t>(0xDC00u)};
+    invalid.text = utf16(std::wstring_view(
+        lone_low.data(), lone_low.size()));
+    reject(invalid);
+    const std::wstring oversized(
+        ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS + 1u, L'X');
+    invalid.text = utf16(oversized);
+    reject(invalid);
+    invalid = line;
+    invalid.flags = UINT32_C(0x80000000);
+    reject(invalid);
+    invalid = line;
+    invalid.color.reserved = 1;
+    reject(invalid);
+    invalid = line;
+    invalid.corner = 0;
+    reject(invalid);
+    invalid = line;
+    invalid.corner = 5;
+    reject(invalid);
+    invalid = line;
+    invalid.corner = UINT32_MAX;
+    reject(invalid);
+    invalid = line;
+    invalid.reserved[1] = 1;
+    reject(invalid);
+
+    const std::wstring maximum_length(
+        ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS, L'M');
+    ERUI_TitleScreenTextDesc maximum{};
+    maximum.size = sizeof(maximum);
+    maximum.text = utf16(maximum_length);
+    maximum.corner = ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT;
+    ERUI_TEST_CHECK(registry.add_title_screen_text(
+        provider_a, &maximum) == ERUI_OK);
+
+    ERUI_TEST_CHECK(registry.commit_provider(provider_z) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.add_title_screen_text(provider_z, &line) ==
+        ERUI_ALREADY_COMMITTED);
+    ERUI_TEST_CHECK(registry.commit_provider(provider_a) == ERUI_OK);
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    ERUI_TEST_CHECK(registry.add_title_screen_text(provider_a, &line) ==
+        ERUI_REGISTRATION_CLOSED);
+    ERUI_TEST_CHECK(menu->title_screen_text_count() == 4);
+    const auto title_lines = menu->title_screen_texts();
+    ERUI_TEST_CHECK(title_lines.size() == 4);
+    ERUI_TEST_CHECK(title_lines[0].provider_id ==
+        "title-text.a");
+    ERUI_TEST_CHECK(title_lines[0].text == L"A first");
+    ERUI_TEST_CHECK(!title_lines[0].color.has_value());
+    ERUI_TEST_CHECK(title_lines[0].corner ==
+        ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT);
+    ERUI_TEST_CHECK(title_lines[1].provider_id == "title-text.a");
+    ERUI_TEST_CHECK(title_lines[1].text.size() ==
+        ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS);
+    ERUI_TEST_CHECK(title_lines[1].text == maximum_length);
+    ERUI_TEST_CHECK(!title_lines[1].color.has_value());
+    ERUI_TEST_CHECK(title_lines[1].corner ==
+        ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT);
+    ERUI_TEST_CHECK(title_lines[2].provider_id ==
+        "title-text.z");
+    ERUI_TEST_CHECK(title_lines[2].text == L"Z first");
+    ERUI_TEST_CHECK(!title_lines[2].color.has_value());
+    ERUI_TEST_CHECK(title_lines[2].corner ==
+        ERUI_TITLE_SCREEN_CORNER_TOP_LEFT);
+    ERUI_TEST_CHECK(title_lines[3].text == L"Z second");
+    ERUI_TEST_CHECK(title_lines[3].color.has_value());
+    ERUI_TEST_CHECK(*title_lines[3].color ==
+        (erui::detail::RgbColor{216u, 167u, 103u}));
+    ERUI_TEST_CHECK(title_lines[3].corner ==
+        ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT);
+}
+
+void verify_title_screen_text_abort_reclaims_draft() {
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_title_screen_text_backend());
+    registry.open_registration();
+
+    const auto register_provider = [&](const char* id) {
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_3;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii(id);
+        provider.display_name = utf16(L"Title-line abort test");
+        ERUI_ProviderHandle handle{};
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_3, &provider, &handle, &root) == ERUI_OK);
+        return handle;
+    };
+    const auto add_lines = [&](ERUI_ProviderHandle provider,
+                               const wchar_t* value) {
+        ERUI_TitleScreenTextDesc line{};
+        line.size = sizeof(line);
+        line.text = utf16(value);
+        line.corner = ERUI_TITLE_SCREEN_CORNER_TOP_LEFT;
+        for (std::size_t index = 0;
+             index < ERUI_TITLE_SCREEN_TEXT_MAX_LINES;
+             ++index) {
+            ERUI_TEST_CHECK(registry.add_title_screen_text(
+                provider, &line) == ERUI_OK);
+        }
+    };
+
+    const ERUI_ProviderHandle abandoned =
+        register_provider("title-abort.abandoned");
+    add_lines(abandoned, L"Abandoned line");
+    ERUI_TEST_CHECK(registry.abort_provider(abandoned) == ERUI_OK);
+
+    const ERUI_ProviderHandle replacement =
+        register_provider("title-abort.replacement");
+    add_lines(replacement, L"Replacement line");
+    ERUI_TEST_CHECK(registry.commit_provider(replacement) == ERUI_OK);
+
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    ERUI_TEST_CHECK(menu->title_screen_text_count() ==
+        ERUI_TITLE_SCREEN_TEXT_MAX_LINES);
+    for (const erui::TitleScreenTextSpec& line :
+         menu->title_screen_texts()) {
+        ERUI_TEST_CHECK(line.provider_id == "title-abort.replacement");
+        ERUI_TEST_CHECK(line.text == L"Replacement line");
+    }
+}
+
+void verify_title_screen_text_committed_limit() {
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_title_screen_text_backend());
+    registry.open_registration();
+
+    const auto register_provider = [&](const char* id,
+                                       ERUI_ProviderHandle& handle) {
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_3;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii(id);
+        provider.display_name = utf16(L"Title line limit");
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_3, &provider, &handle, &root) == ERUI_OK);
+    };
+    const auto add_line = [&](ERUI_ProviderHandle provider) {
+        ERUI_TitleScreenTextDesc line{};
+        line.size = sizeof(line);
+        line.text = utf16(L"Bounded line");
+        line.corner = ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT;
+        return registry.add_title_screen_text(provider, &line);
+    };
+
+    ERUI_ProviderHandle first{};
+    ERUI_ProviderHandle second{};
+    register_provider("title-limit.first", first);
+    register_provider("title-limit.second", second);
+    for (std::size_t index = 0;
+         index < ERUI_TITLE_SCREEN_TEXT_MAX_LINES;
+         ++index) {
+        ERUI_TEST_CHECK(add_line(first) == ERUI_OK);
+    }
+    ERUI_TEST_CHECK(add_line(first) ==
+        ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED);
+
+    // Draft providers do not reserve the committed budget; commit performs
+    // the same limit check atomically.
+    ERUI_TEST_CHECK(add_line(second) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(first) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(second) ==
+        ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED);
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    ERUI_TEST_CHECK(menu->title_screen_text_count() ==
+        ERUI_TITLE_SCREEN_TEXT_MAX_LINES);
+    for (const erui::TitleScreenTextSpec& line :
+         menu->title_screen_texts()) {
+        ERUI_TEST_CHECK(line.provider_id == "title-limit.first");
+    }
+}
+
 void verify_custom_tab_registration_contract() {
     // A copied 1.3 entry point must reject an older provider before touching
     // either 1.3-only pointer.
@@ -1173,6 +1467,9 @@ void verify_fixed_fifty_custom_tab_stress() {
 int main() {
     erui::host::set_api_state(erui::host::ApiState::accepting);
     verify_provider_identifier_contract();
+    verify_title_screen_text_registration_contract();
+    verify_title_screen_text_abort_reclaims_draft();
+    verify_title_screen_text_committed_limit();
     verify_custom_tab_backend_gate();
     verify_custom_tab_registration_contract();
     verify_custom_tab_committed_limit();
@@ -1240,6 +1537,9 @@ int main() {
     ERUI_TEST_CHECK((negotiated.table.capabilities &
         ERUI_CAP_CUSTOM_TABS) == 0);
     ERUI_TEST_CHECK(negotiated.table.add_tab != nullptr);
+    ERUI_TEST_CHECK((negotiated.table.capabilities &
+        ERUI_CAP_TITLE_SCREEN_TEXT) == 0);
+    ERUI_TEST_CHECK(negotiated.table.add_title_screen_text != nullptr);
     ERUI_PageHandle unavailable_tab{UINT64_C(0x5AA55AA55AA55AA5)};
     ERUI_TEST_CHECK(negotiated.table.add_tab(
         ERUI_INVALID_PROVIDER, nullptr, &unavailable_tab) ==
@@ -1268,6 +1568,8 @@ int main() {
     // to 1.1-only operations or make the host inspect 1.1 pointers.
     ERUI_TEST_CHECK(
         erui::host::registry().enable_custom_tabs_backend());
+    ERUI_TEST_CHECK(
+        erui::host::registry().enable_title_screen_text_backend());
     ERUI_Api tabs_enabled{};
     tabs_enabled.size = sizeof(tabs_enabled);
     ERUI_TEST_CHECK(ERUI_GetApi(
@@ -1275,9 +1577,14 @@ int main() {
     ERUI_TEST_CHECK((tabs_enabled.capabilities &
         ERUI_CAP_CUSTOM_TABS) != 0);
     ERUI_TEST_CHECK(tabs_enabled.add_tab != nullptr);
+    ERUI_TEST_CHECK((tabs_enabled.capabilities &
+        ERUI_CAP_TITLE_SCREEN_TEXT) != 0);
+    ERUI_TEST_CHECK(tabs_enabled.add_title_screen_text != nullptr);
     erui::host::registry().open_registration();
     ERUI_TEST_CHECK(
         !erui::host::registry().enable_custom_tabs_backend());
+    ERUI_TEST_CHECK(
+        !erui::host::registry().enable_title_screen_text_backend());
     ERUI_ProviderDesc v1_provider{};
     v1_provider.size = sizeof(v1_provider);
     v1_provider.api_version = ERUI_API_VERSION_1_0;
@@ -1293,6 +1600,8 @@ int main() {
         v1_provider_handle, v1_root, nullptr, &untouched_row) ==
         ERUI_NOT_SUPPORTED);
     ERUI_TEST_CHECK(untouched_row == UINT64_C(0xA55AA55AA55AA55A));
+    ERUI_TEST_CHECK(negotiated.table.add_title_screen_text(
+        v1_provider_handle, nullptr) == ERUI_NOT_SUPPORTED);
     ERUI_TEST_CHECK(negotiated.table.set_text_input_value(
         v1_provider_handle, UINT64_C(123), nullptr) == ERUI_NOT_SUPPORTED);
     std::uint32_t untouched_length{0xA5A5A5A5u};

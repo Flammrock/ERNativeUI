@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -89,6 +90,16 @@ struct TabMetadata {
     std::optional<std::int32_t> player_order{};
     std::int32_t effective_order{};
     TabIconSpec icon{};
+};
+
+// Immutable title-screen line assembled from API 1.3 registrations. The
+// provider ID is retained for diagnostics; presentation order is the vector
+// order established by Registry during its deterministic freeze pass.
+struct TitleScreenTextSpec {
+    std::string provider_id{};
+    std::wstring text{};
+    std::optional<detail::RgbColor> color{};
+    ERUI_TitleScreenCorner corner{};
 };
 
 using ActionCallback = void (*)(void* user_data) noexcept;
@@ -401,6 +412,7 @@ public:
     Page& add_tab(
         TabMetadata metadata,
         std::wstring title);
+    void add_title_screen_text(TitleScreenTextSpec text);
 
     InputBindingSection& add_input_binding_section(
         std::string provider_id,
@@ -411,6 +423,13 @@ public:
     [[nodiscard]] bool frozen() const noexcept { return frozen_; }
     [[nodiscard]] std::size_t page_count() const noexcept { return pages_.size(); }
     [[nodiscard]] std::size_t tab_count() const noexcept { return tab_pages_.size(); }
+    [[nodiscard]] std::size_t title_screen_text_count() const noexcept {
+        return title_screen_texts_.size();
+    }
+    [[nodiscard]] std::span<const TitleScreenTextSpec>
+    title_screen_texts() const noexcept {
+        return title_screen_texts_;
+    }
     [[nodiscard]] std::size_t input_binding_section_count() const noexcept {
         return input_binding_sections_.size();
     }
@@ -427,6 +446,7 @@ private:
     MenuLocalization localization_{};
     std::vector<std::unique_ptr<Page>> pages_{};
     std::vector<Page*> tab_pages_{};
+    std::vector<TitleScreenTextSpec> title_screen_texts_{};
     std::vector<std::unique_ptr<InputBindingSection>>
         input_binding_sections_{};
     std::array<Page*, detail::builtin_page_count> builtin_pages_{};

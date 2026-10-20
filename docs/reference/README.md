@@ -63,6 +63,7 @@ authoritative ABI; the C++ header is an inline convenience layer over it.
 | Register one provider | `Connection::register_menu` | `register_provider`, `commit_provider`, `abort_provider` |
 | Select a destination | `Menu::root`, `Menu::page` | root handle, `get_builtin_page` |
 | Add a top-level custom tab | `Menu::add_tab`, `TabOptions` | `add_tab`, `ERUI_TabDesc`, `ERUI_TabIconDesc` |
+| [Add title-screen status text](../guides/title-screen-text.md) | `Menu::add_title_screen_text`, `TitleScreenCorner`, `TitleScreenTextOptions` | `add_title_screen_text`, `ERUI_TitleScreenCorner`, `ERUI_TitleScreenTextDesc` |
 | Build pages and rows | `Page::add_*` | `add_*` function-table entries |
 | Read or update row state | `Registration` | provider/row handles and typed getters/setters |
 | Read the effective game/localization language | `Connection::game_language` | `get_game_language` |

@@ -5,6 +5,7 @@
 #include "native_tab_runtime_state.hpp"
 
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+#include "addresses.hpp"
 #include "hooks.hpp"
 #include "native_tab_catalogue.hpp"
 #include "native_tabs.hpp"
@@ -30,6 +31,10 @@
 #include <span>
 #include <utility>
 #include <vector>
+
+namespace erui::native {
+struct PreservedSharedMenuAddresses;
+}
 
 namespace {
 
@@ -14178,7 +14183,11 @@ void reset_hooks() noexcept {
     g_state_isolation_expectation = {};
 }
 
-bool install_hooks_and_interfaces(bool install_hooks = true) noexcept {
+bool install_hooks_and_interfaces(
+    bool install_hooks = true,
+    const erui::native::PreservedSharedMenuAddresses*
+        preserved_shared = nullptr) noexcept {
+    (void)preserved_shared;
     constexpr std::array<std::uint8_t, 16> kSelectionEntry{
         0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x12,
         0x48, 0x8B, 0xD9, 0x48, 0x8B, 0x49, 0x08, 0x48};
@@ -14403,6 +14412,25 @@ bool install_hooks_and_interfaces(bool install_hooks = true) noexcept {
         pristine_resolve_path_entry_matches ||
         host_owned_resolve_path_bridge_matches;
 
+    const bool pristine_selector_select_entry_matches =
+        entry_matches(kSelectorSelectRva, kSelectorSelectEntry);
+    bool approved_selector_select_entry_matches{};
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    if (install_hooks && preserved_shared) {
+        erui::native::ModuleView live_game{};
+        approved_selector_select_entry_matches =
+            live_game.initialize(
+                reinterpret_cast<HMODULE>(g_game.base)) &&
+            erui::native::revalidate_preserved_shared_menu_entry(
+                live_game,
+                *preserved_shared,
+                erui::native::PreservedSharedMenuEntry::selector_select);
+    }
+#endif
+    const bool selector_select_interface_matches =
+        pristine_selector_select_entry_matches ||
+        approved_selector_select_entry_matches;
+
     if (g_game.timestamp == kEldenRing271Timestamp &&
         !native_pointer_poll_helpers_match) {
         log_line(
@@ -14412,7 +14440,7 @@ bool install_hooks_and_interfaces(bool install_hooks = true) noexcept {
 
     if (!entry_matches(kSelectionCallbackRva, kSelectionEntry) ||
         !entry_matches(kCompositeFrameRva, kCompositeFrameEntry) ||
-        !entry_matches(kSelectorSelectRva, kSelectorSelectEntry) ||
+        !selector_select_interface_matches ||
         !entry_matches(
             kInputDispatchFrameBeginRva,
             kInputDispatchFrameBeginBytes) ||
@@ -14460,10 +14488,13 @@ bool install_hooks_and_interfaces(bool install_hooks = true) noexcept {
         !shape_helper_entries_match ||
         !destructor_entry_matches) {
         log_line(
-            "ERROR: one or more viewport interfaces differ from the validated executable; no hooks installed (resolvePath={pristine:%u hostOwned:%u accepted:%u})",
+            "ERROR: one or more viewport interfaces differ from the validated executable; no hooks installed (resolvePath={pristine:%u hostOwned:%u accepted:%u} selectorSelect={pristine:%u solidApproved:%u accepted:%u})",
             pristine_resolve_path_entry_matches ? 1U : 0U,
             host_owned_resolve_path_bridge_matches ? 1U : 0U,
-            resolve_path_interface_matches ? 1U : 0U);
+            resolve_path_interface_matches ? 1U : 0U,
+            pristine_selector_select_entry_matches ? 1U : 0U,
+            approved_selector_select_entry_matches ? 1U : 0U,
+            selector_select_interface_matches ? 1U : 0U);
         return false;
     }
 
@@ -14647,6 +14678,28 @@ bool install_hooks_and_interfaces(bool install_hooks = true) noexcept {
     // From the first enable attempt onward the hook objects and catalogue are
     // process-lifetime. Until every target is enabled, callbacks are gated to
     // exact native pass-through/no-op behavior.
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    // Hook preparation can allocate and suspend threads. Close that timing
+    // window with one last exact selector-prefix and indirect-target check
+    // while every prepared hook is still disabled and locally reversible.
+    bool selector_still_approved =
+        entry_matches(kSelectorSelectRva, kSelectorSelectEntry);
+    if (preserved_shared && !selector_still_approved) {
+        erui::native::ModuleView live_game{};
+        selector_still_approved = live_game.initialize(
+            reinterpret_cast<HMODULE>(g_game.base)) &&
+            erui::native::revalidate_preserved_shared_menu_entry(
+                live_game,
+                *preserved_shared,
+                erui::native::PreservedSharedMenuEntry::selector_select);
+    }
+    if (!selector_still_approved) {
+        log_line(
+            "ERROR: Selector::select changed after interface validation and before viewport hook exposure; no hooks installed");
+        reset_hooks();
+        return false;
+    }
+#endif
     g_viewport_callbacks_armed.store(false, std::memory_order_release);
     g_viewport_hooks_exposed.store(true, std::memory_order_release);
 
@@ -14796,7 +14849,8 @@ NativeTabsPreflightStatus preflight_native_tabs() noexcept {
 }
 
 bool install_native_tabs(
-    const detail::NativeTabCatalogue& catalogue) noexcept {
+    const detail::NativeTabCatalogue& catalogue,
+    const PreservedSharedMenuAddresses* preserved_shared) noexcept {
     if (g_native_tabs_installed.load(std::memory_order_acquire) ||
         catalogue.custom_count() == 0 ||
         catalogue.custom_count() > ERUI_CUSTOM_TAB_MAX_COUNT ||
@@ -14895,7 +14949,7 @@ bool install_native_tabs(
         catalogue.navigation_settings().mouse_dwell_enabled;
     g_pointer_dwell_timing =
         catalogue.navigation_settings().mouse_dwell_timing;
-    if (!install_hooks_and_interfaces(true)) {
+    if (!install_hooks_and_interfaces(true, preserved_shared)) {
         if (g_viewport_hooks_exposed.load(std::memory_order_acquire)) {
             // Once the first enable was attempted, an enabled/in-flight
             // trampoline may exist even when SafetyHook reported failure.

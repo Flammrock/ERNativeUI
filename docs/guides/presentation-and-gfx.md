@@ -1,9 +1,9 @@
 # Runtime GFX completion and presentation
 
-ERNativeUI completes Elden Ring's supported settings movies in memory while
-the game loads them. A normal installation needs only the host DLL: players do
-not need to install loose `menu/win/*.gfx` files for expanded rows, TextInput,
-or ColorPicker presentation.
+ERNativeUI completes Elden Ring's supported settings and title movies in
+memory while the game loads them. A normal installation needs only the host
+DLL: players do not need to install loose `menu/win/*.gfx` files for expanded
+rows, TextInput, ColorPicker, or API 1.3 title-screen text presentation.
 
 This happens after the game or mod loader selects the effective GFX file and
 before Scaleform consumes it. The input may therefore be the vanilla movie or
@@ -44,6 +44,48 @@ These changes affect presentation and physical capacity only. Client mods
 still declare logical controls and pages through the public API, and the host
 still owns merging, callbacks, values, and pagination.
 
+### Title-screen text
+
+For `05_000_title.gfx`, the host places registered API 1.3 text in the
+explicitly selected top-left, top-right, bottom-left, or bottom-right corner.
+It derives the stage bounds, native text metrics, transforms, alignment, and
+safe corner insets from the effective movie instead of assuming a fixed screen
+resolution.
+
+The bottom-right corner shares space with Elden Ring's native DLC, online
+state, application-version, and calibration-version fields. ERNativeUI checks
+whether Steam reports Shadow of the Erdtree as currently installed before it
+builds the immutable title-text plan:
+
+- when installed, the native DLC line and its authored blank row remain
+  reserved;
+- when absent and the effective `05_000_title.gfx` exactly matches the
+  validated Elden Ring 2.7.1.0 / App 1.17.1 native profile, the empty
+  `DLCVersion_0` placement and its authored blank row are excluded from
+  collision occupancy, so custom lines sit at normal line spacing directly
+  above `OFFLINE`;
+- when the effective title movie is structurally compatible but does not
+  match that exact native profile, ERNativeUI preserves the DLC row and gap;
+  and
+- when the state cannot be determined, ERNativeUI reserves the DLC line and
+  gap rather than risk covering native text.
+
+The native `DLCVersion_0` field is never removed or rewritten. The decision
+only changes which empty native geometry is available while placing copied
+provider lines.
+
+On Elden Ring 2.7.1.0, two live observations establish the underlying layout:
+
+| Installed content | Observed native title layout |
+|---|---|
+| Shadow of the Erdtree absent, earlier run | `DLCVersion_0` was empty; retaining its placement and authored spacer produced a visible extra gap above `OFFLINE`. |
+| Shadow of the Erdtree present, current run | `Shadow of the Erdtree` occupied the DLC field, followed by the authored blank row and then `OFFLINE`; preserving that gap produced the intended layout. |
+
+The adaptive installed/absent branch is covered by structural and unit tests,
+but its final same-build live A/B validation with the Steam DLC checkbox
+disabled and re-enabled is still pending. The two observations above should
+not be reported as that final adaptive-branch validation.
+
 ## Modified GFX compatibility
 
 ERNativeUI does not assume that the loaded movie is byte-for-byte vanilla. It
@@ -54,7 +96,7 @@ is left unchanged.
 
 The transformation is deliberately conservative:
 
-- only the two exact supported settings-movie paths are considered;
+- only the exact supported settings- and title-movie paths are considered;
 - required hosts, named children, row sequences, and placement contracts must
   be recognized;
 - unrelated definitions and authored data are preserved; and
@@ -65,6 +107,18 @@ If a modified movie is malformed or its relevant layout is not recognized,
 ERNativeUI keeps the effective input bytes unchanged instead of guessing. Enable
 `ERNativeUI.log` when diagnosing such a conflict; the log records whether each
 target movie was transformed, already complete, or rejected.
+
+For a modified title movie, the transformer additionally requires an
+unambiguous title information hierarchy, usable stage geometry, positive
+axis-aligned placement transforms, and non-overlapping corner regions. Existing
+compatible direct text fields are preserved and participate in collision
+checks. Even when that structure is compatible, DLC-absent gap reuse is
+limited to the exact validated Elden Ring 2.7.1.0 / App 1.17.1 native profile;
+other movies preserve the DLC row and authored gap. If any required
+relationship is ambiguous, no provider title text is inserted and the
+original movie continues unchanged. The fallback cannot make an unrelated
+custom title hierarchy compatible, and it never guesses around unknown
+authored animation or transforms.
 
 Because Mod Engine 2 still chooses one effective file for each game path, two
 mods cannot independently merge arbitrary binary GFX replacements through
@@ -80,7 +134,7 @@ movie for the lifetime of the process.
 |---|---|---|
 | Logical menu | Client mod through the public API | Pages, controls, text, callbacks, and initial values |
 | Native integration | One `ERNativeUI.dll` | Game hooks, provider merge, pagination, values, input, and lifetime |
-| Runtime GFX completion | `ERNativeUI.dll` at the validated file-opening boundary | Missing row placements and supported widget presentation |
+| Runtime GFX completion | `ERNativeUI.dll` at the validated file-opening boundary | Missing row placements, supported widget presentation, and registered title-screen text |
 | Optional replacement GFX | Another asset mod or a developer's experiment | Additional presentation changes outside ERNativeUI's normal runtime additions |
 
 ## Customize submenu titles

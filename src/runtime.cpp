@@ -215,6 +215,7 @@ InstallResult install_impl(
     Menu& menu,
     RuntimeOptions options,
     const native::GameAddresses* resolved_addresses,
+    const native::PreservedSharedMenuAddresses* preserved_shared_addresses,
     const detail::TabConfiguration* tab_configuration) noexcept {
     const ScopedRuntimeLifecycleLock lifecycle_lock;
     detail::RuntimeState& runtime = detail::runtime_state();
@@ -413,6 +414,13 @@ InstallResult install_impl(
         }
     }
 
+    if (resolved_addresses && preserved_shared_addresses) {
+        detail::logf(
+            LogLevel::error,
+            "Full and partial native address overrides cannot be combined");
+        return fail_install(InstallError::invalid_options);
+    }
+
     erui::native::GameAddresses addresses{};
     if (resolved_addresses) {
         addresses = *resolved_addresses;
@@ -442,7 +450,8 @@ InstallResult install_impl(
                 require_native_back,
                 runtime.menu->modeled_popup_choice_count != 0,
                 require_text_inputs,
-                options.enable_custom_text)) {
+                options.enable_custom_text,
+                preserved_shared_addresses)) {
             return fail_install(InstallError::address_resolution_failed);
         }
     }
@@ -471,8 +480,18 @@ InstallResult install_impl(
         return fail_install(InstallError::address_resolution_failed);
     }
 
+    if (preserved_shared_addresses &&
+        !erui::native::revalidate_preserved_shared_menu_addresses(
+            game, *preserved_shared_addresses)) {
+        detail::logf(
+            LogLevel::error,
+            "Approved shared menu interfaces changed before hook installation");
+        return fail_install(InstallError::address_resolution_failed);
+    }
+
     const erui::native::HookInstallStatus hook_status =
-        erui::native::install_native_menu_hooks(addresses);
+        erui::native::install_native_menu_hooks(
+            addresses, preserved_shared_addresses);
     if (hook_status != erui::native::HookInstallStatus::success) {
         return fail_install(InstallError::hook_install_failed);
     }
@@ -490,7 +509,8 @@ InstallResult install_impl(
     // install is never followed by rollback work.
     if (runtime.tab_catalogue &&
         runtime.tab_catalogue->custom_count() != 0 &&
-        !erui::native::install_native_tabs(*runtime.tab_catalogue)) {
+        !erui::native::install_native_tabs(
+            *runtime.tab_catalogue, preserved_shared_addresses)) {
         detail::logf(
             LogLevel::error,
             "Failed to install the native custom-tab backend after menu hooks");
@@ -502,21 +522,22 @@ InstallResult install_impl(
 }
 
 InstallResult install(Menu& menu, RuntimeOptions options) noexcept {
-    return install_impl(menu, options, nullptr, nullptr);
+    return install_impl(menu, options, nullptr, nullptr, nullptr);
 }
 
 InstallResult install_with_resolved_addresses(
     Menu& menu,
     RuntimeOptions options,
     const native::GameAddresses& addresses) noexcept {
-    return install_impl(menu, options, &addresses, nullptr);
+    return install_impl(menu, options, &addresses, nullptr, nullptr);
 }
 
 InstallResult install_with_tab_configuration(
     Menu& menu,
     RuntimeOptions options,
     const detail::TabConfiguration& tab_configuration) noexcept {
-    return install_impl(menu, options, nullptr, &tab_configuration);
+    return install_impl(
+        menu, options, nullptr, nullptr, &tab_configuration);
 }
 
 InstallResult install_with_resolved_addresses_and_tab_configuration(
@@ -525,7 +546,16 @@ InstallResult install_with_resolved_addresses_and_tab_configuration(
     const native::GameAddresses& addresses,
     const detail::TabConfiguration& tab_configuration) noexcept {
     return install_impl(
-        menu, options, &addresses, &tab_configuration);
+        menu, options, &addresses, nullptr, &tab_configuration);
+}
+
+InstallResult install_with_preserved_shared_addresses_and_tab_configuration(
+    Menu& menu,
+    RuntimeOptions options,
+    const native::PreservedSharedMenuAddresses& addresses,
+    const detail::TabConfiguration& tab_configuration) noexcept {
+    return install_impl(
+        menu, options, nullptr, &addresses, &tab_configuration);
 }
 
 void uninstall() noexcept {

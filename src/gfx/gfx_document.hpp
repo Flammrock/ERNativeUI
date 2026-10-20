@@ -136,6 +136,39 @@ struct GfxMatrixTranslation {
     std::int32_t y{};
 };
 
+// SWF/GFX stores MATRIX scale and skew terms as signed 16.16 fixed-point
+// values and translations as twips. Keeping the authored-presence bits is
+// useful to structural transformers which need to distinguish an omitted
+// identity component from an explicitly authored value without reparsing the
+// opaque tag body.
+struct GfxMatrix {
+    static constexpr std::int32_t identity_scale = 1 << 16;
+
+    std::int32_t scale_x{identity_scale};
+    std::int32_t scale_y{identity_scale};
+    std::int32_t rotate_skew_0{};
+    std::int32_t rotate_skew_1{};
+    std::int32_t translate_x{};
+    std::int32_t translate_y{};
+    bool has_scale{};
+    bool has_rotate{};
+
+    friend bool operator==(const GfxMatrix&, const GfxMatrix&) = default;
+};
+
+struct GfxFrameRect {
+    std::int32_t x_min{};
+    std::int32_t x_max{};
+    std::int32_t y_min{};
+    std::int32_t y_max{};
+
+    [[nodiscard]] bool has_positive_area() const noexcept {
+        return x_min < x_max && y_min < y_max;
+    }
+
+    friend bool operator==(const GfxFrameRect&, const GfxFrameRect&) = default;
+};
+
 // PlaceObject2 and PlaceObject3 are indexed far enough to expose their common
 // structural identity. Fields after the instance name (filters, clip actions,
 // and other renderer data) stay opaque and are preserved byte-for-byte.
@@ -147,6 +180,7 @@ struct GfxPlacementInfo {
     std::uint16_t character_id{};
     std::string name{};
     GfxMatrixTranslation translation{};
+    GfxMatrix matrix{};
     // Raw PlaceObject2/3 flag bytes. flags2 is zero for PlaceObject2. These
     // remain available even when a producer appends a PlaceObject3 extension
     // that the structural index deliberately leaves opaque.
@@ -238,6 +272,7 @@ public:
     [[nodiscard]] std::uint32_t declared_length() const noexcept;
     [[nodiscard]] std::size_t physical_size() const noexcept;
     [[nodiscard]] std::size_t trailing_size() const noexcept;
+    [[nodiscard]] std::optional<GfxFrameRect> frame_rect() const noexcept;
     [[nodiscard]] std::uint64_t revision() const noexcept;
     [[nodiscard]] const GfxDocumentLimits& limits() const noexcept;
 

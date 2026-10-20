@@ -62,10 +62,11 @@ Do not download the Nexus archive for development. It is a compact player
 package and does not contain the complete SDK.
 
 The headers selected at build time determine the exact ERUI API requested by
-the client. Features documented as API 1.3, including custom tabs, require an
-SDK that explicitly contains the API 1.3 declarations. When intentionally
-targeting an older API, use the headers and documentation from that SDK's
-release tag and put its release version in your build configuration.
+the client. Features documented as API 1.3, including custom tabs and
+title-screen text, require an SDK that explicitly contains the API 1.3
+declarations. When intentionally targeting an older API, use the headers and
+documentation from that SDK's release tag and put its release version in your
+build configuration.
 
 ## 2. Extract the SDK
 

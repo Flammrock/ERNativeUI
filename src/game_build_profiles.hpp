@@ -17,6 +17,42 @@ struct CoreUiAddressProfile {
     std::uintptr_t scaleform_result_destructor_rva{};
 };
 
+// Entry points shared with menu-overhaul mods are captured at process attach,
+// including the Selector::select viewport seam used by API 1.3 custom tabs.
+// Exact-build RVAs make that snapshot bounded and deterministic: unlike
+// ordinary late resolution, this path performs no executable-wide signature
+// scans while another DLL's worker is racing to install hooks. Each entry may
+// contain either its canonical game prefix or an already-installed,
+// subsequently validated compatibility detour.
+struct SharedMenuAddressProfile {
+    EldenRingBuild build{};
+    std::uintptr_t game_options_handler_rva{};
+    std::uintptr_t sub_handler_rva{};
+    std::uintptr_t text_resolver_rva{};
+    std::uintptr_t slider_refresh_rva{};
+    std::uintptr_t selector_select_rva{};
+};
+
+inline constexpr std::array<SharedMenuAddressProfile, 2>
+    kSharedMenuAddressProfiles{{
+        {
+            EldenRingBuild::v2_7_0_0,
+            0x958C50,
+            0x95A5D0,
+            0x7633D0,
+            0x74FA20,
+            0x739B90,
+        },
+        {
+            EldenRingBuild::v2_7_1_0,
+            0x959DF0,
+            0x95B770,
+            0x764220,
+            0x74FA20,
+            0x739B90,
+        },
+    }};
+
 inline constexpr std::array<CoreUiAddressProfile, 2>
     kCoreUiAddressProfiles{{
         {
@@ -227,6 +263,11 @@ find_text_input_address_profile(EldenRingBuild build) noexcept {
 [[nodiscard]] constexpr const CoreUiAddressProfile*
 find_core_ui_address_profile(EldenRingBuild build) noexcept {
     return find_address_profile(kCoreUiAddressProfiles, build);
+}
+
+[[nodiscard]] constexpr const SharedMenuAddressProfile*
+find_shared_menu_address_profile(EldenRingBuild build) noexcept {
+    return find_address_profile(kSharedMenuAddressProfiles, build);
 }
 
 [[nodiscard]] constexpr const ColorPickerAddressProfile*

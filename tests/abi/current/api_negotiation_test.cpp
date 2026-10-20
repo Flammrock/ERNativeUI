@@ -53,6 +53,9 @@ int check_v1_0_prefix(ERUI_GetApiFn get_api) {
     CHECK((api->capabilities & ERUI_CAP_NUMERIC_SLIDER) == 0);
     CHECK((api->capabilities & ERUI_CAP_CUSTOM_SLIDER) == 0);
 #endif
+#if defined(ERUI_API_VERSION_1_3)
+    CHECK((api->capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0);
+#endif
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_0_SIZE,
         storage.bytes.size() - ERUI_API_V1_0_SIZE,
@@ -78,6 +81,7 @@ int check_v1_2_prefix(ERUI_GetApiFn get_api) {
     CHECK((api->capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0);
     CHECK((api->capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0);
     CHECK((api->capabilities & ERUI_CAP_CUSTOM_TABS) == 0);
+    CHECK((api->capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0);
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_2_SIZE,
         storage.bytes.size() - ERUI_API_V1_2_SIZE,
@@ -107,6 +111,9 @@ int check_v1_1_prefix(ERUI_GetApiFn get_api) {
     CHECK((api->capabilities & ERUI_CAP_STORAGE) != 0);
     CHECK((api->capabilities & ERUI_CAP_NUMERIC_SLIDER) == 0);
     CHECK((api->capabilities & ERUI_CAP_CUSTOM_SLIDER) == 0);
+#if defined(ERUI_API_VERSION_1_3)
+    CHECK((api->capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0);
+#endif
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_1_SIZE,
         storage.bytes.size() - ERUI_API_V1_1_SIZE,
@@ -180,6 +187,8 @@ int check_selected_current(ERUI_GetApiFn get_api) {
 #if defined(ERUI_API_VERSION_1_3)
     CHECK((api.capabilities & ERUI_CAP_CUSTOM_TABS) != 0);
     CHECK(api.add_tab != nullptr);
+    CHECK((api.capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) != 0);
+    CHECK(api.add_title_screen_text != nullptr);
 #endif
     return 0;
 }

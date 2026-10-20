@@ -16,8 +16,9 @@ ERNativeUI exposes four public API generations:
 - **Released API 1.2:** introduced with ERNativeUI 1.2.0. It appends Numeric
   Slider and Custom Slider while preserving both earlier contracts.
 - **Current API 1.3:** appends client-owned top-level Configuration tabs and
-  preserves all three earlier contracts. Package-release versions and ERUI API
-  versions are independent; use an SDK and host that explicitly expose 1.3.
+  title-screen status text while preserving all three earlier contracts.
+  Package-release versions and ERUI API versions are independent; use an SDK
+  and host that explicitly expose 1.3.
 
 See [Feature status](../features.md) for the exact boundary and
 [How ERNativeUI works](../how-it-works.md) for the lifecycle and ownership
@@ -140,7 +141,7 @@ does not negotiate the runtime ERUI API.
 
 Version negotiation selects a complete, exact function-table contract. API
 1.0 is frozen at 128 bytes, API 1.1 at 320 bytes, API 1.2 at 368 bytes, and
-the current API 1.3 table is 376 bytes. An API 1.3 client cannot use a host
+the current API 1.3 table is 384 bytes. An API 1.3 client cannot use a host
 exposing only an earlier table, and the current C++ wrapper intentionally does
 not downgrade. Conversely, any client built with an earlier SDK is supported
 by later compatible 1.x hosts through its unchanged function-table contract.
@@ -160,9 +161,9 @@ by later compatible 1.x hosts through its unchanged function-table contract.
   Ring widget or from a non-null pointer belonging to another API version.
 - `ERUI_NOT_SUPPORTED` can also mean that a game-version-sensitive optional
   native facility was unavailable. In particular, a valid API 1.3 connection
-  may omit `ERUI_CAP_CUSTOM_TABS` when the installed executable has not passed
-  the custom-tab native validation. Inspect the capability and host log before
-  blaming table negotiation.
+  may omit `ERUI_CAP_CUSTOM_TABS` or `ERUI_CAP_TITLE_SCREEN_TEXT` when the
+  installed executable has not passed the corresponding native validation.
+  Inspect the capability and host log before blaming table negotiation.
 
 ## Provider registration or commit fails
 
@@ -248,23 +249,26 @@ provider modules because native rows retain callbacks.
 - A Game/Camera action row lacks the matching left label presentation.
 - Game Options paginates earlier than screenshots, or no custom Camera Options
   row appears.
+- Registered API 1.3 title-screen text does not appear.
 
 **Likely cause**
 
-The runtime GFX transformer did not recognize the effective settings movie,
-or the validated file-opening integration was unavailable for this Elden Ring
-build. Another asset mod may have changed a required panel or widget contract.
-ERNativeUI leaves unrecognized bytes unchanged instead of applying a guessed
-edit, so controls retain their safe fallback presentation and the host uses
-the capacity that actually loaded.
+The runtime GFX transformer did not recognize the effective settings or title
+movie, or the validated file-opening integration was unavailable for this
+Elden Ring build. Another asset mod may have changed a required panel, widget,
+or title-information contract. ERNativeUI leaves unrecognized bytes unchanged
+instead of applying a guessed edit, so controls retain their safe fallback
+presentation, the host uses the capacity that actually loaded, and unsafe
+title fields are not inserted.
 
 **Fix**
 
 - Do not install an ERNativeUI loose GFX package; normal presentation is
   completed by the DLL at runtime.
 - Enable logging, restart the game, and find the runtime GFX line for
-  `02_040_optionsetting.gfx` or `02_042_pc_graphicsetting.gfx`. It reports
-  whether the movie was transformed, already complete, or rejected.
+  `02_040_optionsetting.gfx`, `02_042_pc_graphicsetting.gfx`, or
+  `05_000_title.gfx`. It reports whether the movie was transformed, already
+  complete, or rejected.
 - Temporarily remove another mod's replacement for the affected movie. If the
   vanilla movie succeeds, report the replacement and transformation failure
   together so its structural compatibility can be reviewed.

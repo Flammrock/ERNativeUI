@@ -86,10 +86,18 @@ enum class Capability : ERUI_Capabilities {
     numeric_slider = ERUI_CAP_NUMERIC_SLIDER,
     custom_slider = ERUI_CAP_CUSTOM_SLIDER,
     custom_tabs = ERUI_CAP_CUSTOM_TABS,
+    title_screen_text = ERUI_CAP_TITLE_SCREEN_TEXT,
 };
 
 enum class TabIconFormat : ERUI_TabIconFormat {
     rgba8 = ERUI_TAB_ICON_FORMAT_RGBA8,
+};
+
+enum class TitleScreenCorner : ERUI_TitleScreenCorner {
+    top_left = ERUI_TITLE_SCREEN_CORNER_TOP_LEFT,
+    top_right = ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT,
+    bottom_left = ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT,
+    bottom_right = ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT,
 };
 
 enum class InputDevice : ERUI_InputDevices {
@@ -610,6 +618,15 @@ struct Color {
     std::uint8_t blue{};
 };
 
+struct TitleScreenTextOptions {
+    // One player-facing line. CR, LF, U+0085, U+2028, and U+2029 are not
+    // accepted. The host copies this view before the call returns, so
+    // temporary localized storage is safe during registration.
+    std::wstring_view text{};
+    // Empty preserves Elden Ring's native title-screen text color.
+    std::optional<Color> color{};
+};
+
 struct ColorPickerOptions {
     Color initial_value{};
     bool enabled{true};
@@ -1051,6 +1068,42 @@ inline bool valid_tab_icon(TabIconView icon) noexcept {
     return icon.format == TabIconFormat::rgba8;
 }
 
+inline bool valid_title_screen_text(std::wstring_view text) noexcept {
+    if (text.empty() ||
+        text.size() > ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS ||
+        !view_size_fits(text.size())) {
+        return false;
+    }
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        const std::uint16_t unit = static_cast<std::uint16_t>(text[index]);
+        if (unit == 0 || unit == static_cast<std::uint16_t>('\r') ||
+            unit == static_cast<std::uint16_t>('\n') || unit == 0x0085u ||
+            unit == 0x2028u || unit == 0x2029u) {
+            return false;
+        }
+        if (unit >= 0xD800u && unit <= 0xDBFFu) {
+            if (++index >= text.size()) return false;
+            const std::uint16_t low =
+                static_cast<std::uint16_t>(text[index]);
+            if (low < 0xDC00u || low > 0xDFFFu) return false;
+        } else if (unit >= 0xDC00u && unit <= 0xDFFFu) {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool valid_title_screen_corner(TitleScreenCorner corner) noexcept {
+    switch (corner) {
+    case TitleScreenCorner::top_left:
+    case TitleScreenCorner::top_right:
+    case TitleScreenCorner::bottom_left:
+    case TitleScreenCorner::bottom_right:
+        return true;
+    }
+    return false;
+}
+
 inline bool valid_storage_identifier(std::string_view value) noexcept {
     if (value.empty() ||
         value.size() > ERUI_STORAGE_MAX_IDENTIFIER_BYTES ||
@@ -1110,6 +1163,8 @@ inline const wchar_t* result_name(ERUI_Result result) noexcept {
     case ERUI_STORAGE_FORMAT_ERROR: return L"storage data is malformed";
     case ERUI_DUPLICATE_TAB_ID: return L"duplicate provider-local tab ID";
     case ERUI_TAB_LIMIT_REACHED: return L"process-wide custom-tab limit reached";
+    case ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED:
+        return L"process-wide title-screen text limit reached";
     default: return L"unknown host result";
     }
 }
@@ -1169,7 +1224,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
                     ERUI_CAP_NUMERIC_SLIDER |
                     ERUI_CAP_CUSTOM_SLIDER |
-                    ERUI_CAP_CUSTOM_TABS)) == 0;
+                    ERUI_CAP_CUSTOM_TABS |
+                    ERUI_CAP_TITLE_SCREEN_TEXT)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -1191,7 +1247,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
             (api.capabilities &
                 (ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
-                    ERUI_CAP_CUSTOM_TABS)) == 0;
+                    ERUI_CAP_CUSTOM_TABS |
+                    ERUI_CAP_TITLE_SCREEN_TEXT)) == 0;
     }
     if (version == ERUI_API_VERSION_1_2) {
         return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
@@ -1216,7 +1273,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
             (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
             (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
-            (api.capabilities & ERUI_CAP_CUSTOM_TABS) == 0;
+            (api.capabilities & ERUI_CAP_CUSTOM_TABS) == 0 &&
+            (api.capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0;
     }
     if (version == ERUI_API_VERSION_1_3) {
         return api.size == ERUI_API_V1_3_SIZE && api.add_text_input &&
@@ -1234,7 +1292,7 @@ inline bool api_complete_for_version(
             api.add_numeric_slider && api.set_numeric_slider_value &&
             api.get_numeric_slider_value && api.add_custom_slider &&
             api.set_custom_slider_index && api.get_custom_slider_index &&
-            api.add_tab &&
+            api.add_tab && api.add_title_screen_text &&
             (api.capabilities & ERUI_CAP_TEXT_INPUT) != 0 &&
             (api.capabilities & ERUI_CAP_COLOR_PICKER) != 0 &&
             (api.capabilities & ERUI_CAP_BUILTIN_PAGES) != 0 &&
@@ -3199,6 +3257,33 @@ private:
 class Menu {
 public:
     Page root() noexcept { return Page(draft_, draft_ ? draft_->root_ : 0); }
+    void add_title_screen_text(
+        TitleScreenCorner corner,
+        const TitleScreenTextOptions& options) noexcept {
+        if (!draft_ || !draft_->open() || draft_->failed_) return;
+        if (!draft_->api_.add_title_screen_text ||
+            (draft_->api_.capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0) {
+            draft_->record(ERUI_NOT_SUPPORTED, L"add_title_screen_text");
+            return;
+        }
+        if (!detail::valid_title_screen_corner(corner) ||
+            !detail::valid_title_screen_text(options.text)) {
+            draft_->record(
+                ERUI_INVALID_ARGUMENT, L"add_title_screen_text");
+            return;
+        }
+
+        ERUI_TitleScreenTextDesc description{};
+        description.size = sizeof(description);
+        description.text = detail::utf16_view(options.text);
+        description.corner = static_cast<ERUI_TitleScreenCorner>(corner);
+        if (options.color) {
+            description.flags = ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR;
+            description.color = detail::native_color(*options.color);
+        }
+        draft_->record(draft_->api_.add_title_screen_text(
+            draft_->provider_, &description), L"add_title_screen_text");
+    }
     Page add_tab(const TabOptions& options) noexcept {
         if (!draft_ || !draft_->open() || draft_->failed_) return {};
         if (!draft_->api_.add_tab ||

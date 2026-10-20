@@ -2,6 +2,8 @@
 
 #include "game_build.hpp"
 #include "gfx/settings_gfx_runtime.hpp"
+#include "gfx/title_gfx_runtime.hpp"
+#include "menu.hpp"
 #include "module.hpp"
 #include "runtime_log.hpp"
 
@@ -29,6 +31,10 @@ using erui::gfx::SettingsGfxRuntimeCache;
 using erui::gfx::SettingsGfxRuntimeOutcome;
 using erui::gfx::SettingsGfxRuntimeResult;
 using erui::gfx::SettingsGfxRuntimeTarget;
+using erui::gfx::TitleGfxRuntimeCache;
+using erui::gfx::TitleGfxRuntimeOutcome;
+using erui::gfx::TitleGfxRuntimePlanState;
+using erui::gfx::TitleGfxRuntimeResult;
 
 constexpr std::uintptr_t kFileOpener271Rva = 0xD6D280;
 constexpr std::uintptr_t kFileOpenerVtable271Rva = 0x2BBE498;
@@ -44,6 +50,10 @@ constexpr std::array<std::uintptr_t, 12> kMemoryFile271VslotRvas{
 
 constexpr std::size_t kMaximumPathLength = 511;
 constexpr std::size_t kTargetCount = 2;
+static_assert(
+    ERUI_TITLE_SCREEN_TEXT_MAX_LINES ==
+    erui::gfx::kTitleGfxRuntimeMaximumLines);
+static_assert(sizeof(wchar_t) == sizeof(std::uint16_t));
 
 using OpenFileFn = void*(__fastcall*)(
     void* file_opener,
@@ -88,14 +98,43 @@ enum class NativePatchFailure : std::uint8_t {
 SafetyHookInline g_open_file_hook{};
 std::atomic<OpenFileFn> g_original_open_file{};
 std::atomic<SettingsGfxRuntimeCache*> g_runtime_cache{};
+std::atomic<TitleGfxRuntimeCache*> g_title_runtime_cache{};
 std::atomic_bool g_installed{};
 std::mutex g_install_mutex{};
+// OpenFile can return one shared MemoryFile object to concurrent callers.
+// Serialize ERNativeUI's complete capture/transform/view-publication section
+// so its three-word view is never written concurrently. The unknown native
+// OpenFile implementation deliberately remains outside this lock; the
+// before/after snapshots reject native interference without calling an
+// external function while holding an ERNativeUI process-wide mutex.
+std::mutex g_memory_file_publication_mutex{};
+// Only the first title opener decides whether the finite catalogue handoff
+// succeeded. This also prevents a later opener from mutating a title movie
+// already exposed unchanged after a terminal fail-open decision.
+std::mutex g_title_open_mutex{};
+std::atomic_bool g_title_patching_abandoned{};
+std::atomic_uint32_t g_title_catalogue_wait_ms{
+    erui::native::kNativeTitleCatalogueWaitDefaultMilliseconds};
 void* g_expected_memory_file_vtable{};
 
 std::array<std::atomic_bool, kTargetCount> g_success_reported{};
 std::array<std::atomic_bool, kTargetCount> g_unchanged_reported{};
 std::array<std::atomic_bool, kTargetCount> g_transform_failure_reported{};
 std::array<std::atomic_bool, kTargetCount> g_native_failure_reported{};
+std::atomic_bool g_title_wait_timeout_reported{};
+std::atomic_bool g_title_success_reported{};
+std::atomic_bool g_title_unchanged_reported{};
+std::atomic_bool g_title_transform_failure_reported{};
+std::atomic_bool g_title_native_failure_reported{};
+
+// Called only while the installation mutex is held and the OpenFile detour is
+// known to be disabled. Successful installations deliberately retain both
+// caches for the process lifetime because Scaleform can keep their immutable
+// replacement pointers for the MovieDef lifetime.
+void discard_uninstalled_runtime_caches() noexcept {
+    delete g_runtime_cache.exchange(nullptr, std::memory_order_acq_rel);
+    delete g_title_runtime_cache.exchange(nullptr, std::memory_order_acq_rel);
+}
 
 [[nodiscard]] std::size_t target_index(
     SettingsGfxRuntimeTarget target) noexcept {
@@ -372,11 +411,95 @@ void report_success_once(
         result.after.character_creation_color_picker ? 1U : 0U);
 }
 
+void report_title_wait_timeout_once(std::uint32_t wait_ms) noexcept {
+    if (g_title_wait_timeout_reported.exchange(
+            true, std::memory_order_acq_rel)) {
+        return;
+    }
+    erui::detail::logf(
+        erui::LogLevel::warning,
+        "Title-screen text left the title GFX unchanged because its catalogue remained pending after the bounded %u ms startup handoff; title-GFX mutation is disabled for this process",
+        static_cast<unsigned>(wait_ms));
+}
+
+void report_title_native_failure_once(NativePatchFailure failure) noexcept {
+    if (failure == NativePatchFailure::restoration_failed) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Title-screen text could not restore the title MemoryFile after a failed write; the file view may be inconsistent for this process");
+        return;
+    }
+    if (g_title_native_failure_reported.exchange(
+            true, std::memory_order_acq_rel)) {
+        return;
+    }
+    erui::detail::logf(
+        erui::LogLevel::warning,
+        "Title-screen text left the title GFX unchanged: native MemoryFile boundary failed (%s)",
+        native_patch_failure_name(failure));
+}
+
+void report_title_transform_failure_once(
+    const TitleGfxRuntimeResult& result) noexcept {
+    if (g_title_transform_failure_reported.exchange(
+            true, std::memory_order_acq_rel)) {
+        return;
+    }
+    erui::detail::logf(
+        erui::LogLevel::warning,
+        "Title-screen text left the title GFX unchanged: profile=%s stage=%s document=%s title=%s feature=%s detail=%u line=%u",
+        erui::gfx::title_gfx_runtime_source_profile_name(
+            result.source_profile),
+        erui::gfx::title_gfx_runtime_error_name(result.error.code),
+        erui::gfx::gfx_document_error_name(
+            result.error.document_error.code),
+        erui::gfx::title_gfx_error_name(result.error.title_error.code),
+        erui::gfx::title_gfx_feature_name(result.error.title_error.feature),
+        static_cast<unsigned>(result.error.title_error.detail),
+        static_cast<unsigned>(result.error.title_error.line_index));
+}
+
+void report_title_unchanged_once(
+    const TitleGfxRuntimeResult& result,
+    std::size_t source_size) noexcept {
+    if (g_title_unchanged_reported.exchange(
+            true, std::memory_order_acq_rel)) {
+        return;
+    }
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Title-screen text inspected the title GFX: requested fields are already present, original MemoryFile retained (profile=%s bytes=%zu lines=%zu)",
+        erui::gfx::title_gfx_runtime_source_profile_name(
+            result.source_profile),
+        source_size,
+        result.after.existing_private_lines);
+}
+
+void report_title_success_once(
+    const TitleGfxRuntimeResult& result,
+    std::size_t source_size) noexcept {
+    if (g_title_success_reported.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Title-screen text applied to the title GFX: profile=%s bytes=%zu->%zu lines=%zu firstY=%d spacing=%d dlcRowReuseEligible=%s",
+        erui::gfx::title_gfx_runtime_source_profile_name(
+            result.source_profile),
+        source_size,
+        result.replacement_size,
+        result.after.existing_private_lines,
+        result.after.first_injected_y,
+        result.after.line_spacing,
+        result.dlc_row_reuse_permitted ? "yes" : "no");
+}
+
 [[nodiscard]] bool capture_source(
     void* file,
     MemoryFileSnapshot& snapshot,
     std::vector<std::uint8_t>& source,
-    NativePatchFailure& failure) noexcept {
+    NativePatchFailure& failure,
+    std::size_t maximum_bytes) noexcept {
     failure = NativePatchFailure::none;
     if (!file) {
         failure = NativePatchFailure::null_file;
@@ -397,7 +520,7 @@ void report_success_once(
     }
     if (snapshot.length < 12 ||
         static_cast<std::size_t>(snapshot.length) >
-            erui::gfx::kSettingsGfxRuntimeMaximumBytes) {
+            maximum_bytes) {
         failure = NativePatchFailure::invalid_length;
         return false;
     }
@@ -431,7 +554,8 @@ void report_success_once(
 [[nodiscard]] NativePatchFailure publish_replacement(
     void* file,
     const MemoryFileSnapshot& captured,
-    const SettingsGfxRuntimeResult& result) noexcept {
+    const std::uint8_t* replacement_bytes,
+    std::size_t replacement_size) noexcept {
     MemoryFileSnapshot before{};
     if (!read_memory_file_snapshot(file, before)) {
         return NativePatchFailure::unreadable_layout;
@@ -441,16 +565,16 @@ void report_success_once(
     // output into this object, the requested postcondition is satisfied.
     if (before.vtable == captured.vtable &&
         before.refcount == captured.refcount &&
-        before.bytes == result.replacement_bytes &&
-        before.length == static_cast<std::int32_t>(result.replacement_size) &&
+        before.bytes == replacement_bytes &&
+        before.length == static_cast<std::int32_t>(replacement_size) &&
         before.cursor == 0 && before.valid == captured.valid) {
         return NativePatchFailure::none;
     }
     if (!same_snapshot(captured, before)) {
         return NativePatchFailure::changed_during_copy;
     }
-    if (result.replacement_size == 0 ||
-        result.replacement_size >
+    if (!replacement_bytes || replacement_size == 0 ||
+        replacement_size >
             static_cast<std::size_t>(
                 (std::numeric_limits<std::int32_t>::max)())) {
         return NativePatchFailure::invalid_length;
@@ -464,8 +588,8 @@ void report_success_once(
     const MemoryFileView original{
         before.bytes, before.length, before.cursor};
     const MemoryFileView replacement{
-        result.replacement_bytes,
-        static_cast<std::int32_t>(result.replacement_size),
+        replacement_bytes,
+        static_cast<std::int32_t>(replacement_size),
         0};
     if (!guarded_copy(destination, &replacement, sizeof(replacement))) {
         return restore_memory_file_view(file, before, original)
@@ -477,8 +601,8 @@ void report_success_once(
     const bool verified = read_memory_file_snapshot(file, after) &&
         after.vtable == before.vtable &&
         after.refcount == before.refcount &&
-        after.bytes == result.replacement_bytes &&
-        after.length == static_cast<std::int32_t>(result.replacement_size) &&
+        after.bytes == replacement_bytes &&
+        after.length == static_cast<std::int32_t>(replacement_size) &&
         after.cursor == 0 && after.valid == before.valid;
     if (!verified) {
         return restore_memory_file_view(file, before, original)
@@ -505,6 +629,90 @@ void* __fastcall open_file_detour(
         : nullptr;
 
     if (!path_read || path_truncated) return file;
+
+    if (erui::gfx::is_title_gfx_runtime_path(copied_path.data())) {
+        // A failed/probing open cannot expose or cache a MovieDef. Preserve
+        // the one successful mutation opportunity for a later valid file.
+        if (!file) return file;
+
+        TitleGfxRuntimeCache* const title_cache =
+            g_title_runtime_cache.load(std::memory_order_acquire);
+        if (!title_cache) return file;
+
+        // The title MovieDef is commonly cached after its first exact open.
+        // Give the immutable registration plan one finite opportunity to
+        // settle before returning that first MemoryFile. If the deadline or a
+        // native/transform boundary fails, permanently fail open: mutating a
+        // later open could race a MovieDef already consuming the original
+        // view. The mutex also makes concurrent first openers share this one
+        // decision. Native OpenFile stays outside this lock: snapshot
+        // revalidation below fails open if its shared view changed, while we
+        // avoid holding an ERNativeUI mutex across an unknown native call.
+        std::lock_guard title_open_lock(g_title_open_mutex);
+        if (g_title_patching_abandoned.load(std::memory_order_acquire)) {
+            return file;
+        }
+
+        TitleGfxRuntimePlanState state = title_cache->plan_state();
+        if (state == TitleGfxRuntimePlanState::pending) {
+            const std::uint32_t wait_ms =
+                g_title_catalogue_wait_ms.load(std::memory_order_acquire);
+            state = title_cache->wait_for_plan(wait_ms);
+            if (state == TitleGfxRuntimePlanState::pending) {
+                g_title_patching_abandoned.store(
+                    true, std::memory_order_release);
+                report_title_wait_timeout_once(wait_ms);
+                return file;
+            }
+        }
+        if (state == TitleGfxRuntimePlanState::ready_empty) return file;
+
+        std::lock_guard publication_lock(g_memory_file_publication_mutex);
+        MemoryFileSnapshot snapshot{};
+        std::vector<std::uint8_t> source{};
+        NativePatchFailure native_failure{};
+        if (!capture_source(
+                file,
+                snapshot,
+                source,
+                native_failure,
+                erui::gfx::kTitleGfxRuntimeMaximumBytes)) {
+            g_title_patching_abandoned.store(true, std::memory_order_release);
+            report_title_native_failure_once(native_failure);
+            return file;
+        }
+
+        const TitleGfxRuntimeResult prepared = title_cache->prepare(source);
+        if (prepared.outcome == TitleGfxRuntimeOutcome::failed) {
+            g_title_patching_abandoned.store(true, std::memory_order_release);
+            report_title_transform_failure_once(prepared);
+            return file;
+        }
+        if (prepared.outcome == TitleGfxRuntimeOutcome::unchanged) {
+            report_title_unchanged_once(prepared, source.size());
+            return file;
+        }
+        if (!prepared.has_replacement()) {
+            g_title_patching_abandoned.store(true, std::memory_order_release);
+            report_title_native_failure_once(
+                NativePatchFailure::invalid_state);
+            return file;
+        }
+
+        native_failure = publish_replacement(
+            file,
+            snapshot,
+            prepared.replacement_bytes,
+            prepared.replacement_size);
+        if (native_failure != NativePatchFailure::none) {
+            g_title_patching_abandoned.store(true, std::memory_order_release);
+            report_title_native_failure_once(native_failure);
+            return file;
+        }
+        report_title_success_once(prepared, source.size());
+        return file;
+    }
+
     const SettingsGfxRuntimeTarget target =
         erui::gfx::classify_settings_gfx_runtime_path(copied_path.data());
     if (target == SettingsGfxRuntimeTarget::none) return file;
@@ -513,10 +721,16 @@ void* __fastcall open_file_detour(
         g_runtime_cache.load(std::memory_order_acquire);
     if (!cache) return file;
 
+    std::lock_guard publication_lock(g_memory_file_publication_mutex);
     MemoryFileSnapshot snapshot{};
     std::vector<std::uint8_t> source{};
     NativePatchFailure native_failure{};
-    if (!capture_source(file, snapshot, source, native_failure)) {
+    if (!capture_source(
+            file,
+            snapshot,
+            source,
+            native_failure,
+            erui::gfx::kSettingsGfxRuntimeMaximumBytes)) {
         report_native_failure_once(target, native_failure);
         return file;
     }
@@ -537,7 +751,11 @@ void* __fastcall open_file_detour(
         return file;
     }
 
-    native_failure = publish_replacement(file, snapshot, prepared);
+    native_failure = publish_replacement(
+        file,
+        snapshot,
+        prepared.replacement_bytes,
+        prepared.replacement_size);
     if (native_failure != NativePatchFailure::none) {
         report_native_failure_once(target, native_failure);
         return file;
@@ -596,7 +814,8 @@ namespace erui::native {
 
 NativeGfxLoaderInstallStatus install_native_gfx_loader(
     const ModuleView& game,
-    std::uint16_t minimum_tab_slots) noexcept {
+    std::uint16_t minimum_tab_slots,
+    std::uint32_t title_catalogue_wait_ms) noexcept {
     try {
         std::lock_guard lock(g_install_mutex);
         if (g_installed.load(std::memory_order_acquire)) {
@@ -612,17 +831,33 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
 
         auto* const cache = new (std::nothrow)
             SettingsGfxRuntimeCache{minimum_tab_slots};
-        if (!cache || !cache->ready()) {
+        auto* const title_cache = new (std::nothrow) TitleGfxRuntimeCache{};
+        if (!cache || !cache->ready() ||
+            !title_cache || !title_cache->ready()) {
             delete cache;
+            delete title_cache;
             return NativeGfxLoaderInstallStatus::allocation_failed;
         }
 
         g_expected_memory_file_vtable =
             game.at_rva(kMemoryFileVtable271Rva);
+        const std::uint32_t effective_title_wait_ms = (std::min)(
+            title_catalogue_wait_ms,
+            kNativeTitleCatalogueWaitMaximumMilliseconds);
+        g_title_catalogue_wait_ms.store(
+            effective_title_wait_ms, std::memory_order_release);
+        if (effective_title_wait_ms != title_catalogue_wait_ms) {
+            detail::logf(
+                LogLevel::warning,
+                "Title-GFX catalogue handoff was capped from %u to %u ms",
+                static_cast<unsigned>(title_catalogue_wait_ms),
+                static_cast<unsigned>(effective_title_wait_ms));
+        }
         // Deliberately process-lifetime. Once OpenFile can publish a
         // replacement pointer, neither the cache nor the hook may be reclaimed
         // independently.
         g_runtime_cache.store(cache, std::memory_order_release);
+        g_title_runtime_cache.store(title_cache, std::memory_order_release);
 
         auto hook = SafetyHookInline::create(
             game.at_rva(kFileOpener271Rva),
@@ -633,6 +868,7 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
                 LogLevel::warning,
                 "Runtime GFX completion hook could not be prepared (SafetyHook error type %u)",
                 static_cast<unsigned>(hook.error().type));
+            discard_uninstalled_runtime_caches();
             return NativeGfxLoaderInstallStatus::hook_failed;
         }
         g_open_file_hook = std::move(*hook);
@@ -647,14 +883,16 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
                 static_cast<unsigned>(enabled.error().type));
             g_original_open_file.store(nullptr, std::memory_order_release);
             g_open_file_hook.reset();
+            discard_uninstalled_runtime_caches();
             return NativeGfxLoaderInstallStatus::hook_failed;
         }
         g_installed.store(true, std::memory_order_release);
         detail::logf(
             LogLevel::info,
-            "Runtime GFX completion hook installed: Elden Ring 2.7.1.0 CSScaleformFileOpener::OpenFile RVA=0x%llX minimumTabSlots=%u",
+            "Runtime GFX completion hook installed: Elden Ring 2.7.1.0 CSScaleformFileOpener::OpenFile RVA=0x%llX minimumTabSlots=%u titleCatalogueWaitMs=%u",
             static_cast<unsigned long long>(kFileOpener271Rva),
-            static_cast<unsigned>(minimum_tab_slots));
+            static_cast<unsigned>(minimum_tab_slots),
+            static_cast<unsigned>(effective_title_wait_ms));
         return NativeGfxLoaderInstallStatus::installed;
     } catch (...) {
         // SafetyHook normally reports failures through its result type, but
@@ -667,11 +905,181 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
         } catch (...) {
         }
         g_original_open_file.store(nullptr, std::memory_order_release);
+        discard_uninstalled_runtime_caches();
         g_installed.store(false, std::memory_order_release);
         detail::logf(
             LogLevel::warning,
             "Runtime GFX completion hook installation raised an unexpected exception");
         return NativeGfxLoaderInstallStatus::hook_failed;
+    }
+}
+
+NativeTitleTextPublishStatus publish_native_title_screen_texts(
+    std::span<const TitleScreenTextSpec> lines,
+    NativeTitleDlcState dlc_state,
+    std::span<const NativeTitleTextOccupancy> external_occupancy) noexcept {
+    TitleGfxRuntimeCache* const cache =
+        g_title_runtime_cache.load(std::memory_order_acquire);
+    if (!cache || !cache->ready()) {
+        return NativeTitleTextPublishStatus::unavailable;
+    }
+    if (lines.size() > erui::gfx::kTitleGfxRuntimeMaximumLines) {
+        return NativeTitleTextPublishStatus::too_many_lines;
+    }
+    if (external_occupancy.size() >
+        erui::gfx::kTitleGfxRuntimeMaximumExternalOccupancy) {
+        return NativeTitleTextPublishStatus::too_many_lines;
+    }
+
+    try {
+        erui::gfx::TitleGfxDlcState gfx_dlc_state =
+            erui::gfx::TitleGfxDlcState::unknown;
+        switch (dlc_state) {
+        case NativeTitleDlcState::unknown:
+            break;
+        case NativeTitleDlcState::absent:
+            gfx_dlc_state = erui::gfx::TitleGfxDlcState::absent;
+            break;
+        case NativeTitleDlcState::installed:
+            gfx_dlc_state = erui::gfx::TitleGfxDlcState::installed;
+            break;
+        }
+
+        std::vector<erui::gfx::TitleGfxRuntimeLine> published{};
+        published.reserve(lines.size());
+        for (std::size_t index = 0; index < lines.size(); ++index) {
+            const TitleScreenTextSpec& line = lines[index];
+            if (line.text.empty() ||
+                line.text.size() >
+                    static_cast<std::size_t>(
+                        (std::numeric_limits<int>::max)())) {
+                return NativeTitleTextPublishStatus::invalid_text;
+            }
+
+            const int source_size = static_cast<int>(line.text.size());
+            const int required = WideCharToMultiByte(
+                CP_UTF8,
+                WC_ERR_INVALID_CHARS,
+                line.text.data(),
+                source_size,
+                nullptr,
+                0,
+                nullptr,
+                nullptr);
+            if (required <= 0) {
+                return NativeTitleTextPublishStatus::invalid_text;
+            }
+
+            erui::gfx::TitleGfxRuntimeLine converted{};
+            converted.provider_id = line.provider_id;
+            switch (line.corner) {
+            case ERUI_TITLE_SCREEN_CORNER_TOP_LEFT:
+                converted.corner = erui::gfx::TitleGfxCorner::top_left;
+                break;
+            case ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT:
+                converted.corner = erui::gfx::TitleGfxCorner::top_right;
+                break;
+            case ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT:
+                converted.corner = erui::gfx::TitleGfxCorner::bottom_left;
+                break;
+            case ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT:
+                converted.corner = erui::gfx::TitleGfxCorner::bottom_right;
+                break;
+            default:
+                return NativeTitleTextPublishStatus::invalid_text;
+            }
+            converted.text.resize(static_cast<std::size_t>(required));
+            if (WideCharToMultiByte(
+                    CP_UTF8,
+                    WC_ERR_INVALID_CHARS,
+                    line.text.data(),
+                    source_size,
+                    converted.text.data(),
+                    required,
+                    nullptr,
+                    nullptr) != required) {
+                return NativeTitleTextPublishStatus::invalid_text;
+            }
+            if (line.color) {
+                converted.color = erui::gfx::TitleGfxRgb{
+                    line.color->red,
+                    line.color->green,
+                    line.color->blue};
+            }
+            detail::logf(
+                LogLevel::trace,
+                "Title-screen text catalogue line: index=%zu provider='%s' corner=%u customColor=%u",
+                index,
+                converted.provider_id.c_str(),
+                static_cast<unsigned>(converted.corner),
+                converted.color ? 1U : 0U);
+            published.push_back(std::move(converted));
+        }
+
+        std::vector<erui::gfx::TitleGfxTextOccupancy>
+            published_occupancy{};
+        published_occupancy.reserve(external_occupancy.size());
+        for (const NativeTitleTextOccupancy occupancy :
+             external_occupancy) {
+            erui::gfx::TitleGfxTextSide side{};
+            switch (occupancy.side) {
+            case NativeTitleTextSide::left:
+                side = erui::gfx::TitleGfxTextSide::left;
+                break;
+            case NativeTitleTextSide::right:
+                side = erui::gfx::TitleGfxTextSide::right;
+                break;
+            default:
+                return NativeTitleTextPublishStatus::invalid_text;
+            }
+            published_occupancy.push_back({side, occupancy.y});
+        }
+
+        const erui::gfx::TitleGfxRuntimePublishStatus status =
+            cache->publish(
+                std::move(published),
+                gfx_dlc_state,
+                std::move(published_occupancy));
+        switch (status) {
+        case erui::gfx::TitleGfxRuntimePublishStatus::published: {
+            const auto summary = cache->plan_summary();
+            detail::logf(
+                LogLevel::info,
+                "Title-screen text catalogue published: state=%s dlcState=%u lines=%zu providers=%zu customColors=%zu externalOccupancy=%zu",
+                erui::gfx::title_gfx_runtime_plan_state_name(summary.state),
+                static_cast<unsigned>(summary.dlc_state),
+                summary.line_count,
+                summary.provider_count,
+                summary.custom_color_count,
+                summary.external_occupancy_count);
+            return NativeTitleTextPublishStatus::published;
+        }
+        case erui::gfx::TitleGfxRuntimePublishStatus::already_published:
+            return NativeTitleTextPublishStatus::already_published;
+        case erui::gfx::TitleGfxRuntimePublishStatus::too_many_lines:
+            return NativeTitleTextPublishStatus::too_many_lines;
+        case erui::gfx::TitleGfxRuntimePublishStatus::allocation_failed:
+            return NativeTitleTextPublishStatus::allocation_failed;
+        }
+    } catch (const std::bad_alloc&) {
+        return NativeTitleTextPublishStatus::allocation_failed;
+    } catch (...) {
+        return NativeTitleTextPublishStatus::invalid_text;
+    }
+    return NativeTitleTextPublishStatus::allocation_failed;
+}
+
+void abandon_native_title_screen_texts() noexcept {
+    TitleGfxRuntimeCache* const cache =
+        g_title_runtime_cache.load(std::memory_order_acquire);
+    if (!cache || !cache->ready()) return;
+
+    const erui::gfx::TitleGfxRuntimePublishStatus status = cache->publish(
+        {}, erui::gfx::TitleGfxDlcState::unknown);
+    if (status == erui::gfx::TitleGfxRuntimePublishStatus::published) {
+        detail::logf(
+            LogLevel::warning,
+            "Title-screen text catalogue abandoned during host startup; waiting title GFX opens were released unchanged");
     }
 }
 
@@ -688,6 +1096,22 @@ const char* native_gfx_loader_install_status_name(
     case NativeGfxLoaderInstallStatus::allocation_failed:
         return "allocation_failed";
     case NativeGfxLoaderInstallStatus::hook_failed: return "hook_failed";
+    }
+    return "unknown";
+}
+
+const char* native_title_text_publish_status_name(
+    NativeTitleTextPublishStatus status) noexcept {
+    switch (status) {
+    case NativeTitleTextPublishStatus::published: return "published";
+    case NativeTitleTextPublishStatus::already_published:
+        return "already_published";
+    case NativeTitleTextPublishStatus::unavailable: return "unavailable";
+    case NativeTitleTextPublishStatus::invalid_text: return "invalid_text";
+    case NativeTitleTextPublishStatus::too_many_lines:
+        return "too_many_lines";
+    case NativeTitleTextPublishStatus::allocation_failed:
+        return "allocation_failed";
     }
     return "unknown";
 }

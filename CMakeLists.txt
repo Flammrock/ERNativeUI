@@ -159,6 +159,22 @@ if(_ernativeui_need_gfx_document)
             /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
     endif()
 
+    add_library(ERNativeUITitleGfxTransformer STATIC
+        src/sha256.cpp
+        src/gfx/title_gfx_transformer.cpp
+        src/gfx/title_gfx_runtime.cpp)
+    add_library(ERNativeUI::TitleGfxTransformer ALIAS
+        ERNativeUITitleGfxTransformer)
+    target_include_directories(ERNativeUITitleGfxTransformer PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(ERNativeUITitleGfxTransformer PUBLIC
+        ERNativeUI::GfxDocument)
+    target_compile_features(ERNativeUITitleGfxTransformer PUBLIC cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUITitleGfxTransformer PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+
 endif()
 
 set(_ernativeui_need_gfx_patch OFF)
@@ -426,6 +442,7 @@ if(_ernativeui_need_native_core)
         src/runtime.cpp
         src/runtime_log.cpp
         src/runtime_state.cpp
+        src/steam_dlc.cpp
         src/storage_document.cpp
         src/submenu_navigation.cpp
         src/tab_configuration.cpp
@@ -438,6 +455,7 @@ if(_ernativeui_need_native_core)
         ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(ERNativeUICore PRIVATE
         ERNativeUI::SettingsGfxTransformer
+        ERNativeUI::TitleGfxTransformer
         safetyhook::safetyhook
         minhook)
     target_compile_features(ERNativeUICore PUBLIC cxx_std_20)
@@ -525,7 +543,7 @@ if(TARGET ERNativeUIHost)
     foreach(_ernativeui_example_target IN ITEMS
             TarnishedUIShowcase LocalizedGreeting
             ShowcaseScreenshotHelperStage MyERNativeUIMod
-            CustomTabsStress)
+            CustomTabsStress TitleScreenTextExample)
         if(TARGET ${_ernativeui_example_target})
             list(APPEND _ernativeui_stage_dependencies
                 ${_ernativeui_example_target})
@@ -722,6 +740,45 @@ if(_ernativeui_enable_tests)
     add_test(NAME ERNativeUI.SettingsGfxRuntime
         COMMAND ERNativeUISettingsGfxRuntimeTests)
 
+    add_executable(ERNativeUITitleGfxTransformerTests
+        tests/title_gfx_transformer_test.cpp)
+    target_link_libraries(ERNativeUITitleGfxTransformerTests PRIVATE
+        ERNativeUI::TitleGfxTransformer)
+    target_include_directories(ERNativeUITitleGfxTransformerTests PRIVATE
+        tests)
+    target_compile_features(ERNativeUITitleGfxTransformerTests PRIVATE
+        cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUITitleGfxTransformerTests PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ERNativeUI.TitleGfxTransformer
+        COMMAND ERNativeUITitleGfxTransformerTests)
+
+    add_executable(ERNativeUITitleGfxRuntimeTests
+        tests/title_gfx_runtime_test.cpp)
+    target_link_libraries(ERNativeUITitleGfxRuntimeTests PRIVATE
+        ERNativeUI::TitleGfxTransformer)
+    target_include_directories(ERNativeUITitleGfxRuntimeTests PRIVATE tests)
+    target_compile_features(ERNativeUITitleGfxRuntimeTests PRIVATE cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUITitleGfxRuntimeTests PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ERNativeUI.TitleGfxRuntime
+        COMMAND ERNativeUITitleGfxRuntimeTests)
+
+    add_executable(ERNativeUISha256Tests tests/sha256_test.cpp)
+    target_link_libraries(ERNativeUISha256Tests PRIVATE
+        ERNativeUI::TitleGfxTransformer)
+    target_include_directories(ERNativeUISha256Tests PRIVATE tests)
+    target_compile_features(ERNativeUISha256Tests PRIVATE cxx_std_20)
+    if(_ernativeui_msvc_abi)
+        target_compile_options(ERNativeUISha256Tests PRIVATE
+            /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+    endif()
+    add_test(NAME ERNativeUI.Sha256 COMMAND ERNativeUISha256Tests)
+
     add_executable(ERNativeUIPaginationTests tests/pagination_test.cpp src/pagination.cpp)
     target_include_directories(ERNativeUIPaginationTests PRIVATE src)
     target_compile_features(ERNativeUIPaginationTests PRIVATE cxx_std_20)
@@ -808,6 +865,24 @@ if(_ernativeui_enable_tests)
     add_test(NAME ERNativeUI.LoggingPolicy COMMAND ERNativeUILoggingPolicyTests)
 
     if(WIN32)
+        add_executable(ERNativeUISharedMenuAddressTests
+            tests/shared_menu_address_test.cpp
+            src/addresses.cpp
+            src/module.cpp
+            src/runtime_log.cpp)
+        target_include_directories(ERNativeUISharedMenuAddressTests PRIVATE
+            src include tests)
+        target_compile_features(ERNativeUISharedMenuAddressTests PRIVATE
+            cxx_std_20)
+        target_compile_definitions(ERNativeUISharedMenuAddressTests PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+        if(_ernativeui_msvc_abi)
+            target_compile_options(ERNativeUISharedMenuAddressTests PRIVATE
+                /W4 /EHsc /permissive- /utf-8 /Zc:__cplusplus)
+        endif()
+        add_test(NAME ERNativeUI.SharedMenuAddresses
+            COMMAND ERNativeUISharedMenuAddressTests)
+
         add_executable(ERNativeUILoggerIntegrationTests
             tests/logger_integration_test.cpp
             src/logger.cpp)
@@ -952,6 +1027,14 @@ if(_ernativeui_enable_tests)
         add_test(NAME ERNativeUI.SteamLanguageUnavailable
             COMMAND ERNativeUISteamLanguageUnavailableTests)
 
+        add_executable(ERNativeUISteamDlcTests
+            tests/steam_dlc_test.cpp src/steam_dlc.cpp)
+        target_include_directories(ERNativeUISteamDlcTests PRIVATE src tests)
+        target_compile_features(ERNativeUISteamDlcTests PRIVATE cxx_std_20)
+        target_compile_definitions(ERNativeUISteamDlcTests PRIVATE
+            WIN32_LEAN_AND_MEAN NOMINMAX)
+        add_test(NAME ERNativeUI.SteamDlc COMMAND ERNativeUISteamDlcTests)
+
         add_executable(ERNativeUIHostLocaleTests
             tests/host_locale_test.cpp
             src/host_locale.cpp
@@ -1050,6 +1133,7 @@ endif()
 if(TARGET TarnishedUIShowcase)
     install(TARGETS TarnishedUIShowcase LocalizedGreeting
         ShowcaseScreenshotHelper MyERNativeUIMod CustomTabsStress
+        TitleScreenTextExample
         LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/examples
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/examples)
     install(FILES

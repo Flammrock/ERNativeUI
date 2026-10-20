@@ -710,13 +710,15 @@ bool resolve_native_addresses(
     }
 
     const std::string_view build_name = elden_ring_build_name(build);
-    erui::detail::logf(
-        erui::LogLevel::info,
-        "Input bindings native profile: Elden Ring %.*s timestamp=0x%08X size=0x%zX",
-        static_cast<int>(build_name.size()),
-        build_name.data(),
-        static_cast<unsigned>(game.timestamp()),
-        game.image_size());
+    if (log_failure) {
+        erui::detail::logf(
+            erui::LogLevel::info,
+            "Input bindings native profile: Elden Ring %.*s timestamp=0x%08X size=0x%zX",
+            static_cast<int>(build_name.size()),
+            build_name.data(),
+            static_cast<unsigned>(game.timestamp()),
+            game.image_size());
+    }
 
     output.build_key_setting_list =
         resolve_function<BuildKeySettingListFn>(
@@ -2763,7 +2765,137 @@ ERUI_Result validate_live_action(
 
 } // namespace
 
-bool capture_native_input_bindings_before_third_party_hooks() noexcept {
+bool capture_native_input_bindings_at_process_attach(
+    void* game_image_base) noexcept {
+    // This function is called while the loader lock is held. Keep every
+    // operation local and bounded: no ModuleView (it owns a vector), pattern
+    // parser, logging, or Win32 loader query belongs on this path.
+    g_captured_addresses_approved.store(false, std::memory_order_release);
+    g_captured_addresses_ready.store(false, std::memory_order_release);
+    g_captured_allowed_owner = nullptr;
+    g_captured_addresses = {};
+    g_captured_function_entries = {};
+
+    auto* const image_base =
+        static_cast<std::uint8_t*>(game_image_base);
+    if (!image_base) return false;
+
+    const auto* const dos =
+        reinterpret_cast<const IMAGE_DOS_HEADER*>(image_base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 ||
+        static_cast<std::uint64_t>(dos->e_lfanew) > UINT64_C(0x100000)) {
+        return false;
+    }
+    const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+        image_base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
+        nt->OptionalHeader.SizeOfImage < 0x1000U) {
+        return false;
+    }
+
+    const std::size_t image_size = nt->OptionalHeader.SizeOfImage;
+    const EldenRingBuild build = identify_elden_ring_build(
+        nt->FileHeader.TimeDateStamp, image_size);
+    const InputBindingsAddressProfile* const profile =
+        find_input_bindings_address_profile(build);
+    if (!profile) return false;
+
+    const auto address_at = [image_base, image_size](
+                                std::uintptr_t rva,
+                                std::size_t required_size) noexcept
+        -> std::uint8_t* {
+        return rva < image_size && required_size <= image_size - rva
+            ? image_base + rva
+            : nullptr;
+    };
+    const auto function_at = [&address_at](std::uintptr_t rva) noexcept {
+        return address_at(rva, CapturedFunctionEntry{}.bytes.size());
+    };
+
+    NativeInputBindingAddresses captured{};
+    captured.build_key_setting_list =
+        reinterpret_cast<BuildKeySettingListFn>(
+            function_at(profile->build_key_setting_list_rva));
+    captured.construct_key_setting =
+        reinterpret_cast<ConstructKeySettingFn>(
+            function_at(profile->construct_key_setting_rva));
+    captured.construct_spacer = reinterpret_cast<ConstructSpacerFn>(
+        function_at(profile->construct_spacer_rva));
+    captured.append_key_setting = reinterpret_cast<AppendKeySettingFn>(
+        function_at(profile->append_key_setting_rva));
+    captured.poll_key_capture = reinterpret_cast<PollKeyCaptureFn>(
+        function_at(profile->poll_key_capture_rva));
+    captured.clear_key_setting = reinterpret_cast<ClearKeySettingFn>(
+        function_at(profile->clear_key_setting_rva));
+    captured.refresh_key_conflict =
+        reinterpret_cast<RefreshKeyConflictFn>(
+            function_at(profile->refresh_key_conflict_rva));
+    captured.write_binding_value =
+        reinterpret_cast<WriteBindingValueFn>(
+            function_at(profile->write_binding_value_rva));
+    captured.input_token_physical_id =
+        reinterpret_cast<InputTokenPhysicalIdFn>(
+            function_at(profile->input_token_physical_id_rva));
+    captured.input_token_analog = reinterpret_cast<InputTokenAnalogFn>(
+        function_at(profile->input_token_analog_rva));
+    captured.get_player_input = reinterpret_cast<GetPlayerInputFn>(
+        function_at(profile->get_player_input_rva));
+    captured.query_input_states = reinterpret_cast<QueryInputStatesFn>(
+        function_at(profile->query_input_states_rva));
+    captured.input_manager_update = reinterpret_cast<InputManagerUpdateFn>(
+        function_at(profile->input_manager_update_rva));
+    captured.software_keyboard_construct =
+        reinterpret_cast<SoftwareKeyboardJobConstructFn>(
+            function_at(profile->software_keyboard_job_construct_rva));
+    captured.software_keyboard_destroy =
+        reinterpret_cast<NativeTextEditorDestroyFn>(
+            function_at(profile->software_keyboard_job_destroy_rva));
+    captured.text_input_dialog_construct =
+        reinterpret_cast<TextInputDialogConstructFn>(
+            function_at(profile->text_input_dialog_construct_rva));
+    captured.text_input_dialog_destroy =
+        reinterpret_cast<NativeTextEditorDestroyFn>(
+            function_at(profile->text_input_dialog_destroy_rva));
+
+    captured.input_manager_slot = reinterpret_cast<void**>(address_at(
+        profile->input_manager_slot_rva, sizeof(void*)));
+    captured.key_config_dialog_vtable = address_at(
+        profile->key_config_dialog_vtable_rva, sizeof(void*));
+    captured.key_setting_list_vtable = address_at(
+        profile->key_setting_list_vtable_rva, sizeof(void*));
+    captured.key_config_vtable = address_at(
+        profile->key_config_vtable_rva, sizeof(void*));
+    captured.software_keyboard_vtable = address_at(
+        profile->software_keyboard_job_vtable_rva, sizeof(void*));
+    captured.text_input_dialog_vtable = address_at(
+        profile->text_input_dialog_vtable_rva, sizeof(void*));
+    if (!captured.complete() ||
+        !address_at(profile->write_menu_config_rva, sizeof(void*))) {
+        return false;
+    }
+
+    CapturedFunctionEntries captured_entries{};
+    const auto entries = native_function_entries(captured);
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        if (!entries[index]) return false;
+        captured_entries[index].address = entries[index];
+        std::memcpy(
+            captured_entries[index].bytes.data(),
+            entries[index],
+            captured_entries[index].bytes.size());
+    }
+
+    // Publish only a complete snapshot. The worker's acquire load pairs with
+    // this store before it performs full signatures and ownership checks.
+    g_captured_addresses = captured;
+    g_captured_function_entries = captured_entries;
+    g_captured_addresses_ready.store(true, std::memory_order_release);
+    return true;
+}
+
+bool capture_native_input_bindings_before_third_party_hooks(
+    bool quiet) noexcept {
     g_captured_addresses_approved.store(false, std::memory_order_release);
     g_captured_addresses_ready.store(false, std::memory_order_release);
     g_captured_addresses = {};
@@ -2771,7 +2903,7 @@ bool capture_native_input_bindings_before_third_party_hooks() noexcept {
     g_captured_allowed_owner = nullptr;
 
     NativeInputBindingAddresses captured{};
-    if (!resolve_native_addresses(captured, true)) return false;
+    if (!resolve_native_addresses(captured, !quiet)) return false;
     const auto entries = native_function_entries(captured);
     for (std::size_t index = 0; index < entries.size(); ++index) {
         if (!entries[index]) return false;
@@ -2784,7 +2916,7 @@ bool capture_native_input_bindings_before_third_party_hooks() noexcept {
     g_captured_addresses = captured;
     g_captured_addresses_ready.store(true, std::memory_order_release);
     erui::detail::logf(
-        erui::LogLevel::info,
+        quiet ? erui::LogLevel::verbose : erui::LogLevel::info,
         "Captured native input-binding interfaces before third-party hook installation");
     return true;
 }

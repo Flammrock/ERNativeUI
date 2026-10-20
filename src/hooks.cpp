@@ -1924,7 +1924,27 @@ bool install_dialog_input_gates(
     return true;
 }
 
-bool install_game_options_hook(const GameAddresses& addresses) noexcept {
+bool revalidate_shared_menu_entry_before_hook(
+    const ModuleView* game,
+    const PreservedSharedMenuAddresses* preserved,
+    PreservedSharedMenuEntry entry,
+    const char* name) noexcept {
+    if (!preserved) return true;
+    if (game && revalidate_preserved_shared_menu_entry(
+            *game, *preserved, entry)) {
+        return true;
+    }
+    erui::detail::logf(
+        erui::LogLevel::error,
+        "Approved shared menu entry '%s' changed immediately before hook creation",
+        name ? name : "unknown");
+    return false;
+}
+
+bool install_game_options_hook(
+    const GameAddresses& addresses,
+    const ModuleView* game,
+    const PreservedSharedMenuAddresses* preserved) noexcept {
     if (erui::detail::diagnostics_enabled()) {
         const auto* code = reinterpret_cast<const unsigned char*>(
             addresses.game_options_handler);
@@ -1933,6 +1953,13 @@ bool install_game_options_hook(const GameAddresses& addresses) noexcept {
             "diagnostic: Game Options entry before hook=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
             code[0], code[1], code[2], code[3], code[4], code[5], code[6], code[7],
             code[8], code[9], code[10], code[11], code[12], code[13], code[14], code[15]);
+    }
+    if (!revalidate_shared_menu_entry_before_hook(
+            game,
+            preserved,
+            PreservedSharedMenuEntry::game_options,
+            "Game Options")) {
+        return false;
     }
     auto game_options_result = SafetyHookInline::create(
         reinterpret_cast<void*>(addresses.game_options_handler),
@@ -2237,7 +2264,10 @@ void install_builtin_panel_materializers(
         g_original_graphics_panel_materializer);
 }
 
-bool install_sub_hook(const GameAddresses& addresses) noexcept {
+bool install_sub_hook(
+    const GameAddresses& addresses,
+    const ModuleView* game,
+    const PreservedSharedMenuAddresses* preserved) noexcept {
     if (erui::detail::diagnostics_enabled()) {
         const auto* code = reinterpret_cast<const unsigned char*>(addresses.sub_handler);
         erui::detail::logf(
@@ -2245,6 +2275,13 @@ bool install_sub_hook(const GameAddresses& addresses) noexcept {
             "diagnostic: subpage entry before hook=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
             code[0], code[1], code[2], code[3], code[4], code[5], code[6], code[7],
             code[8], code[9], code[10], code[11], code[12], code[13], code[14], code[15]);
+    }
+    if (!revalidate_shared_menu_entry_before_hook(
+            game,
+            preserved,
+            PreservedSharedMenuEntry::sub_handler,
+            "Game Options subpage")) {
+        return false;
     }
     auto sub_result = SafetyHookInline::create(
         reinterpret_cast<void*>(addresses.sub_handler),
@@ -2332,7 +2369,10 @@ enum class TextHookInstallStatus : std::uint8_t {
     hook_failed,
 };
 
-TextHookInstallStatus install_text_hook(const GameAddresses& addresses) noexcept {
+TextHookInstallStatus install_text_hook(
+    const GameAddresses& addresses,
+    const ModuleView* game,
+    const PreservedSharedMenuAddresses* preserved) noexcept {
     const MH_STATUS initialize_status = MH_Initialize();
     if (initialize_status != MH_OK && initialize_status != MH_ERROR_ALREADY_INITIALIZED) {
         erui::detail::logf(
@@ -2343,6 +2383,13 @@ TextHookInstallStatus install_text_hook(const GameAddresses& addresses) noexcept
         return TextHookInstallStatus::hook_failed;
     }
 
+    if (!revalidate_shared_menu_entry_before_hook(
+            game,
+            preserved,
+            PreservedSharedMenuEntry::text_resolver,
+            "native text resolver")) {
+        return TextHookInstallStatus::hook_failed;
+    }
     g_text_hook_target = reinterpret_cast<void*>(addresses.text_resolver);
     void* trampoline = nullptr;
     const MH_STATUS create_status = MH_CreateHook(
@@ -2800,7 +2847,9 @@ void request_navigate_page(
     }
 }
 
-HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noexcept {
+HookInstallStatus install_native_menu_hooks(
+    const GameAddresses& addresses,
+    const PreservedSharedMenuAddresses* preserved_shared) noexcept {
     g_addresses = addresses;
     g_last_page.store(nullptr, std::memory_order_release);
     g_dialog_input_page.store(nullptr, std::memory_order_release);
@@ -2815,6 +2864,15 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
     g_sub_injection_count.store(0, std::memory_order_release);
     g_title_fault_count.store(0, std::memory_order_release);
     g_title_capture.reset();
+
+    ModuleView game{};
+    if (preserved_shared &&
+        !game.initialize(GetModuleHandleW(nullptr))) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Could not initialize the game image for per-entry shared-menu revalidation");
+        return HookInstallStatus::hook_failed;
+    }
 
     erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
     const bool enable_rows = runtime.options.enable_row_injection;
@@ -2939,7 +2997,8 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
 
     if (enable_rows) {
         if (!addresses.game_options_handler ||
-            !install_game_options_hook(addresses)) {
+            !install_game_options_hook(
+                addresses, &game, preserved_shared)) {
             reset_hooks();
             return HookInstallStatus::hook_failed;
         }
@@ -2949,7 +3008,7 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         install_builtin_panel_materializers(addresses);
         if (enable_submenus) {
             if (!addresses.sub_handler || !addresses.open_sub_page ||
-                !install_sub_hook(addresses)) {
+                !install_sub_hook(addresses, &game, preserved_shared)) {
                 erui::detail::logf(
                     erui::LogLevel::error,
                     "pagination/submenu routes require resolved subpage interfaces");
@@ -2962,7 +3021,8 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
 
     if (enable_text) {
         if (!addresses.text_resolver ||
-            install_text_hook(addresses) != TextHookInstallStatus::success) {
+            install_text_hook(addresses, &game, preserved_shared) !=
+                TextHookInstallStatus::success) {
             reset_hooks();
             return HookInstallStatus::hook_failed;
         }
@@ -2972,7 +3032,8 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
             "Custom text hook disabled; rows use a vanilla fallback message ID");
     }
 
-    if (!install_native_slider_presentation(addresses)) {
+    if (!install_native_slider_presentation(
+            addresses, &game, preserved_shared)) {
         erui::detail::logf(
             erui::LogLevel::error,
             "Formatted-slider presentation could not be installed");
@@ -2993,7 +3054,6 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         return HookInstallStatus::hook_failed;
     }
 
-    ModuleView game{};
     const bool dialog_input_ready = enable_text &&
         install_dialog_input_gates(addresses, enable_text_inputs);
     if (!enable_text) {
@@ -3004,7 +3064,8 @@ HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noex
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert transport unavailable: modal input gates were not installed");
-    } else if (!game.initialize(GetModuleHandleW(nullptr))) {
+    } else if (!game.base() &&
+        !game.initialize(GetModuleHandleW(nullptr))) {
         erui::detail::logf(
             erui::LogLevel::warning,
             "Native alert transport unavailable: main executable could not be parsed");

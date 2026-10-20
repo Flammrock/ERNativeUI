@@ -7,11 +7,20 @@
 
 namespace erui::native {
 
+// Takes the exact-build visibility-entry snapshot during DLL_PROCESS_ATTACH,
+// before another DLL's worker can replace it. The supplied value is the
+// already-known base of the mapped game executable. This path performs only
+// bounded PE/RVA reads and a fixed-size copy; it must not allocate, log, scan,
+// or call into the Windows loader.
+[[nodiscard]] bool capture_color_picker_visibility_at_process_attach(
+    void* game_image_base) noexcept;
+
 // Solid Uncapper uses the same Scaleform property setter as ColorPicker.
 // Capture its pristine exact-build entry before the third-party worker can
 // install its hook, then approve only a narrowly owned chain after startup.
 [[nodiscard]] bool capture_color_picker_visibility_before_third_party_hooks(
-    const ModuleView& game) noexcept;
+    const ModuleView& game,
+    bool quiet = false) noexcept;
 [[nodiscard]] bool approve_captured_color_picker_visibility(
     void* allowed_detour_module) noexcept;
 

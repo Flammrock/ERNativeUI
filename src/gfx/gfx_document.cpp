@@ -51,6 +51,7 @@ struct ParsedTree {
     std::uint8_t version{};
     std::uint32_t declared_length{};
     std::size_t physical_size{};
+    GfxFrameRect frame_rect{};
     std::vector<std::uint8_t> movie_header{};
     std::vector<TagNode> top_level{};
     std::vector<std::uint8_t> trailing{};
@@ -176,14 +177,17 @@ private:
 
 [[nodiscard]] bool movie_header_end(
     std::span<const std::uint8_t> bytes,
-    std::size_t& end) noexcept {
+    std::size_t& end,
+    GfxFrameRect& frame_rect) noexcept {
     if (bytes.size() < 12) return false;
     BitReader reader(bytes, 8);
     std::uint32_t bit_count{};
     if (!reader.read(5, bit_count) || bit_count > 31U) return false;
-    std::int32_t ignored{};
-    for (std::size_t field = 0; field < 4; ++field) {
-        if (!reader.read_signed(bit_count, ignored)) return false;
+    if (!reader.read_signed(bit_count, frame_rect.x_min) ||
+        !reader.read_signed(bit_count, frame_rect.x_max) ||
+        !reader.read_signed(bit_count, frame_rect.y_min) ||
+        !reader.read_signed(bit_count, frame_rect.y_max)) {
+        return false;
     }
     reader.align();
     return checked_add(reader.byte_position(), 4, end) && end <= bytes.size();
@@ -417,7 +421,8 @@ struct ParseState {
     }
 
     std::size_t tags_begin{};
-    if (!movie_header_end(input.first(declared), tags_begin) ||
+    GfxFrameRect frame_rect{};
+    if (!movie_header_end(input.first(declared), tags_begin, frame_rect) ||
         tags_begin > declared) {
         error = make_error(
             GfxDocumentErrorCode::invalid_movie_header,
@@ -432,6 +437,7 @@ struct ParseState {
     tree.version = input[3];
     tree.declared_length = declared;
     tree.physical_size = input.size();
+    tree.frame_rect = frame_rect;
     tree.movie_header.assign(
         input.begin(), input.begin() + static_cast<std::ptrdiff_t>(tags_begin));
     tree.trailing.assign(
@@ -542,28 +548,31 @@ enum class CharacterDefinitionState : std::uint8_t {
 [[nodiscard]] bool skip_matrix(
     std::span<const std::uint8_t> body,
     std::size_t& cursor,
-    GfxMatrixTranslation& translation) noexcept {
+    GfxMatrix& matrix) noexcept {
     BitReader reader(body, cursor);
     std::uint32_t present{};
     std::uint32_t bit_count{};
-    std::int32_t ignored{};
     if (!reader.read(1, present)) return false;
-    if (present != 0 &&
-        (!reader.read(5, bit_count) || bit_count > 31 ||
-            !reader.read_signed(bit_count, ignored) ||
-            !reader.read_signed(bit_count, ignored))) {
-        return false;
+    matrix.has_scale = present != 0;
+    if (matrix.has_scale) {
+        if (!reader.read(5, bit_count) || bit_count > 31 ||
+            !reader.read_signed(bit_count, matrix.scale_x) ||
+            !reader.read_signed(bit_count, matrix.scale_y)) {
+            return false;
+        }
     }
     if (!reader.read(1, present)) return false;
-    if (present != 0 &&
-        (!reader.read(5, bit_count) || bit_count > 31 ||
-            !reader.read_signed(bit_count, ignored) ||
-            !reader.read_signed(bit_count, ignored))) {
-        return false;
+    matrix.has_rotate = present != 0;
+    if (matrix.has_rotate) {
+        if (!reader.read(5, bit_count) || bit_count > 31 ||
+            !reader.read_signed(bit_count, matrix.rotate_skew_0) ||
+            !reader.read_signed(bit_count, matrix.rotate_skew_1)) {
+            return false;
+        }
     }
     if (!reader.read(5, bit_count) || bit_count > 31 ||
-        !reader.read_signed(bit_count, translation.x) ||
-        !reader.read_signed(bit_count, translation.y)) {
+        !reader.read_signed(bit_count, matrix.translate_x) ||
+        !reader.read_signed(bit_count, matrix.translate_y)) {
         return false;
     }
     reader.align();
@@ -675,7 +684,10 @@ enum class CharacterDefinitionState : std::uint8_t {
     }
     if ((flags & 0x04U) != 0) {
         placement.has_matrix = true;
-        if (!skip_matrix(body, cursor, placement.translation)) return false;
+        if (!skip_matrix(body, cursor, placement.matrix)) return false;
+        placement.translation = {
+            placement.matrix.translate_x,
+            placement.matrix.translate_y};
     }
     if ((flags & 0x08U) != 0 && !skip_color_transform(body, cursor)) return false;
     if ((flags & 0x10U) != 0) {
@@ -732,7 +744,10 @@ enum class CharacterDefinitionState : std::uint8_t {
     }
     if ((flags & 0x04U) != 0) {
         placement.has_matrix = true;
-        if (!skip_matrix(body, cursor, placement.translation)) return false;
+        if (!skip_matrix(body, cursor, placement.matrix)) return false;
+        placement.translation = {
+            placement.matrix.translate_x,
+            placement.matrix.translate_y};
     }
     if ((flags & 0x08U) != 0 && !skip_color_transform(body, cursor)) return false;
     if ((flags & 0x10U) != 0) {
@@ -1327,6 +1342,11 @@ std::size_t GfxDocument::physical_size() const noexcept {
 
 std::size_t GfxDocument::trailing_size() const noexcept {
     return storage_ != nullptr ? storage_->tree.trailing.size() : 0;
+}
+
+std::optional<GfxFrameRect> GfxDocument::frame_rect() const noexcept {
+    if (storage_ == nullptr) return std::nullopt;
+    return storage_->tree.frame_rect;
 }
 
 std::uint64_t GfxDocument::revision() const noexcept {

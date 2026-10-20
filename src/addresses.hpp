@@ -4,6 +4,7 @@
 
 #include "runtime.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -214,6 +215,102 @@ struct GameAddresses {
         bool require_custom_text) const noexcept;
 };
 
+// A deliberately partial snapshot of entry points that may be detoured by a
+// third-party menu mod before ERNativeUI performs its complete late address
+// resolution. It also retains the viewport Selector::select entry used by
+// custom tabs, but that optional seam is validated independently and is not
+// part of the ordinary row-hook aggregate. This is not a complete installable
+// GameAddresses value.
+struct PreservedSharedMenuAddresses {
+    static constexpr std::size_t entry_prefix_size = 16U;
+
+    std::uint8_t* game_image_base{};
+    std::size_t game_image_size{};
+    GameOptionsHandlerFn game_options_handler{};
+    SubHandlerFn sub_handler{};
+    TextResolverFn text_resolver{};
+    SliderRefreshFn slider_refresh{};
+    void* selector_select{};
+    std::array<unsigned char, entry_prefix_size>
+        game_options_pristine_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        sub_pristine_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        text_pristine_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        slider_pristine_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        selector_select_pristine_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        game_options_approved_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        sub_approved_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        text_approved_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        slider_approved_prefix{};
+    std::array<unsigned char, entry_prefix_size>
+        selector_select_approved_prefix{};
+    std::array<const void*, 3> approved_detour_targets{};
+    const void* slider_approved_detour_target{};
+    const void* selector_select_approved_detour_target{};
+    bool required_entries_approved{};
+    bool slider_entry_approved{};
+    bool selector_select_entry_approved{};
+
+    [[nodiscard]] bool required_complete() const noexcept {
+        return game_image_base && game_image_size != 0U &&
+            game_options_handler && sub_handler && text_resolver;
+    }
+};
+
+// Required shared entry points are installed at separate times. Revalidate
+// only the entry about to be patched: an earlier successful ERNativeUI hook
+// has legitimately changed its own entry by the time the next one is ready.
+enum class PreservedSharedMenuEntry : std::uint8_t {
+    game_options,
+    sub_handler,
+    text_resolver,
+    slider_refresh,
+    selector_select,
+};
+
+// Loader-lock-safe exact-RVA record used synchronously by the host's
+// DLL_PROCESS_ATTACH path. A recognized image identity supplies both the
+// addresses and their canonical pristine prefixes, so this also succeeds when
+// a supported earlier DLL has already detoured the live entries. This performs
+// only bounded PE reads, pointer arithmetic, and fixed-size copies: no
+// allocation, logging, scanning, waiting, hook installation, or Win32 loader
+// operation occurs inside it.
+[[nodiscard]] bool capture_preserved_shared_menu_addresses_at_attach(
+    HMODULE game_module,
+    PreservedSharedMenuAddresses& output) noexcept;
+
+// Exact-profile, constant-time snapshot used before asynchronously loaded
+// third-party hooks can replace the shared prologues. The three required
+// entries must all validate; SliderCtrl refresh remains optional.
+[[nodiscard]] bool capture_preserved_shared_menu_addresses(
+    const ModuleView& game,
+    PreservedSharedMenuAddresses& output) noexcept;
+
+// Rechecks that every approved live prefix is unchanged. The runtime calls
+// this immediately before hook creation because full address resolution and
+// feature preparation may take long enough for another worker to mutate an
+// entry after the first compatibility decision.
+[[nodiscard]] bool revalidate_preserved_shared_menu_addresses(
+    const ModuleView& game,
+    const PreservedSharedMenuAddresses& preserved) noexcept;
+
+// Exact-profile check for one shared entry. This verifies the fixed RVA,
+// canonical pristine identity, approved live prefix, and (for a chained
+// FF 25 detour) the approved indirect destination. SliderCtrl refresh remains
+// optional overall, but must have been approved when explicitly requested.
+// Call this immediately before creating the corresponding hook.
+[[nodiscard]] bool revalidate_preserved_shared_menu_entry(
+    const ModuleView& game,
+    const PreservedSharedMenuAddresses& preserved,
+    PreservedSharedMenuEntry entry) noexcept;
+
 bool resolve_game_addresses(
     const ModuleView& game,
     GameAddresses& output,
@@ -223,6 +320,7 @@ bool resolve_game_addresses(
     bool require_native_back,
     bool require_popup_choices,
     bool require_text_inputs,
-    bool require_custom_text) noexcept;
+    bool require_custom_text,
+    const PreservedSharedMenuAddresses* preserved_shared = nullptr) noexcept;
 
 } // namespace erui::native

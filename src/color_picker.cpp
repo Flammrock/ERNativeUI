@@ -1032,8 +1032,64 @@ bool read_property_row_index(
 
 } // namespace
 
+bool capture_color_picker_visibility_at_process_attach(
+    void* game_image_base) noexcept {
+    // This function runs under the loader lock. It intentionally avoids
+    // ModuleView, pattern parsing, logging, allocation, and Win32 loader
+    // queries; the ordinary worker-side approval remains authoritative.
+    g_captured_visibility_approved.store(false, std::memory_order_release);
+    g_captured_visibility_ready.store(false, std::memory_order_release);
+    g_captured_visibility_owner = nullptr;
+    g_captured_visibility = {};
+
+    auto* const image_base =
+        static_cast<std::uint8_t*>(game_image_base);
+    if (!image_base) return false;
+
+    const auto* const dos =
+        reinterpret_cast<const IMAGE_DOS_HEADER*>(image_base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 ||
+        static_cast<std::uint64_t>(dos->e_lfanew) > UINT64_C(0x100000)) {
+        return false;
+    }
+    const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+        image_base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
+        nt->OptionalHeader.SizeOfImage < 0x1000U) {
+        return false;
+    }
+
+    const std::size_t image_size = nt->OptionalHeader.SizeOfImage;
+    const EldenRingBuild build = identify_elden_ring_build(
+        nt->FileHeader.TimeDateStamp, image_size);
+    const ColorPickerAddressProfile* const profile =
+        find_color_picker_address_profile(build);
+    if (!profile ||
+        profile->scaleform_visibility_setter_rva >= image_size ||
+        g_captured_visibility.bytes.size() >
+            image_size - profile->scaleform_visibility_setter_rva) {
+        return false;
+    }
+
+    CapturedVisibilityEntry captured{};
+    captured.address =
+        image_base + profile->scaleform_visibility_setter_rva;
+    captured.timestamp = nt->FileHeader.TimeDateStamp;
+    captured.image_size = image_size;
+    std::memcpy(
+        captured.bytes.data(),
+        captured.address,
+        captured.bytes.size());
+
+    g_captured_visibility = captured;
+    g_captured_visibility_ready.store(true, std::memory_order_release);
+    return true;
+}
+
 bool capture_color_picker_visibility_before_third_party_hooks(
-    const ModuleView& game) noexcept {
+    const ModuleView& game,
+    bool quiet) noexcept {
     g_captured_visibility_approved.store(false, std::memory_order_release);
     g_captured_visibility_ready.store(false, std::memory_order_release);
     g_captured_visibility_owner = nullptr;
@@ -1050,7 +1106,7 @@ bool capture_color_picker_visibility_before_third_party_hooks(
         !game.contains(entry, g_captured_visibility.bytes.size()) ||
         !game.matches(entry, kScaleformVisibilitySetterPattern)) {
         erui::detail::logf(
-            erui::LogLevel::warning,
+            quiet ? erui::LogLevel::verbose : erui::LogLevel::warning,
             "Color Picker visibility interface could not be captured before third-party hooks");
         return false;
     }
@@ -1064,7 +1120,7 @@ bool capture_color_picker_visibility_before_third_party_hooks(
         g_captured_visibility.bytes.size());
     g_captured_visibility_ready.store(true, std::memory_order_release);
     erui::detail::logf(
-        erui::LogLevel::info,
+        quiet ? erui::LogLevel::verbose : erui::LogLevel::info,
         "Captured Color Picker visibility interface before third-party hook installation");
     return true;
 }

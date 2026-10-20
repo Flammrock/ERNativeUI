@@ -65,7 +65,8 @@ enum {
     ERUI_STORAGE_IO_ERROR = 19u,
     ERUI_STORAGE_FORMAT_ERROR = 20u,
     ERUI_DUPLICATE_TAB_ID = 21u,
-    ERUI_TAB_LIMIT_REACHED = 22u
+    ERUI_TAB_LIMIT_REACHED = 22u,
+    ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED = 23u
 };
 
 typedef uint64_t ERUI_ProviderHandle;
@@ -120,7 +121,8 @@ enum {
     ERUI_CAP_STORAGE = UINT64_C(1) << 15,
     ERUI_CAP_NUMERIC_SLIDER = UINT64_C(1) << 16,
     ERUI_CAP_CUSTOM_SLIDER = UINT64_C(1) << 17,
-    ERUI_CAP_CUSTOM_TABS = UINT64_C(1) << 18
+    ERUI_CAP_CUSTOM_TABS = UINT64_C(1) << 18,
+    ERUI_CAP_TITLE_SCREEN_TEXT = UINT64_C(1) << 19
 };
 
 /*
@@ -140,6 +142,10 @@ enum {
 #define ERUI_CUSTOM_TAB_MAX_COUNT 1024u
 /* Maximum UTF-16 code units in a custom-tab title, excluding its terminator. */
 #define ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS 95u
+/* Maximum UTF-16 code units in one title-screen line. */
+#define ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS 255u
+/* Process-wide committed title-screen line ceiling in API 1.3. */
+#define ERUI_TITLE_SCREEN_TEXT_MAX_LINES 16u
 
 typedef uint32_t ERUI_TabIconFormat;
 enum {
@@ -1034,6 +1040,48 @@ typedef struct ERUI_TabDesc {
 } ERUI_TabDesc;
 
 /*
+ * API 1.3 title-screen text. Each successful call registers one line for the
+ * provider in one explicitly selected screen corner. Within each corner,
+ * calls made by one provider retain their call order; provider blocks are
+ * ordered by ascending root_priority, then provider_id, then the provider
+ * registration ordinal. The host copies text before add_title_screen_text
+ * returns. Text must be a single non-empty line:
+ * CR, LF, U+0085, U+2028, and U+2029 are rejected. A line may contain at most
+ * ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS UTF-16 code units. At most
+ * ERUI_TITLE_SCREEN_TEXT_MAX_LINES committed lines may exist process-wide. An
+ * add or commit that would exceed that limit returns
+ * ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED; abort the uncommitted draft.
+ *
+ * With ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR set, color supplies the line's
+ * opaque RGB color. Without it, the line inherits the native title-screen
+ * color and color's RGB channels are ignored. corner is mandatory and must
+ * be one of the four ERUI_TITLE_SCREEN_CORNER_* values; zero is deliberately
+ * invalid. color.reserved and every descriptor reserved field must be zero.
+ */
+typedef uint32_t ERUI_TitleScreenTextFlags;
+enum {
+    ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR = 1u << 0
+};
+
+/* Closed choices, not combinable bit flags. Zero is intentionally invalid. */
+typedef uint32_t ERUI_TitleScreenCorner;
+enum {
+    ERUI_TITLE_SCREEN_CORNER_TOP_LEFT = 1u,
+    ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT = 2u,
+    ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT = 3u,
+    ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT = 4u
+};
+
+typedef struct ERUI_TitleScreenTextDesc {
+    uint32_t size;
+    ERUI_TitleScreenTextFlags flags;
+    ERUI_Utf16View text;
+    ERUI_Color color;
+    ERUI_TitleScreenCorner corner;
+    uint32_t reserved[2];
+} ERUI_TitleScreenTextDesc;
+
+/*
  * The host copies label before add_input_section returns. Sections are
  * presentation groups shared by the native controller and keyboard/mouse
  * binding screens; their returned handles are valid only for this provider.
@@ -1584,6 +1632,16 @@ typedef struct ERUI_Api {
         ERUI_ProviderHandle provider,
         const ERUI_TabDesc* description,
         ERUI_PageHandle* out_page);
+    /*
+     * API 1.3 append-only title-screen text block. The host copies the
+     * descriptor and text synchronously before returning. This entry is
+     * present in every valid 1.3 table; clients must test
+     * ERUI_CAP_TITLE_SCREEN_TEXT before calling it because the host may
+     * expose the table while returning ERUI_NOT_SUPPORTED for this feature.
+     */
+    ERUI_Result (ERUI_CALL* add_title_screen_text)(
+        ERUI_ProviderHandle provider,
+        const ERUI_TitleScreenTextDesc* description);
 } ERUI_Api;
 
 /* Complete function-table prefix required by API 1.0 clients. */
@@ -1612,8 +1670,8 @@ typedef struct ERUI_Api {
  * 1.0, 1.1, and 1.2 prefixes and their size constants remain unchanged.
  */
 #define ERUI_API_V1_3_SIZE ((uint32_t)( \
-    offsetof(ERUI_Api, add_tab) + \
-    sizeof(((ERUI_Api*)0)->add_tab)))
+    offsetof(ERUI_Api, add_title_screen_text) + \
+    sizeof(((ERUI_Api*)0)->add_title_screen_text)))
 #define ERUI_API_CURRENT_SIZE ERUI_API_V1_3_SIZE
 
 typedef ERUI_Result (ERUI_CALL* ERUI_GetApiFn)(

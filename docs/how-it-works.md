@@ -97,6 +97,11 @@ title and optional 32x32 RGBA8 artwork; the host owns tab-strip navigation,
 overflow and native presentation. See
 [Custom Configuration tabs](guides/custom-tabs.md).
 
+API 1.3 can also copy provider version or status lines into an explicitly
+selected title-screen corner during startup registration. These lines have no
+runtime handle: they become part of the same all-or-nothing provider draft and
+remain fixed for the process.
+
 Mods declare as many logical rows as they need. At runtime ERNativeUI reads the
 available capacity of the concrete page and divides the logical content into
 physical slices. It supplies Next and Previous rows where necessary and uses
@@ -130,10 +135,11 @@ needed later.
 
 ERNativeUI's behavior comes from native game interfaces. At the validated
 Scaleform file-opening boundary, the host also parses the effective supported
-settings movies and completes missing row placements and widget presentation
-before Scaleform consumes them. This provides expanded ordinary-page capacity
-and the TextInput and ColorPicker presentation without installing loose
-ERNativeUI GFX files.
+settings and title movies before Scaleform consumes them. It completes missing
+settings-row placements and widget presentation, and inserts copied API 1.3
+title-screen lines into validated corner geometry. This provides expanded
+ordinary-page capacity, TextInput and ColorPicker presentation, and title text
+without installing loose ERNativeUI GFX files.
 
 The input may be vanilla or supplied by another mod. The transformer validates
 the relevant structure, preserves unrelated definitions, serializes and
@@ -141,6 +147,16 @@ reparses its result, and publishes replacement bytes only after every check
 succeeds. An already-complete movie is unchanged. An unsupported or
 unrecognized layout continues with its original bytes rather than a guessed
 edit.
+
+For bottom-right title text, a startup Steam query distinguishes a currently
+installed Shadow of the Erdtree DLC line from the empty base-game placement.
+Installed or unknown state reserves the native DLC line and authored gap;
+known absence allows custom lines to use that otherwise empty vertical space
+only when the effective `05_000_title.gfx` exactly matches the validated
+Elden Ring 2.7.1.0 / App 1.17.1 native profile. A structurally compatible
+modified or otherwise unrecognized movie keeps the DLC row and gap reserved;
+an unsupported title hierarchy continues unchanged. The transformer does not
+change the native DLC field itself.
 
 Pagination still reads the resulting live capacity and adapts to rows already
 materialized by the game or another supported hook. See the

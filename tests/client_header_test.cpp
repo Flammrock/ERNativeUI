@@ -1,7 +1,9 @@
 #include <ernativeui/ERNativeUI.hpp>
 
 #include "test_assertions.hpp"
+#include <array>
 #include <iterator>
+#include <string>
 #include <type_traits>
 
 namespace {
@@ -67,6 +69,7 @@ int main() {
     static_assert(sizeof(ERUI_ProviderDesc) == 56);
     static_assert(sizeof(ERUI_TabIconDesc) == 32);
     static_assert(sizeof(ERUI_TabDesc) == 64);
+    static_assert(sizeof(ERUI_TitleScreenTextDesc) == 40);
     static_assert(sizeof(ERUI_ButtonDesc) == 64);
     static_assert(sizeof(ERUI_ToggleDesc) == 64);
     static_assert(sizeof(ERUI_SliderDesc) == 80);
@@ -95,20 +98,40 @@ int main() {
     static_assert(sizeof(ERUI_PageTitleFormatContext) == 56);
     static_assert(sizeof(ERUI_PagePresentationDesc) == 64);
     static_assert(sizeof(ERUI_AlertDesc) == 48);
-    static_assert(sizeof(ERUI_Api) == 376);
+    static_assert(sizeof(ERUI_Api) == 384);
     static_assert(ERUI_API_V1_0_SIZE == 128);
     static_assert(ERUI_API_V1_1_SIZE == 320);
     static_assert(ERUI_API_V1_2_SIZE == 368);
-    static_assert(ERUI_API_V1_3_SIZE == 376);
+    static_assert(ERUI_API_V1_3_SIZE == 384);
     static_assert(offsetof(ERUI_Api, add_tab) == 368);
+    static_assert(offsetof(ERUI_Api, add_title_screen_text) == 376);
     static_assert(offsetof(ERUI_TabIconDesc, pixels) == 16);
     static_assert(offsetof(ERUI_TabDesc, preferred_order) == 40);
     static_assert(offsetof(ERUI_TabDesc, icon) == 48);
+    static_assert(offsetof(ERUI_TitleScreenTextDesc, text) == 8);
+    static_assert(offsetof(ERUI_TitleScreenTextDesc, color) == 24);
+    static_assert(offsetof(ERUI_TitleScreenTextDesc, corner) == 28);
+    static_assert(offsetof(ERUI_TitleScreenTextDesc, reserved) == 32);
     static_assert(ERUI_CUSTOM_TAB_MAX_COUNT == 1024);
     static_assert(ERUI_TAB_LIMIT_REACHED == 22);
+    static_assert(ERUI_TITLE_SCREEN_TEXT_MAX_LINES == 16);
+    static_assert(ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED == 23);
+    static_assert(ERUI_CAP_TITLE_SCREEN_TEXT == (UINT64_C(1) << 19));
+    static_assert(ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR == (1u << 0));
+    static_assert(ERUI_TITLE_SCREEN_CORNER_TOP_LEFT == 1u);
+    static_assert(ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT == 2u);
+    static_assert(ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT == 3u);
+    static_assert(ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT == 4u);
     static_assert(ERUI_TAB_ICON_FORMAT_RGBA8 == 1);
+    static_assert(ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS == 255);
     static_assert(static_cast<ERUI_TabIconFormat>(
         erui::TabIconFormat::rgba8) == ERUI_TAB_ICON_FORMAT_RGBA8);
+    static_assert(static_cast<ERUI_TitleScreenCorner>(
+        erui::TitleScreenCorner::top_left) ==
+        ERUI_TITLE_SCREEN_CORNER_TOP_LEFT);
+    static_assert(static_cast<ERUI_TitleScreenCorner>(
+        erui::TitleScreenCorner::bottom_right) ==
+        ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT);
     static_assert(std::is_trivially_copyable<ERUI_Api>::value);
     static_assert(std::is_pointer<erui::ButtonCallback>::value);
     static_assert(std::is_pointer<erui::AlertCallback>::value);
@@ -121,6 +144,32 @@ int main() {
         ERUI_ALERT_BUTTONS_DISMISS_ONLY);
     static_assert(static_cast<std::uint32_t>(erui::AlertPlacement::center) ==
         ERUI_ALERT_PLACEMENT_CENTER);
+
+    const std::wstring exact_title_line(
+        ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS, L'X');
+    ERUI_TEST_CHECK(erui::detail::valid_title_screen_text(exact_title_line));
+    ERUI_TEST_CHECK(erui::detail::valid_title_screen_corner(
+        erui::TitleScreenCorner::top_left));
+    ERUI_TEST_CHECK(erui::detail::valid_title_screen_corner(
+        erui::TitleScreenCorner::top_right));
+    ERUI_TEST_CHECK(erui::detail::valid_title_screen_corner(
+        erui::TitleScreenCorner::bottom_left));
+    ERUI_TEST_CHECK(erui::detail::valid_title_screen_corner(
+        erui::TitleScreenCorner::bottom_right));
+    ERUI_TEST_CHECK(!erui::detail::valid_title_screen_corner(
+        static_cast<erui::TitleScreenCorner>(0u)));
+    ERUI_TEST_CHECK(!erui::detail::valid_title_screen_corner(
+        static_cast<erui::TitleScreenCorner>(5u)));
+    ERUI_TEST_CHECK(!erui::detail::valid_title_screen_text(
+        exact_title_line + L"X"));
+    for (const wchar_t separator : {
+             L'\r', L'\n', static_cast<wchar_t>(0x0085u),
+             static_cast<wchar_t>(0x2028u),
+             static_cast<wchar_t>(0x2029u)}) {
+        const std::array<wchar_t, 3> separated{L'A', separator, L'B'};
+        ERUI_TEST_CHECK(!erui::detail::valid_title_screen_text(
+            std::wstring_view(separated.data(), separated.size())));
+    }
     static_assert(static_cast<std::uint32_t>(erui::AlertResponse::dismissed) ==
         ERUI_ALERT_RESPONSE_DISMISSED);
     static_assert(!std::is_default_constructible<erui::Connection>::value);

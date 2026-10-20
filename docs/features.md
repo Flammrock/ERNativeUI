@@ -13,7 +13,7 @@ contracts.
 
 | Label | Meaning |
 |---|---|
-| **Current API 1.3** | The current client contract. It adds custom top-level Configuration tabs. |
+| **Current API 1.3** | The current client contract. It adds custom top-level Configuration tabs and title-screen status text. |
 | **Supported APIs 1.0, 1.1, and 1.2** | Frozen earlier contracts. Already-compiled clients remain supported by compatible 1.x hosts. |
 | **Future research** | Not implemented in the public API. Do not design a client around it yet. |
 
@@ -72,20 +72,21 @@ frozen API 1.1 prefix.
 | Feature | What the player sees | Minimum API and capability | GFX presentation | Important limits and examples |
 |---|---|---|---|---|
 | [Custom Configuration tabs](guides/custom-tabs.md) | A client-owned title and optional custom icon in the top-level System tab strip, with native selection, overflow and page content. | 1.3; `ERUI_CAP_CUSTOM_TABS` | No. | Exact 32x32 RGBA8 icon or host fallback; 1,024 committed custom tabs process-wide; returned pages use ordinary controls and automatic pagination. [Screenshot helper](../examples/showcase_screenshot_helper/README.md); [stress example](../examples/custom_tabs_stress/README.md). |
+| [Title-screen status text](guides/title-screen-text.md) | One or more copied provider status/version lines in an explicitly selected screen corner, optionally using an opaque RGB color. | 1.3; `ERUI_CAP_TITLE_SCREEN_TEXT` | Runtime transformation of the effective title GFX. | Mandatory top-left, top-right, bottom-left, or bottom-right corner; 1..255 UTF-16 code units per line; 16 committed lines process-wide; inherited native color or explicit RGB. [Example](../examples/title_screen_text/README.md). |
 
-The API 1.3 C function table appends `add_tab` after the frozen API 1.2 prefix.
-Capability checks describe the negotiated host surface. Custom tabs remain
-independently game-build-gated: an API 1.3 connection can succeed while
-`ERUI_CAP_CUSTOM_TABS` is absent when the required native boundary has not
-been validated.
+The API 1.3 C function table appends `add_tab` and
+`add_title_screen_text` after the frozen API 1.2 prefix. Capability checks
+describe the negotiated host surface. Custom tabs and title-screen text remain
+independently game-build-gated: an API 1.3 connection can succeed while either
+capability is absent when its required native boundary has not been validated.
 
 ## Runtime GFX completion
 
-ERNativeUI intercepts the two supported settings movies at their validated
-Scaleform file-opening boundary. It structurally validates the effective
-bytes, adds only missing row placements and widget presentation, serializes
-and reparses the result, then publishes it in memory. No loose ERNativeUI GFX
-files are normally required.
+ERNativeUI intercepts the supported settings and title movies at their
+validated Scaleform file-opening boundary. It structurally validates the
+effective bytes, adds only missing row placements, widget presentation, and
+registered title-screen fields, serializes and reparses the result, then
+publishes it in memory. No loose ERNativeUI GFX files are normally required.
 
 The ordinary target capacities are 13 rows for Game, Camera, Display, Sound,
 Keyboard/Mouse, and Graphics, and 10 for Network so its native restriction
@@ -131,8 +132,10 @@ coexistence, and validation requirements may move to a later API.
   and ColorPicker overlaps.
 - Seamless Co-op 2.0.1 was live-validated on Elden Ring executable 2.7.0.0,
   with no incompatibility observed for that exact combination.
-- DLC compatibility has not been live-validated; no incompatibility is
-  currently claimed or ruled out.
+- Elden Ring 2.7.1.0 title layouts have been observed live both without and
+  with Shadow of the Erdtree. Final live A/B validation of the new adaptive
+  title-spacing branch is still pending; broader DLC compatibility is not
+  inferred from those title-screen observations.
 
 See [Game and mod compatibility](COMPATIBILITY.md) for tested combinations and
 the reporting checklist. The exact ownership and directional API 1.0

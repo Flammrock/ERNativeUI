@@ -85,13 +85,14 @@ player setup unless their demonstrations are wanted.
 ## 4. Runtime GFX presentation
 
 There is no separate GFX installation step. ERNativeUI completes supported
-settings movies in memory while Elden Ring loads them. This supplies expanded
-ordinary-page capacity and the TextInput and ColorPicker presentation without
-a loose `menu` directory or a Mod Engine 2 mod-loader entry.
+settings and title movies in memory while Elden Ring loads them. This supplies
+expanded ordinary-page capacity, TextInput and ColorPicker presentation, and
+registered API 1.3 title-screen text without a loose `menu` directory or a Mod
+Engine 2 mod-loader entry.
 
-If another mod supplies one of the same settings movies, ERNativeUI supports
-it when the relevant layout is structurally compatible. Unrecognized layouts
-are left unchanged. Read
+If another mod supplies one of the same movies, ERNativeUI supports it when
+the relevant layout is structurally compatible. Unrecognized layouts are left
+unchanged. Read
 [Runtime GFX completion and presentation](../guides/presentation-and-gfx.md)
 for the exact behavior.
 
@@ -157,8 +158,9 @@ content to display.
 - Seamless Co-op 2.0.1 was live-tested with Elden Ring 2.7.0.0, with no
   incompatibility observed for that exact combination. See
   [Game and mod compatibility](../COMPATIBILITY.md#seamless-co-op).
-- Shadow of the Erdtree remains explicitly unverified until its live test
-  matrix is completed.
+- Elden Ring 2.7.1.0 title layouts were observed with Shadow of the Erdtree
+  both absent and present. Final live A/B validation of API 1.3's adaptive
+  title spacing is still pending; see the compatibility guide for scope.
 - Host and committed client DLLs must remain loaded until process exit.
 - If another mod supplies the same GFX path, its mod-loader order still decides
   which complete file reaches the game. ERNativeUI then completes that file

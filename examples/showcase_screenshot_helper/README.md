@@ -1,9 +1,10 @@
 # Showcase Screenshot Helper
 
 `ShowcaseScreenshotHelper.dll` creates one small, predictable view for taking
-ERNativeUI documentation screenshots. It can isolate one control or register
-one example custom tab. It is also a compact example of reading a
-client-specific INI through ERNativeUI's host-owned Storage service.
+ERNativeUI documentation screenshots. It can isolate one control, register
+one example custom tab, or place deterministic example text around the title
+screen. It is also a compact example of reading a client-specific INI through
+ERNativeUI's host-owned Storage service.
 
 The helper is intentionally English-only. It never queries the game language
 and all client-provided labels are fixed English strings. Set Elden Ring to
@@ -41,16 +42,20 @@ The accepted values are:
 | `text-input` | Empty **Player Name** with **Enter a name** placeholder |
 | `color-picker` | **Accent Color**, initially RGB `(171, 125, 99)` |
 | `custom-tab` | Top-level **My Mod Settings** tab with a generated `rgb(107, 100, 80)` triangle icon and one toggle |
+| `title-screen-text` | One labeled line in each title-screen corner: one native color and three subdued custom RGB colors |
 
 Restart Elden Ring after changing the mode. Menu topology is registered once
 during startup, so editing the file while the game is running cannot replace
 the current page. For the control modes, open **System -> Game Options ->
 _Control_ Showcase** to see the selected control by itself. For `custom-tab`,
-open **System** and select the top-level **My Mod Settings** tab.
+open **System** and select the top-level **My Mod Settings** tab. For
+`title-screen-text`, remain on the title screen after startup; this mode does
+not add a System-menu page.
 
 This build uses the current API 1.3 headers, so every mode requires a host
 exposing API 1.3. The `custom-tab` mode additionally requires the optional
 custom-tab capability on a supported game executable.
+The `title-screen-text` mode requires the title-screen-text capability.
 For matching before/after screenshots, press Right once on **Camera
 Distance** to change `x0.6` to `x0.7`. Press Left once on **Impossible
 Values** to change **hello** to `1s`.
@@ -58,6 +63,21 @@ Values** to change **hello** to `1s`.
 An absent or unreadable mode safely falls back to `button`. If the INI or its
 `mode` key is missing, the example attempts to create the default entry. An
 unknown value is left untouched so a spelling mistake remains visible.
+
+## Capture the title-screen text image
+
+Set `mode=title-screen-text`, then launch Elden Ring and remain on its title
+screen. For the canonical documentation image, disable
+`TitleScreenTextExample.dll`, Solid Uncapper, and every other DLL or mod that
+injects title-screen text. Load only ERNativeUI and this helper unless another
+dependency is required to start the game. Capture the complete game frame as:
+
+```text
+docs/assets/images/title-screen/title-screen-corners.png
+```
+
+The four labels identify their requested corners and colors, so no interaction
+is needed before taking the screenshot.
 
 ## Capture and generate the slider images
 

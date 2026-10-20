@@ -384,7 +384,39 @@ _Static_assert(ERUI_API_V1_2_SIZE == 368u,
     "API 1.2 prefix size drift");
 _Static_assert(offsetof(ERUI_Api, add_tab) == 368u,
     "custom-tab block is not append-only");
-_Static_assert(ERUI_API_V1_3_SIZE == 376u,
+_Static_assert(offsetof(ERUI_Api, add_title_screen_text) == 376u,
+    "title-screen text block is not append-only");
+_Static_assert(ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED == 23u,
+    "title-screen text limit result drift");
+_Static_assert(ERUI_CAP_TITLE_SCREEN_TEXT == (UINT64_C(1) << 19),
+    "title-screen text capability bit drift");
+_Static_assert(ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR == (1u << 0),
+    "title-screen text custom-color flag drift");
+_Static_assert(ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS == 255u,
+    "title-screen text length limit drift");
+_Static_assert(ERUI_TITLE_SCREEN_TEXT_MAX_LINES == 16u,
+    "title-screen text line limit drift");
+_Static_assert(sizeof(ERUI_TitleScreenTextDesc) == 40u,
+    "title-screen text descriptor size drift");
+_Static_assert(offsetof(ERUI_TitleScreenTextDesc, flags) == 4u,
+    "title-screen text flags offset drift");
+_Static_assert(offsetof(ERUI_TitleScreenTextDesc, text) == 8u,
+    "title-screen text view offset drift");
+_Static_assert(offsetof(ERUI_TitleScreenTextDesc, color) == 24u,
+    "title-screen text color offset drift");
+_Static_assert(offsetof(ERUI_TitleScreenTextDesc, corner) == 28u,
+    "title-screen text corner offset drift");
+_Static_assert(offsetof(ERUI_TitleScreenTextDesc, reserved) == 32u,
+    "title-screen text reserved offset drift");
+_Static_assert(ERUI_TITLE_SCREEN_CORNER_TOP_LEFT == 1u,
+    "top-left title-screen corner drift");
+_Static_assert(ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT == 2u,
+    "top-right title-screen corner drift");
+_Static_assert(ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT == 3u,
+    "bottom-left title-screen corner drift");
+_Static_assert(ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT == 4u,
+    "bottom-right title-screen corner drift");
+_Static_assert(ERUI_API_V1_3_SIZE == 384u,
     "API 1.3 prefix size drift");
 _Static_assert(ERUI_API_CURRENT_SIZE == ERUI_API_V1_3_SIZE,
     "current API size does not select API 1.3");

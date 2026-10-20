@@ -172,6 +172,10 @@ options, screenshots, and links to its native implementation research.
 
 - Give a mod its own top-level Configuration tab with a localized title and
   custom RGBA8 icon. [Learn about custom tabs](docs/guides/custom-tabs.md).
+- Add copied version or status lines to any title-screen corner, using Elden
+  Ring's native text color or an explicit RGB color.
+  [Learn about title-screen text](docs/guides/title-screen-text.md), then see
+  the [buildable example](examples/title_screen_text/README.md).
 - Add ordinary rows to supported built-in Configuration pages, including
   Game Options, Camera Options, Display, Sound, Network, Keyboard/Mouse, and
   Graphics. [Learn about menus and pages](docs/guides/menus-and-pages.md).
@@ -232,8 +236,9 @@ MSVC, clang-cl, and MinGW-w64 client mods can use the same stable host ABI.
 - Solid Uncapper coexistence has a documented load order and tested matrix.
 - Seamless Co-op 2.0.1 was live-tested with the Elden Ring 2.7.0.0 reference
   executable, with no incompatibility observed for that exact combination.
-- Shadow of the Erdtree remains explicitly unverified until its live matrix
-  is completed.
+- Elden Ring 2.7.1.0 title layouts were observed with Shadow of the Erdtree
+  both absent and present. Final live A/B validation of API 1.3's adaptive
+  title spacing is still pending; see the compatibility guide for scope.
 - Host and committed client DLLs must remain loaded until process exit.
 
 See [Game and mod compatibility](docs/COMPATIBILITY.md) for exact tested

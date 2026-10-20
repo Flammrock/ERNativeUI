@@ -28,6 +28,7 @@ enum class ShowcaseMode {
     text_input,
     color_picker,
     custom_tab,
+    title_screen_text,
 };
 
 struct ModeDefinition {
@@ -36,7 +37,7 @@ struct ModeDefinition {
     const wchar_t* page_title;
 };
 
-constexpr std::array<ModeDefinition, 11> kModes{{
+constexpr std::array<ModeDefinition, 12> kModes{{
     {"button", ShowcaseMode::button, L"Button Showcase"},
     {"submenu", ShowcaseMode::submenu, L"Submenu Showcase"},
     {"toggle", ShowcaseMode::toggle, L"Toggle Showcase"},
@@ -50,6 +51,8 @@ constexpr std::array<ModeDefinition, 11> kModes{{
     {"text-input", ShowcaseMode::text_input, L"TextInput Showcase"},
     {"color-picker", ShowcaseMode::color_picker, L"ColorPicker Showcase"},
     {"custom-tab", ShowcaseMode::custom_tab, L"My Mod Settings"},
+    {"title-screen-text", ShowcaseMode::title_screen_text,
+        L"Title-Screen Text Showcase"},
 }};
 
 constexpr std::array<std::wstring_view, 4> kQualityValues{
@@ -339,7 +342,46 @@ void add_selected_control(
     case ShowcaseMode::custom_tab:
         // Registered directly by add_custom_tab_showcase().
         break;
+
+    case ShowcaseMode::title_screen_text:
+        // Registered directly by add_title_screen_text_showcase().
+        break;
     }
+}
+
+void add_title_screen_text_showcase(erui::Menu& menu) noexcept
+{
+    if (!menu.supports(erui::Capability::title_screen_text)) {
+        debug(
+            L"The title-screen-text capability is unavailable for this host.");
+        return;
+    }
+
+    // One line deliberately omits a color so the screenshot also documents
+    // Elden Ring's native presentation. The other colors are subdued enough
+    // to remain legible against the title screen without looking like debug
+    // overlays. Fixed text and RGB values keep canonical screenshots stable.
+    menu.add_title_screen_text(
+        erui::TitleScreenCorner::top_left,
+        {L"Top left - native color"});
+    menu.add_title_screen_text(
+        erui::TitleScreenCorner::top_right,
+        {
+            L"Top right - muted gold",
+            erui::Color{216U, 167U, 103U},
+        });
+    menu.add_title_screen_text(
+        erui::TitleScreenCorner::bottom_left,
+        {
+            L"Bottom left - pale blue",
+            erui::Color{132U, 168U, 192U},
+        });
+    menu.add_title_screen_text(
+        erui::TitleScreenCorner::bottom_right,
+        {
+            L"Bottom right - soft rose",
+            erui::Color{190U, 128U, 142U},
+        });
 }
 
 void add_custom_tab_showcase(erui::Menu& menu) noexcept
@@ -390,6 +432,10 @@ DWORD WINAPI initialize(void*) noexcept
 
             if (mode == ShowcaseMode::custom_tab) {
                 add_custom_tab_showcase(menu);
+                return;
+            }
+            if (mode == ShowcaseMode::title_screen_text) {
+                add_title_screen_text_showcase(menu);
                 return;
             }
 

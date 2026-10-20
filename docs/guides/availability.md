@@ -29,6 +29,7 @@ erui::Capability::color_picker
 erui::Capability::numeric_slider
 erui::Capability::custom_slider
 erui::Capability::custom_tabs
+erui::Capability::title_screen_text
 ```
 
 Check the `ConnectionResult` before reading its `Connection`, then use
@@ -86,9 +87,10 @@ Here, `menu` has type `erui::Menu` and `registration` has type
 The current C++17 wrapper negotiates API 1.3 as one complete function-table
 contract. Most capabilities describe always-present parts of that table, but
 some native integrations remain independently gated. In particular, a valid
-connection can omit `Capability::custom_tabs` when the installed game build
-has not passed the required native validation. Check the capability before
-calling `Menu::add_tab`.
+connection can omit `Capability::custom_tabs` or
+`Capability::title_screen_text` when the installed game build has not passed
+the corresponding native validation. Check the capability before calling
+`Menu::add_tab` or `Menu::add_title_screen_text`.
 
 Prefer `supports(erui::Capability::...)` over comparing API version numbers.
 The capability states the requirement directly.
@@ -97,8 +99,8 @@ The capability states the requirement directly.
 
 A capability describes the public DLL interface. It does not guarantee that:
 
-- the effective settings GFX retains a structure supported by the runtime
-  transformer;
+- the effective settings or title GFX retains a structure supported by the
+  runtime transformer;
 - a specific Elden Ring executable is compatible with the current host;
 - every native address required by the registered menu can be resolved; or
 - another mod has not introduced an incompatible hook.

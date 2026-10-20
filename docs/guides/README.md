@@ -15,6 +15,7 @@ reference.
 |---|---|
 | Add rows, submenus, built-in destinations, or paginated pages | [Menus, pages, and pagination](menus-and-pages.md) |
 | Give my mod a top-level Configuration tab and custom icon | [Custom Configuration tabs](custom-tabs.md) |
+| Add version or status text to a title-screen corner | [Title-screen text](title-screen-text.md) |
 | Choose and configure a settings control | [Settings controls](controls/README.md) |
 | Check whether the connected host supports a feature | [Availability and capabilities](availability.md) |
 | Show a native message or confirmation dialog | [Native dialogs](native-dialogs.md) |

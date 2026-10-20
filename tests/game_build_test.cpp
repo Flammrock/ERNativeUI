@@ -15,6 +15,18 @@ bool same_profile(
 }
 
 bool same_profile(
+    const erui::native::SharedMenuAddressProfile& left,
+    const erui::native::SharedMenuAddressProfile& right) noexcept {
+    return left.build == right.build &&
+        left.game_options_handler_rva ==
+            right.game_options_handler_rva &&
+        left.sub_handler_rva == right.sub_handler_rva &&
+        left.text_resolver_rva == right.text_resolver_rva &&
+        left.slider_refresh_rva == right.slider_refresh_rva &&
+        left.selector_select_rva == right.selector_select_rva;
+}
+
+bool same_profile(
     const erui::native::TextInputAddressProfile& left,
     const erui::native::TextInputAddressProfile& right) noexcept {
     return left.build == right.build &&
@@ -159,6 +171,24 @@ int main() {
         erui::native::CoreUiAddressProfile{
             EldenRingBuild::v2_7_1_0, 0xD81600}));
 
+    const auto* const shared_270 =
+        erui::native::find_shared_menu_address_profile(
+            EldenRingBuild::v2_7_0_0);
+    const auto* const shared_271 =
+        erui::native::find_shared_menu_address_profile(
+            EldenRingBuild::v2_7_1_0);
+    ERUI_TEST_CHECK(shared_270 && shared_271);
+    ERUI_TEST_CHECK(same_profile(
+        *shared_270,
+        erui::native::SharedMenuAddressProfile{
+            EldenRingBuild::v2_7_0_0,
+            0x958C50, 0x95A5D0, 0x7633D0, 0x74FA20, 0x739B90}));
+    ERUI_TEST_CHECK(same_profile(
+        *shared_271,
+        erui::native::SharedMenuAddressProfile{
+            EldenRingBuild::v2_7_1_0,
+            0x959DF0, 0x95B770, 0x764220, 0x74FA20, 0x739B90}));
+
     const auto* const text_270 =
         erui::native::find_text_input_address_profile(
             EldenRingBuild::v2_7_0_0);
@@ -233,6 +263,9 @@ int main() {
 
     ERUI_TEST_CHECK(
         erui::native::find_core_ui_address_profile(
+            EldenRingBuild::unsupported) == nullptr);
+    ERUI_TEST_CHECK(
+        erui::native::find_shared_menu_address_profile(
             EldenRingBuild::unsupported) == nullptr);
     ERUI_TEST_CHECK(
         erui::native::find_text_input_address_profile(

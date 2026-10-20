@@ -159,11 +159,12 @@ compatibility result.
 
 ## Modified GFX and other asset mods
 
-ERNativeUI transforms the effective supported settings movies in memory after
-the game or mod loader selects them. No ERNativeUI loose GFX replacement is
-normally required. A third-party replacement remains compatible when its
-relevant panel and widget structure can be validated; ERNativeUI adds only the
-missing supported rows and presentation.
+ERNativeUI transforms the effective supported settings and title movies in
+memory after the game or mod loader selects them. No ERNativeUI loose GFX
+replacement is normally required. A third-party replacement remains
+compatible when its relevant panel, widget, or title-information structure can
+be validated; ERNativeUI adds only the missing supported rows and
+presentation.
 
 Mod Engine 2 can still expose only one loose replacement for a given path.
 Load order does not merge two independent binary edits. If the winning movie
@@ -184,11 +185,24 @@ an older matrix.
 
 ## Shadow of the Erdtree
 
-The project was developed without a separate live DLC compatibility run.
-Owning Shadow of the Erdtree normally uses the same executable line, but that
-is not sufficient evidence by itself: optional resources, menu states, or a
-later executable can differ. Use a release that names the running game build
-and report DLC ownership when describing a reproducible issue.
+The Elden Ring 2.7.1.0 title movie has been observed live in both content
+states. In the earlier DLC-absent run, the native `DLCVersion_0` field was
+empty and its authored spacer remained. In the current DLC-present run, the
+field displayed `Shadow of the Erdtree`, followed by the authored blank row
+and then `OFFLINE`.
+
+API 1.3 uses that distinction when placing bottom-right provider text. Known
+absence may reuse the empty DLC placement and spacer only when the effective
+`05_000_title.gfx` exactly matches the validated Elden Ring 2.7.1.0 / App
+1.17.1 native profile. Installed or unknown state reserves them. A
+structurally compatible modified or otherwise unrecognized movie also keeps
+the DLC row and spacer reserved, while an unsupported title hierarchy remains
+unchanged. This new adaptive branch has structural and unit coverage, but
+still requires one final same-build live A/B run with the Steam DLC checkbox
+disabled and re-enabled before it is described as live-validated.
+These title-screen observations do not establish compatibility for every DLC
+resource or menu state. Use a release that names the running game build and
+report DLC ownership and installation state with a reproducible issue.
 
 ## After an Elden Ring update
 

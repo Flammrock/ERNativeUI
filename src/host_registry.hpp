@@ -38,6 +38,11 @@ public:
     // stable contract for the lifetime of that registration epoch.
     [[nodiscard]] bool enable_custom_tabs_backend() noexcept;
     [[nodiscard]] bool custom_tabs_backend_available() const noexcept;
+    // Title-screen text follows the same publication rule: advertise it only
+    // after the validated GFX transform/open seam is ready, and never change
+    // availability once registration has opened.
+    [[nodiscard]] bool enable_title_screen_text_backend() noexcept;
+    [[nodiscard]] bool title_screen_text_backend_available() const noexcept;
     void open_registration() noexcept;
     void set_host_locale(erui::MenuLocalization pagination);
     void set_tab_configuration(erui::detail::TabConfiguration configuration);
@@ -66,6 +71,9 @@ public:
         ERUI_ProviderHandle provider,
         const ERUI_TabDesc* description,
         ERUI_PageHandle* out_page) noexcept;
+    ERUI_Result add_title_screen_text(
+        ERUI_ProviderHandle provider,
+        const ERUI_TitleScreenTextDesc* description) noexcept;
     ERUI_Result add_input_section(
         ERUI_ProviderHandle provider,
         const ERUI_InputSectionDesc* description,
@@ -355,6 +363,7 @@ private:
         std::vector<std::unique_ptr<Row>> rows{};
         std::vector<std::unique_ptr<BindingSection>> binding_sections{};
         std::vector<std::unique_ptr<Binding>> bindings{};
+        std::vector<erui::TitleScreenTextSpec> title_screen_texts{};
         std::unordered_map<ERUI_PageHandle, Page*> page_lookup{};
         std::unordered_map<std::string, Page*> tab_id_lookup{};
         std::unordered_map<ERUI_RowHandle, Row*> row_lookup{};
@@ -418,6 +427,7 @@ private:
 
     mutable std::mutex mutex_{};
     bool custom_tabs_backend_available_{};
+    bool title_screen_text_backend_available_{};
     bool open_{};
     bool frozen_{};
     std::uint64_t generation_{};

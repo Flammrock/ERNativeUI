@@ -8,11 +8,19 @@ struct CompiledMenu;
 
 namespace erui::native {
 
+// Takes the exact-build compatibility snapshot during DLL_PROCESS_ATTACH,
+// before another DLL's worker can replace the shared entry points. The
+// supplied value is the already-known base of the mapped game executable.
+// This narrow path performs bounded PE/RVA reads and fixed-size copies only:
+// it must not allocate, log, scan, or call into the Windows loader.
+[[nodiscard]] bool capture_native_input_bindings_at_process_attach(
+    void* game_image_base) noexcept;
+
 // Captures the exact-build input-binding interfaces while their entry points
 // are still pristine. This is an optional compatibility step for hosts that
 // deliberately load alongside a known third-party UI hook.
-[[nodiscard]] bool capture_native_input_bindings_before_third_party_hooks()
-    noexcept;
+[[nodiscard]] bool capture_native_input_bindings_before_third_party_hooks(
+    bool quiet = false) noexcept;
 
 // Revalidates a prior capture after third-party initialization. Every entry
 // must remain pristine except the two documented Solid Uncapper overlaps,

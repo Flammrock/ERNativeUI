@@ -269,7 +269,9 @@ std::size_t collect_slots() {
 } // namespace
 
 bool install_native_slider_presentation(
-    const GameAddresses& addresses) noexcept {
+    const GameAddresses& addresses,
+    const ModuleView* game,
+    const PreservedSharedMenuAddresses* preserved_shared) noexcept {
     remove_native_slider_presentation();
     if (g_slider_refresh_hook) {
         erui::detail::logf(
@@ -301,6 +303,18 @@ bool install_native_slider_presentation(
             erui::LogLevel::error,
             "Formatted sliders requested by %zu rows, but SliderCtrl refresh or Scaleform text interfaces are unavailable",
             row_count);
+        remove_native_slider_presentation();
+        return false;
+    }
+
+    if (preserved_shared &&
+        (!game || !revalidate_preserved_shared_menu_entry(
+            *game,
+            *preserved_shared,
+            PreservedSharedMenuEntry::slider_refresh))) {
+        erui::detail::logf(
+            erui::LogLevel::error,
+            "Approved SliderCtrl refresh entry changed immediately before formatted-slider hook creation");
         remove_native_slider_presentation();
         return false;
     }

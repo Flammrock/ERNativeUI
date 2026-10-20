@@ -7,14 +7,17 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
 std::atomic_uint32_t g_not_ready_responses{};
 std::atomic<ERUI_Result> g_terminal_result{ERUI_OK};
 std::atomic<ERUI_Result> g_language_result{ERUI_OK};
+std::atomic_uint32_t g_disabled_features{};
 std::atomic_uint32_t g_get_api_calls{};
 std::atomic_uint32_t g_language_calls{};
 std::atomic_uint32_t g_register_calls{};
@@ -30,13 +33,21 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_COLOR_PICKER | ERUI_CAP_BUILTIN_PAGES |
     ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
     ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
-    ERUI_CAP_CUSTOM_TABS;
+    ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
     std::string id{};
     ERUI_ActionInputs defaults{};
     ERUI_ActionInputs current{};
+};
+
+struct TitleScreenTextState {
+    std::wstring text{};
+    std::uint32_t descriptor_size{};
+    ERUI_TitleScreenTextFlags flags{};
+    ERUI_Color color{};
+    ERUI_TitleScreenCorner corner{};
 };
 
 struct ProviderState {
@@ -50,12 +61,16 @@ struct ProviderState {
     std::unordered_map<std::string, std::string> strings{};
     std::unordered_map<std::string, ERUI_ActionInputs> action_inputs{};
     std::unordered_map<std::string, ERUI_PageHandle> tabs{};
+    std::vector<TitleScreenTextState> title_screen_texts{};
+    bool committed{};
 };
 
 std::mutex g_state_mutex{};
 std::unordered_map<ERUI_ProviderHandle, ProviderState> g_providers{};
 std::unordered_map<ERUI_InputActionHandle, ActionState> g_actions{};
 std::uint32_t g_custom_tab_count{};
+std::uint32_t g_title_screen_text_count{};
+std::vector<TitleScreenTextState> g_title_screen_text_observations{};
 
 bool valid_slot(std::uint32_t state, std::uint32_t input,
     std::uint32_t count) noexcept {
@@ -193,6 +208,83 @@ ERUI_Result ERUI_CALL add_tab(
     return ERUI_OK;
 }
 
+ERUI_Result ERUI_CALL add_title_screen_text(
+    ERUI_ProviderHandle provider,
+    const ERUI_TitleScreenTextDesc* description) {
+    constexpr ERUI_TitleScreenTextFlags kKnownFlags =
+        ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR;
+    if (!description || description->size < sizeof(*description) ||
+        (description->flags & ~kKnownFlags) != 0 ||
+        !description->text.data || description->text.length == 0 ||
+        description->text.length >
+            ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS ||
+        description->text.reserved != 0 ||
+        description->color.reserved != 0 ||
+        (description->corner != ERUI_TITLE_SCREEN_CORNER_TOP_LEFT &&
+            description->corner != ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT &&
+            description->corner != ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT &&
+            description->corner != ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT) ||
+        description->reserved[0] != 0 ||
+        description->reserved[1] != 0) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    try {
+        std::wstring text(description->text.length, L'\0');
+        std::memcpy(text.data(), description->text.data,
+            static_cast<std::size_t>(description->text.length) *
+                sizeof(std::uint16_t));
+        for (std::size_t index = 0; index < text.size(); ++index) {
+            const std::uint16_t unit =
+                static_cast<std::uint16_t>(text[index]);
+            if (unit == 0 || unit == '\r' || unit == '\n' ||
+                unit == 0x0085u || unit == 0x2028u || unit == 0x2029u) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            if (unit >= 0xD800u && unit <= 0xDBFFu) {
+                if (++index >= text.size()) return ERUI_INVALID_ARGUMENT;
+                const std::uint16_t low =
+                    static_cast<std::uint16_t>(text[index]);
+                if (low < 0xDC00u || low > 0xDFFFu) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+            } else if (unit >= 0xDC00u && unit <= 0xDFFFu) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+        }
+
+        std::lock_guard lock(g_state_mutex);
+        const auto found = g_providers.find(provider);
+        if (found == g_providers.end()) return ERUI_INVALID_HANDLE;
+        if (found->second.committed) return ERUI_ALREADY_COMMITTED;
+        const std::size_t draft_lines =
+            found->second.title_screen_texts.size();
+        if (draft_lines >= ERUI_TITLE_SCREEN_TEXT_MAX_LINES ||
+            g_title_screen_text_count >=
+                ERUI_TITLE_SCREEN_TEXT_MAX_LINES - draft_lines) {
+            return ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED;
+        }
+        TitleScreenTextState state{};
+        state.text = std::move(text);
+        state.descriptor_size = description->size;
+        state.flags = description->flags;
+        state.color = description->color;
+        state.corner = description->corner;
+        g_title_screen_text_observations.push_back(state);
+        try {
+            found->second.title_screen_texts.push_back(std::move(state));
+        } catch (...) {
+            g_title_screen_text_observations.pop_back();
+            throw;
+        }
+        return ERUI_OK;
+    } catch (const std::bad_alloc&) {
+        return ERUI_OUT_OF_MEMORY;
+    } catch (...) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+}
+
 ERUI_Result ERUI_CALL add_button(
     ERUI_ProviderHandle,
     ERUI_PageHandle,
@@ -296,12 +388,29 @@ ERUI_Result ERUI_CALL set_page_presentation(
 
 ERUI_Result ERUI_CALL commit_provider(ERUI_ProviderHandle provider) {
     g_commit_calls.fetch_add(1, std::memory_order_relaxed);
-    return provider == ERUI_INVALID_PROVIDER ? ERUI_INVALID_HANDLE : ERUI_OK;
+    std::lock_guard lock(g_state_mutex);
+    const auto found = g_providers.find(provider);
+    if (found == g_providers.end()) return ERUI_INVALID_HANDLE;
+    if (found->second.committed) return ERUI_ALREADY_COMMITTED;
+    const std::size_t draft_lines = found->second.title_screen_texts.size();
+    if (draft_lines > ERUI_TITLE_SCREEN_TEXT_MAX_LINES ||
+        g_title_screen_text_count >
+            ERUI_TITLE_SCREEN_TEXT_MAX_LINES - draft_lines) {
+        return ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED;
+    }
+    g_title_screen_text_count += static_cast<std::uint32_t>(draft_lines);
+    found->second.committed = true;
+    return ERUI_OK;
 }
 
 ERUI_Result ERUI_CALL abort_provider(ERUI_ProviderHandle provider) {
     g_abort_calls.fetch_add(1, std::memory_order_relaxed);
-    return provider == ERUI_INVALID_PROVIDER ? ERUI_INVALID_HANDLE : ERUI_OK;
+    std::lock_guard lock(g_state_mutex);
+    const auto found = g_providers.find(provider);
+    if (found == g_providers.end()) return ERUI_INVALID_HANDLE;
+    if (found->second.committed) return ERUI_ALREADY_COMMITTED;
+    g_providers.erase(found);
+    return ERUI_OK;
 }
 
 ERUI_Result ERUI_CALL set_row_value(
@@ -817,6 +926,11 @@ ERUI_Api make_api() noexcept {
     api.set_custom_slider_index = &set_custom_slider_index;
     api.get_custom_slider_index = &get_custom_slider_index;
     api.add_tab = &add_tab;
+    api.add_title_screen_text = &add_title_screen_text;
+    if ((g_disabled_features.load(std::memory_order_relaxed) &
+            ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0) {
+        api.capabilities &= ~ERUI_CAP_TITLE_SCREEN_TEXT;
+    }
     return api;
 }
 
@@ -827,7 +941,8 @@ ERUI_TestConfigureConnection(
     const ERUI_TestConnectionConfig* configuration) {
     if (!configuration || configuration->size != sizeof(*configuration) ||
         configuration->version != ERUI_TEST_CONNECTION_CONTROL_VERSION ||
-        configuration->reserved[0] != 0 ||
+        (configuration->reserved[0] &
+            ~ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0 ||
         configuration->reserved[1] != 0 ||
         configuration->reserved[2] != 0) {
         return ERUI_INVALID_ARGUMENT;
@@ -838,6 +953,8 @@ ERUI_TestConfigureConnection(
         configuration->terminal_result, std::memory_order_relaxed);
     g_language_result.store(
         configuration->language_result, std::memory_order_relaxed);
+    g_disabled_features.store(
+        configuration->reserved[0], std::memory_order_relaxed);
     g_get_api_calls.store(0, std::memory_order_relaxed);
     g_language_calls.store(0, std::memory_order_relaxed);
     g_register_calls.store(0, std::memory_order_relaxed);
@@ -848,7 +965,37 @@ ERUI_TestConfigureConnection(
         g_providers.clear();
         g_actions.clear();
         g_custom_tab_count = 0;
+        g_title_screen_text_count = 0;
+        g_title_screen_text_observations.clear();
     }
+    return ERUI_OK;
+}
+
+extern "C" __declspec(dllexport) ERUI_Result ERUI_CALL
+ERUI_TestGetTitleScreenTextObservation(
+    std::uint32_t index,
+    ERUI_TestTitleScreenTextObservation* out_observation) {
+    if (!out_observation || out_observation->size < sizeof(*out_observation)) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    std::lock_guard lock(g_state_mutex);
+    if (index >= g_title_screen_text_observations.size()) {
+        return ERUI_NOT_FOUND;
+    }
+    const TitleScreenTextState& source =
+        g_title_screen_text_observations[index];
+    ERUI_TestTitleScreenTextObservation observation{};
+    observation.size = sizeof(observation);
+    observation.descriptor_size = source.descriptor_size;
+    observation.flags = source.flags;
+    observation.color = source.color;
+    observation.corner = source.corner;
+    observation.text_length = static_cast<std::uint32_t>(source.text.size());
+    for (std::size_t unit = 0; unit < source.text.size(); ++unit) {
+        observation.text[unit] = static_cast<std::uint16_t>(source.text[unit]);
+    }
+    *out_observation = observation;
     return ERUI_OK;
 }
 

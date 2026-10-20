@@ -16,6 +16,9 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID) {
         if (!erui::host::registry().enable_custom_tabs_backend()) {
             return FALSE;
         }
+        if (!erui::host::registry().enable_title_screen_text_backend()) {
+            return FALSE;
+        }
         erui::host::registry().open_registration();
         erui::host::set_api_state(erui::host::ApiState::runtime_ready);
     }

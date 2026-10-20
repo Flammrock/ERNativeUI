@@ -33,7 +33,7 @@ describes the current API; migration guides record only the changes needed
 between adjacent API versions. Tagged releases preserve the documentation that
 shipped with that version.
 
-Four focused, buildable examples are also available:
+Five focused, buildable examples are also available:
 
 - [Localized Greeting](../examples/localized_greeting/README.md) demonstrates
   connection, game-language selection, fallback text, and a native dialog.
@@ -46,6 +46,10 @@ Four focused, buildable examples are also available:
 - [Custom Tabs Stress](../examples/custom_tabs_stress/README.md) exercises a
   fixed 50-tab, 1,000-row workload for integration and performance testing;
   ordinary mods should follow the dedicated custom-tab guide instead.
+- [Title-Screen Text](../examples/title_screen_text/README.md) registers one
+  API 1.3 line in every title-screen corner, using both inherited and custom
+  colors; ordinary mods should follow the dedicated
+  [title-screen text guide](guides/title-screen-text.md).
 
 The public SDK has two header-only client surfaces: a friendly C++17 wrapper
 and a strict C ABI. Client mods discover the already-loaded host at runtime;

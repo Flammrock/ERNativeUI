@@ -71,6 +71,16 @@ ERUI_Result ERUI_CALL add_tab_entry(
     return erui::host::registry().add_tab(provider, description, out_page);
 }
 
+ERUI_Result ERUI_CALL add_title_screen_text_entry(
+    ERUI_ProviderHandle provider,
+    const ERUI_TitleScreenTextDesc* description) {
+    if (const ERUI_Result state = callable_state(); state != ERUI_OK) {
+        return state;
+    }
+    return erui::host::registry().add_title_screen_text(
+        provider, description);
+}
+
 ERUI_Result ERUI_CALL add_button_entry(
     ERUI_ProviderHandle provider,
     ERUI_PageHandle page,
@@ -643,6 +653,10 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
     }
     if (requested_version >= ERUI_API_VERSION_1_3) {
         table.add_tab = &add_tab_entry;
+        table.add_title_screen_text = &add_title_screen_text_entry;
+        if (erui::host::registry().title_screen_text_backend_available()) {
+            table.capabilities |= ERUI_CAP_TITLE_SCREEN_TEXT;
+        }
         if (erui::host::registry().custom_tabs_backend_available()) {
             table.capabilities |= ERUI_CAP_CUSTOM_TABS;
         }

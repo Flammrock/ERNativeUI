@@ -112,6 +112,35 @@ void write_u32(
     return writer.bytes();
 }
 
+[[nodiscard]] std::vector<std::uint8_t> matrix_with_components(
+    std::int32_t scale_x,
+    std::int32_t scale_y,
+    std::int32_t rotate_skew_0,
+    std::int32_t rotate_skew_1,
+    std::int32_t x,
+    std::int32_t y) {
+    BitWriter writer{};
+    writer.write(1, 1);
+    const std::size_t scale_bits = std::max(
+        signed_bits(scale_x), signed_bits(scale_y));
+    writer.write(static_cast<std::uint32_t>(scale_bits), 5);
+    writer.write_signed(scale_x, scale_bits);
+    writer.write_signed(scale_y, scale_bits);
+    writer.write(1, 1);
+    const std::size_t rotate_bits = std::max(
+        signed_bits(rotate_skew_0), signed_bits(rotate_skew_1));
+    writer.write(static_cast<std::uint32_t>(rotate_bits), 5);
+    writer.write_signed(rotate_skew_0, rotate_bits);
+    writer.write_signed(rotate_skew_1, rotate_bits);
+    const std::size_t translation_bits =
+        std::max(signed_bits(x), signed_bits(y));
+    writer.write(static_cast<std::uint32_t>(translation_bits), 5);
+    writer.write_signed(x, translation_bits);
+    writer.write_signed(y, translation_bits);
+    writer.align();
+    return writer.bytes();
+}
+
 [[nodiscard]] std::vector<std::uint8_t> tag(
     std::uint16_t code,
     std::span<const std::uint8_t> body = {},
@@ -200,6 +229,20 @@ void append_c_string(
     append(body, std::span{
         reinterpret_cast<const std::uint8_t*>(name.data()), name.size()});
     body.push_back(0);
+    return tag(kTagPlaceObject2, body);
+}
+
+[[nodiscard]] std::vector<std::uint8_t> transformed_place_object(
+    std::uint16_t depth,
+    std::uint16_t character_id,
+    std::string_view name,
+    std::span<const std::uint8_t> transform) {
+    std::vector<std::uint8_t> body{};
+    body.push_back(0x26);
+    append_u16(body, depth);
+    append_u16(body, character_id);
+    append(body, transform);
+    append_c_string(body, name);
     return tag(kTagPlaceObject2, body);
 }
 
@@ -385,6 +428,9 @@ void test_parse_and_lossless_round_trip() {
     ERUI_TEST_CHECK(document.declared_length() == bytes.size() - 4);
     ERUI_TEST_CHECK(document.trailing_size() == 4);
     ERUI_TEST_CHECK(document.revision() != 0);
+    ERUI_TEST_CHECK(document.frame_rect().has_value());
+    ERUI_TEST_CHECK((document.frame_rect().value() ==
+        erui::gfx::GfxFrameRect{0, 0, 0, 0}));
     ERUI_TEST_CHECK(document.sprites().size() == 1);
     ERUI_TEST_CHECK(document.placements().size() == 1);
     ERUI_TEST_CHECK(document.character_definitions().size() == 2);
@@ -406,6 +452,14 @@ void test_parse_and_lossless_round_trip() {
     ERUI_TEST_CHECK(placement.name == "NamedChild");
     ERUI_TEST_CHECK(placement.translation.x == -120);
     ERUI_TEST_CHECK(placement.translation.y == 340);
+    ERUI_TEST_CHECK(!placement.matrix.has_scale);
+    ERUI_TEST_CHECK(!placement.matrix.has_rotate);
+    ERUI_TEST_CHECK(
+        placement.matrix.scale_x == erui::gfx::GfxMatrix::identity_scale);
+    ERUI_TEST_CHECK(
+        placement.matrix.scale_y == erui::gfx::GfxMatrix::identity_scale);
+    ERUI_TEST_CHECK(placement.matrix.translate_x == -120);
+    ERUI_TEST_CHECK(placement.matrix.translate_y == 340);
     ERUI_TEST_CHECK(placement.has_character);
     ERUI_TEST_CHECK(placement.has_matrix);
     ERUI_TEST_CHECK(placement.has_name);
@@ -568,6 +622,28 @@ void test_recursive_sprite_length_repair() {
     const auto second = reparsed.serialize_and_validate();
     ERUI_TEST_CHECK(second.success());
     ERUI_TEST_CHECK(second.bytes == serialized.bytes);
+}
+
+void test_full_matrix_components_are_indexed() {
+    const auto shape = character_definition(41U);
+    const auto transform = matrix_with_components(
+        70000, 62000, 321, -654, -777, 888);
+    const auto placed = transformed_place_object(
+        9U, 41U, "Transformed", transform);
+    const auto sprite = define_sprite(42U, std::array{placed});
+    const auto document = parse_document(movie(std::array{shape, sprite}));
+    ERUI_TEST_CHECK(document.placements().size() == 1U);
+    const auto& placement = document.placements().front();
+    ERUI_TEST_CHECK(placement.matrix.has_scale);
+    ERUI_TEST_CHECK(placement.matrix.has_rotate);
+    ERUI_TEST_CHECK(placement.matrix.scale_x == 70000);
+    ERUI_TEST_CHECK(placement.matrix.scale_y == 62000);
+    ERUI_TEST_CHECK(placement.matrix.rotate_skew_0 == 321);
+    ERUI_TEST_CHECK(placement.matrix.rotate_skew_1 == -654);
+    ERUI_TEST_CHECK(placement.matrix.translate_x == -777);
+    ERUI_TEST_CHECK(placement.matrix.translate_y == 888);
+    ERUI_TEST_CHECK(placement.translation.x == -777);
+    ERUI_TEST_CHECK(placement.translation.y == 888);
 }
 
 void test_place_object3_and_name_limit() {
@@ -1413,6 +1489,7 @@ int main() {
     test_uncompressed_swf_round_trip();
     test_nested_sprites_and_limits();
     test_recursive_sprite_length_repair();
+    test_full_matrix_components_are_indexed();
     test_place_object3_and_name_limit();
     test_malformed_input_and_resource_limits();
     test_deterministic_malformed_input_sweep();

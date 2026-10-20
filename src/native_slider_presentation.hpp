@@ -10,7 +10,9 @@ namespace erui::native {
 // NumericSlider and CustomSlider rows. Ordinary API 1.0/1.1 byte sliders are
 // not registered with this bridge and retain Elden Ring's native rendering.
 [[nodiscard]] bool install_native_slider_presentation(
-    const GameAddresses& addresses) noexcept;
+    const GameAddresses& addresses,
+    const ModuleView* game,
+    const PreservedSharedMenuAddresses* preserved_shared) noexcept;
 void remove_native_slider_presentation() noexcept;
 
 // AddSlider refreshes once before storing its bound byte pointer. The native

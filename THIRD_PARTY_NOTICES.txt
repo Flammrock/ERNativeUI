@@ -54,9 +54,10 @@ Elden Ring UI interoperability
 
 ERNativeUI's end-user packages do not redistribute Elden Ring GFX files.
 The host performs narrowly validated, in-memory transformations on compatible
-settings-movie bytes supplied by the game or mod loader. The repository keeps
-derived reference fixtures for structural regression tests and developer
-research; they are not installed into runtime or SDK binary packages.
+settings- and title-movie bytes supplied by the game or mod loader. The
+repository keeps derived reference fixtures for structural regression tests
+and developer research; they are not installed into runtime or SDK binary
+packages.
 
 ELDEN RING and its original game assets are the property of their respective
 owners. Development tooling that reads GFX files is intended for files

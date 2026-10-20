@@ -30,6 +30,8 @@ constexpr std::size_t kMaxTextUnits = 4096;
 static_assert(ERUI_CUSTOM_TAB_MAX_COUNT == 1024u);
 static_assert(ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS == 95u);
 static_assert(ERUI_TAB_ICON_RGBA8_BYTE_COUNT == 4096u);
+static_assert(ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS == 255u);
+static_assert(ERUI_TITLE_SCREEN_TEXT_MAX_LINES == 16u);
 
 static_assert(ERUI_BUILTIN_PAGE_GAME_OPTIONS ==
     static_cast<ERUI_BuiltinPage>(
@@ -133,6 +135,17 @@ bool valid_view(ERUI_Utf16View view) noexcept {
 
 bool valid_color(ERUI_Color color) noexcept {
     return color.reserved == 0;
+}
+
+bool valid_title_screen_corner(ERUI_TitleScreenCorner corner) noexcept {
+    switch (corner) {
+    case ERUI_TITLE_SCREEN_CORNER_TOP_LEFT:
+    case ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT:
+    case ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT:
+    case ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT:
+        return true;
+    }
+    return false;
 }
 
 std::uint64_t decimal_scale(std::uint32_t decimal_places) noexcept {
@@ -563,6 +576,18 @@ bool Registry::custom_tabs_backend_available() const noexcept {
     return custom_tabs_backend_available_;
 }
 
+bool Registry::enable_title_screen_text_backend() noexcept {
+    std::lock_guard lock(mutex_);
+    if (open_ || frozen_) return false;
+    title_screen_text_backend_available_ = true;
+    return true;
+}
+
+bool Registry::title_screen_text_backend_available() const noexcept {
+    std::lock_guard lock(mutex_);
+    return title_screen_text_backend_available_;
+}
+
 void Registry::open_registration() noexcept {
     std::lock_guard lock(mutex_);
     open_ = true;
@@ -835,6 +860,93 @@ ERUI_Result Registry::add_tab(
         }
 
         *out_page = page.handle;
+        note_activity_locked();
+        return ERUI_OK;
+    } catch (const std::bad_alloc&) {
+        return ERUI_OUT_OF_MEMORY;
+    } catch (...) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+}
+
+ERUI_Result Registry::add_title_screen_text(
+    ERUI_ProviderHandle provider_handle,
+    const ERUI_TitleScreenTextDesc* description) noexcept {
+    // Reject legacy providers before reading a descriptor whose type did not
+    // exist in their negotiated table.
+    {
+        std::lock_guard lock(mutex_);
+        if (!title_screen_text_backend_available_) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        const auto provider_it = providers_.find(provider_handle);
+        if (provider_it == providers_.end()) return ERUI_INVALID_HANDLE;
+        if (provider_it->second->api_version < ERUI_API_VERSION_1_3) {
+            return ERUI_NOT_SUPPORTED;
+        }
+    }
+
+    constexpr ERUI_TitleScreenTextFlags kKnownFlags =
+        ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR;
+    if (!description || !field_available(description->size,
+            ERUI_FIELD_END(ERUI_TitleScreenTextDesc, reserved)) ||
+        (description->flags & ~kKnownFlags) != 0 ||
+        !valid_view(description->text) ||
+        description->text.length == 0 ||
+        description->text.length >
+            ERUI_TITLE_SCREEN_TEXT_MAX_CODE_UNITS ||
+        !valid_color(description->color) ||
+        !valid_title_screen_corner(description->corner) ||
+        description->reserved[0] != 0 ||
+        description->reserved[1] != 0) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    try {
+        std::wstring text = copy_utf16(description->text, false);
+        if (text.find_first_of(L"\r\n\u0085\u2028\u2029") !=
+            std::wstring::npos) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+
+        std::optional<erui::detail::RgbColor> color{};
+        if ((description->flags &
+                ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR) != 0) {
+            color = to_internal_color(description->color);
+        }
+
+        std::lock_guard lock(mutex_);
+        if (!title_screen_text_backend_available_) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if (!open_) return ERUI_REGISTRATION_CLOSED;
+        const auto provider_it = providers_.find(provider_handle);
+        if (provider_it == providers_.end()) return ERUI_INVALID_HANDLE;
+        Provider& provider = *provider_it->second;
+        if (provider.api_version < ERUI_API_VERSION_1_3) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if (provider.committed) return ERUI_ALREADY_COMMITTED;
+
+        std::size_t committed_lines = 0;
+        for (const auto& item : providers_) {
+            if (item.second->committed) {
+                committed_lines += item.second->title_screen_texts.size();
+            }
+        }
+        const std::size_t draft_lines = provider.title_screen_texts.size();
+        if (draft_lines >= ERUI_TITLE_SCREEN_TEXT_MAX_LINES ||
+            committed_lines >=
+                ERUI_TITLE_SCREEN_TEXT_MAX_LINES - draft_lines) {
+            return ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED;
+        }
+
+        provider.title_screen_texts.push_back({
+            .provider_id = provider.id,
+            .text = std::move(text),
+            .color = color,
+            .corner = description->corner,
+        });
         note_activity_locked();
         return ERUI_OK;
     } catch (const std::bad_alloc&) {
@@ -2208,6 +2320,19 @@ ERUI_Result Registry::commit_provider(ERUI_ProviderHandle handle) noexcept {
         return ERUI_TAB_LIMIT_REACHED;
     }
 
+    std::size_t committed_title_lines = 0;
+    for (const auto& item : providers_) {
+        if (item.second->committed) {
+            committed_title_lines += item.second->title_screen_texts.size();
+        }
+    }
+    if (provider.title_screen_texts.size() >
+            ERUI_TITLE_SCREEN_TEXT_MAX_LINES ||
+        committed_title_lines > ERUI_TITLE_SCREEN_TEXT_MAX_LINES -
+            provider.title_screen_texts.size()) {
+        return ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED;
+    }
+
     for (const auto& row_record : provider.rows) {
         const Row& row = *row_record;
         const void* callback = nullptr;
@@ -2913,6 +3038,14 @@ std::unique_ptr<erui::Menu> Registry::freeze_and_build_locked() {
         if (left->id != right->id) return left->id < right->id;
         return left->ordinal < right->ordinal;
     });
+    // Use the same deterministic provider order as page compilation, while
+    // retaining each provider's registration call order within its block.
+    for (const Provider* provider : ordered) {
+        for (const erui::TitleScreenTextSpec& line :
+             provider->title_screen_texts) {
+            menu->add_title_screen_text(line);
+        }
+    }
     for (std::size_t destination_index = 0;
          destination_index < erui::detail::builtin_page_count;
          ++destination_index) {

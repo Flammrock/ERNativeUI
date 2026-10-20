@@ -16,6 +16,18 @@ extern "C" {
 #endif
 
 #define ERUI_TEST_CONNECTION_CONTROL_VERSION 1u
+/* Current-host fixture only: pass in configuration.reserved[0]. Frozen
+ * contract hosts continue to require every reserved value to be zero. */
+#define ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT (1u << 0)
+
+/*
+ * Keep the shared control protocol independent of symbols introduced by the
+ * current SDK.  Frozen v1.1/v1.2 clients include this header through their
+ * own erui.h snapshots, which intentionally do not know about title-screen
+ * text.  The current fixture translates these wire-sized values to and from
+ * the current public descriptor.
+ */
+#define ERUI_TEST_TITLE_SCREEN_TEXT_MAX_CODE_UNITS 255u
 
 typedef struct ERUI_TestConnectionConfig {
     uint32_t size;
@@ -41,6 +53,22 @@ typedef ERUI_Result (ERUI_CALL* ERUI_TestConfigureConnectionFn)(
     const ERUI_TestConnectionConfig* configuration);
 typedef ERUI_Result (ERUI_CALL* ERUI_TestGetConnectionSnapshotFn)(
     ERUI_TestConnectionSnapshot* out_snapshot);
+
+/* Exact descriptor observation used by the current-header wrapper test. */
+typedef struct ERUI_TestTitleScreenTextObservation {
+    uint32_t size;
+    uint32_t descriptor_size;
+    uint32_t flags;
+    ERUI_Color color;
+    uint32_t corner;
+    uint32_t text_length;
+    uint16_t text[ERUI_TEST_TITLE_SCREEN_TEXT_MAX_CODE_UNITS];
+    uint32_t reserved[2];
+} ERUI_TestTitleScreenTextObservation;
+
+typedef ERUI_Result (ERUI_CALL* ERUI_TestGetTitleScreenTextObservationFn)(
+    uint32_t index,
+    ERUI_TestTitleScreenTextObservation* out_observation);
 
 /*
  * Simulates one player-originated assignment update. The fixture updates its

@@ -95,6 +95,68 @@ int main() {
         level,
         {.minimum = 0, .maximum = 100, .step = 5});
 
+    menu.add_title_screen_text({
+        .provider_id = "menu-model",
+        .text = L"Default title-screen line",
+        .corner = ERUI_TITLE_SCREEN_CORNER_TOP_LEFT,
+    });
+    menu.add_title_screen_text({
+        .provider_id = "menu-model",
+        .text = L"Colored title-screen line",
+        .color = erui::detail::RgbColor{216u, 167u, 103u},
+        .corner = ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT,
+    });
+    bool invalid_title_corner_rejected = false;
+    try {
+        menu.add_title_screen_text({
+            .provider_id = "menu-model",
+            .text = L"Invalid title-screen corner",
+            .corner = 0u,
+        });
+    } catch (const std::invalid_argument&) {
+        invalid_title_corner_rejected = true;
+    }
+    ERUI_TEST_CHECK(invalid_title_corner_rejected);
+
+    const auto invalid_title_text_rejected = [&](std::wstring value) {
+        try {
+            menu.add_title_screen_text({
+                .provider_id = "menu-model",
+                .text = std::move(value),
+                .corner = ERUI_TITLE_SCREEN_CORNER_TOP_LEFT,
+            });
+        } catch (const std::invalid_argument&) {
+            return true;
+        }
+        return false;
+    };
+    ERUI_TEST_CHECK(invalid_title_text_rejected(
+        std::wstring{L'A', L'\0', L'B'}));
+    for (const wchar_t separator : {
+             L'\r', L'\n', static_cast<wchar_t>(0x0085u),
+             static_cast<wchar_t>(0x2028u),
+             static_cast<wchar_t>(0x2029u)}) {
+        ERUI_TEST_CHECK(invalid_title_text_rejected(
+            std::wstring{L'A', separator, L'B'}));
+    }
+    ERUI_TEST_CHECK(invalid_title_text_rejected(
+        std::wstring{static_cast<wchar_t>(0xD800u)}));
+    ERUI_TEST_CHECK(invalid_title_text_rejected(
+        std::wstring{static_cast<wchar_t>(0xDC00u)}));
+    ERUI_TEST_CHECK(invalid_title_text_rejected(std::wstring{
+        static_cast<wchar_t>(0xD800u), L'A'}));
+
+    erui::Menu supplementary_text_menu(L"Supplementary", L"Validation");
+    supplementary_text_menu.add_title_screen_text({
+        .provider_id = "menu-model",
+        .text = std::wstring{
+            static_cast<wchar_t>(0xD83Du),
+            static_cast<wchar_t>(0xDE80u)},
+        .corner = ERUI_TITLE_SCREEN_CORNER_TOP_LEFT,
+    });
+    ERUI_TEST_CHECK(supplementary_text_menu.title_screen_text_count() == 1);
+    ERUI_TEST_CHECK(menu.title_screen_text_count() == 2);
+
     erui::InputBindingSection& bindings = menu.add_input_binding_section(
         "menu-model", L"Example Controls");
     const ERUI_ActionInputs unbound = all_unbound_inputs();
@@ -120,6 +182,20 @@ int main() {
     ERUI_TEST_CHECK(compiled);
     ERUI_TEST_CHECK(menu.frozen());
     ERUI_TEST_CHECK(compiled->pages.size() == 3);
+    const auto title_lines = menu.title_screen_texts();
+    ERUI_TEST_CHECK(title_lines.size() == 2);
+    ERUI_TEST_CHECK(title_lines[0].provider_id ==
+        "menu-model");
+    ERUI_TEST_CHECK(title_lines[0].text ==
+        L"Default title-screen line");
+    ERUI_TEST_CHECK(!title_lines[0].color.has_value());
+    ERUI_TEST_CHECK(title_lines[0].corner ==
+        ERUI_TITLE_SCREEN_CORNER_TOP_LEFT);
+    ERUI_TEST_CHECK(title_lines[1].color.has_value());
+    ERUI_TEST_CHECK(*title_lines[1].color ==
+        (erui::detail::RgbColor{216u, 167u, 103u}));
+    ERUI_TEST_CHECK(title_lines[1].corner ==
+        ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT);
     ERUI_TEST_CHECK(compiled->root_page().rows.size() == 6);
     ERUI_TEST_CHECK(compiled->root_page().rows[2].choice_ids.size() == 3);
     ERUI_TEST_CHECK(compiled->root_page().rows[2].kind ==

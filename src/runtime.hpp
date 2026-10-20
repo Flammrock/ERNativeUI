@@ -8,6 +8,7 @@
 
 namespace erui::native {
 struct GameAddresses;
+struct PreservedSharedMenuAddresses;
 }
 
 namespace erui::detail {
@@ -97,6 +98,12 @@ struct Capabilities {
     Menu& menu,
     RuntimeOptions options,
     const native::GameAddresses& addresses,
+    const detail::TabConfiguration& tab_configuration) noexcept;
+[[nodiscard]] InstallResult
+install_with_preserved_shared_addresses_and_tab_configuration(
+    Menu& menu,
+    RuntimeOptions options,
+    const native::PreservedSharedMenuAddresses& addresses,
     const detail::TabConfiguration& tab_configuration) noexcept;
 void uninstall() noexcept;
 [[nodiscard]] bool installed() noexcept;

@@ -121,18 +121,49 @@ static_assert(noexcept(custom_slider_changed(
     std::declval<const erui::CustomSliderChange&>())));
 #endif
 #if defined(ERUI_API_VERSION_1_3)
+template <typename T, typename = void>
+struct has_legacy_title_screen_text_overload : std::false_type {};
+
+template <typename T>
+struct has_legacy_title_screen_text_overload<T, std::void_t<decltype(
+    std::declval<T&>().add_title_screen_text(
+        std::declval<const erui::TitleScreenTextOptions&>()))>>
+    : std::true_type {};
+
 static_assert(sizeof(ERUI_TabIconDesc) == 32);
 static_assert(sizeof(ERUI_TabDesc) == 64);
+static_assert(sizeof(ERUI_TitleScreenTextDesc) == 40);
 static_assert(std::is_trivially_copyable<ERUI_TabIconDesc>::value);
 static_assert(std::is_trivially_copyable<ERUI_TabDesc>::value);
+static_assert(std::is_trivially_copyable<ERUI_TitleScreenTextDesc>::value);
 static_assert(static_cast<ERUI_Capabilities>(
     erui::Capability::custom_tabs) == ERUI_CAP_CUSTOM_TABS);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::title_screen_text) == ERUI_CAP_TITLE_SCREEN_TEXT);
 static_assert(static_cast<ERUI_TabIconFormat>(
     erui::TabIconFormat::rgba8) == ERUI_TAB_ICON_FORMAT_RGBA8);
+static_assert(static_cast<ERUI_TitleScreenCorner>(
+    erui::TitleScreenCorner::top_left) ==
+    ERUI_TITLE_SCREEN_CORNER_TOP_LEFT);
+static_assert(static_cast<ERUI_TitleScreenCorner>(
+    erui::TitleScreenCorner::top_right) ==
+    ERUI_TITLE_SCREEN_CORNER_TOP_RIGHT);
+static_assert(static_cast<ERUI_TitleScreenCorner>(
+    erui::TitleScreenCorner::bottom_left) ==
+    ERUI_TITLE_SCREEN_CORNER_BOTTOM_LEFT);
+static_assert(static_cast<ERUI_TitleScreenCorner>(
+    erui::TitleScreenCorner::bottom_right) ==
+    ERUI_TITLE_SCREEN_CORNER_BOTTOM_RIGHT);
 static_assert(std::is_same<
     decltype(std::declval<erui::Menu&>().add_tab(
         std::declval<const erui::TabOptions&>())),
     erui::Page>::value);
+static_assert(std::is_same<
+    decltype(std::declval<erui::Menu&>().add_title_screen_text(
+        std::declval<erui::TitleScreenCorner>(),
+        std::declval<const erui::TitleScreenTextOptions&>())),
+    void>::value);
+static_assert(!has_legacy_title_screen_text_overload<erui::Menu>::value);
 #endif
 #endif
 
@@ -293,8 +324,11 @@ int main() {
     tab_options.preferred_order = 42;
     tab_options.icon = {tab_pixels, sizeof(tab_pixels)};
     tab_options.icon.format = erui::TabIconFormat::rgba8;
+    erui::TitleScreenTextOptions title_text{};
+    title_text.text = L"Example Mod 1.0";
+    title_text.color = erui::Color{216u, 167u, 103u};
     if (page.valid()) return 34;
-    if (ERUI_API_V1_3_SIZE != 376u) return 35;
+    if (ERUI_API_V1_3_SIZE != 384u) return 35;
 #endif
 #endif
 #endif

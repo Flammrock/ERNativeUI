@@ -8,6 +8,8 @@ class NativeTabCatalogue;
 
 namespace erui::native {
 
+struct PreservedSharedMenuAddresses;
+
 // API 1.3 custom tabs are executable-build locked. Preflight is read-only and
 // is intentionally performed before provider registration opens, so the
 // advertised capability cannot change during a registration epoch.
@@ -24,7 +26,8 @@ enum class NativeTabsPreflightStatus : std::uint8_t {
 // menu hooks (including the Graphics materializer detour) must already be
 // installed before this function is called.
 [[nodiscard]] bool install_native_tabs(
-    const detail::NativeTabCatalogue& catalogue) noexcept;
+    const detail::NativeTabCatalogue& catalogue,
+    const PreservedSharedMenuAddresses* preserved_shared = nullptr) noexcept;
 
 // A successfully installed tab backend is process-lifetime because callbacks
 // can begin on the game thread without a teardown/drain handshake. The host

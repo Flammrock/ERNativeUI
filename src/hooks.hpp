@@ -12,7 +12,9 @@ enum class HookInstallStatus : std::uint8_t {
     hook_failed,
 };
 
-HookInstallStatus install_native_menu_hooks(const GameAddresses& addresses) noexcept;
+HookInstallStatus install_native_menu_hooks(
+    const GameAddresses& addresses,
+    const PreservedSharedMenuAddresses* preserved_shared = nullptr) noexcept;
 // Read-only validation for the exact native Graphics carrier contract used by
 // custom tabs. This never creates hooks or mutates runtime state.
 bool preflight_native_tab_carrier(const GameAddresses& addresses) noexcept;
