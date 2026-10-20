@@ -237,9 +237,9 @@ MSVC, clang-cl, and MinGW-w64 client mods can use the same stable host ABI.
 - Solid Uncapper coexistence has a documented load order and tested matrix.
 - Seamless Co-op 2.0.1 was live-tested with the Elden Ring 2.7.0.0 reference
   executable, with no incompatibility observed for that exact combination.
-- Elden Ring 2.7.1.0 title layouts were observed with Shadow of the Erdtree
-  both absent and present. Final live A/B validation of API 1.3's adaptive
-  title spacing is still pending; see the compatibility guide for scope.
+- Elden Ring 2.7.1.0 title layouts and API 1.3's adaptive title spacing were
+  live-tested with Shadow of the Erdtree both absent and present; see the
+  compatibility guide for the exact scope.
 - Host and committed client DLLs must remain loaded until process exit.
 
 See [Game and mod compatibility](docs/COMPATIBILITY.md) for exact tested

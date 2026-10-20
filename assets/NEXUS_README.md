@@ -69,8 +69,9 @@ for complete setup, runtime configuration, and verification details.
   consult the exact tested matrix in [Game and mod compatibility](https://github.com/Flammrock/ERNativeUI/blob/main/docs/COMPATIBILITY.md).
 - Seamless Co-op 2.0.1 was live-tested with Elden Ring 2.7.0.0, with no
   incompatibility observed for that exact combination.
-- Shadow of the Erdtree remains explicitly unverified until its live test
-  matrix is completed.
+- Shadow of the Erdtree title-screen layout and adaptive spacing were
+  live-tested on Elden Ring 2.7.1.0 with the DLC both absent and present; see
+  the compatibility matrix for the exact scope.
 
 If startup fails after a game update, do not reuse an old RVA or disable
 validation. Follow [Common errors](https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/common-errors.md),

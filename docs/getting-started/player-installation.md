@@ -173,9 +173,9 @@ content to display.
 - Seamless Co-op 2.0.1 was live-tested with Elden Ring 2.7.0.0, with no
   incompatibility observed for that exact combination. See
   [Game and mod compatibility](../COMPATIBILITY.md#seamless-co-op).
-- Elden Ring 2.7.1.0 title layouts were observed with Shadow of the Erdtree
-  both absent and present. Final live A/B validation of API 1.3's adaptive
-  title spacing is still pending; see the compatibility guide for scope.
+- Elden Ring 2.7.1.0 title layouts and API 1.3's adaptive title spacing were
+  live-tested with Shadow of the Erdtree both absent and present; see the
+  compatibility guide for the exact scope.
 - Host and committed client DLLs must remain loaded until process exit.
 - If another mod supplies the same GFX path, its mod-loader order still decides
   which complete file reaches the game. ERNativeUI then completes that file

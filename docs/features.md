@@ -139,10 +139,9 @@ coexistence, and validation requirements may move to a later API.
   and ColorPicker overlaps.
 - Seamless Co-op 2.0.1 was live-validated on Elden Ring executable 2.7.0.0,
   with no incompatibility observed for that exact combination.
-- Elden Ring 2.7.1.0 title layouts have been observed live both without and
-  with Shadow of the Erdtree. Final live A/B validation of the new adaptive
-  title-spacing branch is still pending; broader DLC compatibility is not
-  inferred from those title-screen observations.
+- Elden Ring 2.7.1.0 title layouts and the adaptive title-spacing branch were
+  live-tested both without and with Shadow of the Erdtree. Broader DLC
+  compatibility is not inferred from that title-screen validation.
 
 See [Game and mod compatibility](COMPATIBILITY.md) for tested combinations and
 the reporting checklist. The exact ownership and directional API 1.0

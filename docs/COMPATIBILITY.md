@@ -210,11 +210,11 @@ an older matrix.
 
 ## Shadow of the Erdtree
 
-The Elden Ring 2.7.1.0 title movie has been observed live in both content
-states. In the earlier DLC-absent run, the native `DLCVersion_0` field was
-empty and its authored spacer remained. In the current DLC-present run, the
-field displayed `Shadow of the Erdtree`, followed by the authored blank row
-and then `OFFLINE`.
+The Elden Ring 2.7.1.0 title movie and API 1.3's adaptive provider-text
+placement were live-tested in both content states. In the DLC-absent run, the
+native `DLCVersion_0` field was empty and its authored spacer remained. In the
+DLC-present run, the field displayed `Shadow of the Erdtree`, followed by the
+authored blank row and then `OFFLINE`.
 
 API 1.3 uses that distinction when placing bottom-right provider text. Known
 absence may reuse the empty DLC placement and spacer only when the effective
@@ -222,9 +222,10 @@ absence may reuse the empty DLC placement and spacer only when the effective
 1.17.1 native profile. Installed or unknown state reserves them. A
 structurally compatible modified or otherwise unrecognized movie also keeps
 the DLC row and spacer reserved, while an unsupported title hierarchy remains
-unchanged. This new adaptive branch has structural and unit coverage, but
-still requires one final same-build live A/B run with the Steam DLC checkbox
-disabled and re-enabled before it is described as live-validated.
+unchanged. The adaptive branch has structural and unit coverage and was
+live-validated through separate DLC-absent and DLC-present runs on Elden Ring
+2.7.1.0.
+
 These title-screen observations do not establish compatibility for every DLC
 resource or menu state. Use a release that names the running game build and
 report DLC ownership and installation state with a reproducible issue.

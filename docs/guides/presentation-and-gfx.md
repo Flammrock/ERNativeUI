@@ -116,10 +116,10 @@ On Elden Ring 2.7.1.0, two live observations establish the underlying layout:
 | Shadow of the Erdtree absent, earlier run | `DLCVersion_0` was empty; retaining its placement and authored spacer produced a visible extra gap above `OFFLINE`. |
 | Shadow of the Erdtree present, current run | `Shadow of the Erdtree` occupied the DLC field, followed by the authored blank row and then `OFFLINE`; preserving that gap produced the intended layout. |
 
-The adaptive installed/absent branch is covered by structural and unit tests,
-but its final same-build live A/B validation with the Steam DLC checkbox
-disabled and re-enabled is still pending. The two observations above should
-not be reported as that final adaptive-branch validation.
+The adaptive installed/absent branch is covered by structural and unit tests
+and was live-validated through those DLC-absent and DLC-present runs. This
+validation covers title-screen layout and provider-text spacing; it does not
+establish compatibility for every DLC resource or menu state.
 
 ## Modified GFX compatibility
 
