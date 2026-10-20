@@ -389,6 +389,12 @@ The shared host owns L1/R1 navigation, held repeat, wrapping, pointer selection
 and stationary mouse dwell. A client contributes only real tabs; it must not
 create placeholder or overflow entries.
 
+Do not confuse physical slots with logical custom tabs. The player can request
+8, 9, or 10 physical slots through `[Tabs] MinimumTabSlots`; ten is the hard
+native ceiling. The host can still merge up to 1,024 logical custom tabs and
+uses the same viewport to expose everything beyond the visible strip. Client
+mods do not inspect or change this player preference.
+
 Players can tune the navigation margin and mouse-dwell timing in
 `ERNativeUI.ini`. Those are host-wide preferences, not per-client settings.
 

@@ -26,13 +26,12 @@ inline constexpr std::size_t kMaximumTabDiagnosticFieldBytes = 512;
 // Pathological stale-override or diagnostic output is still truncated by
 // whole records and terminated with diagnostics_suppressed.
 inline constexpr std::size_t kMaximumTabDiagnosticsReportBytes = 1024 * 1024;
-// Eight is Elden Ring's stock active System-tab count. Runtime discovery can
-// still accept a compatible incoming layout that exposes more slots, but live
-// growth beyond the stock authored strip remains disabled until its complete
-// Scaleform depth/layout contract has been proven. This setting is a floor,
-// not a cap.
+// Eight is Elden Ring's stock active System-tab count. The validated native
+// record storage and runtime GFX completion path support at most ten physical
+// slots. This setting is a floor, not a cap: a compatible incoming layout that
+// already exposes more slots is never reduced.
 inline constexpr std::uint32_t kDefaultMinimumTabSlots = 8;
-inline constexpr std::uint32_t kMaximumConfigurableMinimumTabSlots = 8;
+inline constexpr std::uint32_t kMaximumConfigurableMinimumTabSlots = 10;
 
 // Host-owned settings. The parser keeps these defaults in one place so the
 // runtime adapter, generated default INI, diagnostics, and tests cannot drift.

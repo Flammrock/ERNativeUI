@@ -1,4 +1,5 @@
 #include "native_tab_runtime_state.hpp"
+#include "native_tab_slot_growth_policy.hpp"
 
 #include "test_assertions.hpp"
 
@@ -18,11 +19,75 @@ using erui::detail::NativeTabRuntimeEntry;
 using erui::detail::NativeTabLiveGeometry;
 using erui::detail::NativeTabPhysicalLayer;
 using erui::detail::NativeTabRuntimeState;
+using erui::detail::NativeTabSlotGrowthStatus;
 using erui::detail::invalid_native_tab_runtime_index;
 using erui::detail::native_tab_physical_host_capacity;
 using erui::detail::native_tab_physical_layer_count;
 using erui::detail::native_tab_physical_slot_capacity;
+using erui::detail::native_tab_active_slot_target;
 using erui::detail::validate_native_tab_live_geometry;
+using erui::detail::plan_native_tab_slot_growth;
+
+void test_slot_growth_plan_requires_symmetric_contiguous_cells() {
+    constexpr std::array<bool, 3> stock{true, false, false};
+    constexpr std::array<bool, 3> nine{true, true, false};
+    constexpr std::array<bool, 3> ten{true, true, true};
+
+    auto plan = plan_native_tab_slot_growth(stock, stock, 8);
+    ERUI_TEST_CHECK(plan.minimum_satisfied());
+    ERUI_TEST_CHECK(plan.discovered_slot_count == 8);
+
+    plan = plan_native_tab_slot_growth(nine, nine, 8);
+    ERUI_TEST_CHECK(plan.minimum_satisfied());
+    ERUI_TEST_CHECK(plan.discovered_slot_count == 9);
+    plan = plan_native_tab_slot_growth(nine, nine, 9);
+    ERUI_TEST_CHECK(plan.minimum_satisfied());
+    plan = plan_native_tab_slot_growth(nine, nine, 10);
+    ERUI_TEST_CHECK(plan.structure_exact());
+    ERUI_TEST_CHECK(!plan.minimum_satisfied());
+    ERUI_TEST_CHECK(plan.status == NativeTabSlotGrowthStatus::below_minimum);
+
+    for (const std::size_t minimum : {8U, 9U, 10U}) {
+        plan = plan_native_tab_slot_growth(ten, ten, minimum);
+        ERUI_TEST_CHECK(plan.minimum_satisfied());
+        ERUI_TEST_CHECK(plan.discovered_slot_count == 10);
+    }
+
+    plan = plan_native_tab_slot_growth(stock, nine, 8);
+    ERUI_TEST_CHECK(
+        plan.status == NativeTabSlotGrowthStatus::asymmetric_layers);
+    ERUI_TEST_CHECK(!plan.structure_exact());
+
+    constexpr std::array<bool, 3> missing_eight{false, false, false};
+    plan = plan_native_tab_slot_growth(missing_eight, missing_eight, 8);
+    ERUI_TEST_CHECK(plan.status ==
+        NativeTabSlotGrowthStatus::missing_stock_trailing_cell);
+
+    constexpr std::array<bool, 3> hole{true, false, true};
+    plan = plan_native_tab_slot_growth(hole, hole, 8);
+    ERUI_TEST_CHECK(
+        plan.status == NativeTabSlotGrowthStatus::non_contiguous_cells);
+
+    plan = plan_native_tab_slot_growth(stock, stock, 7);
+    ERUI_TEST_CHECK(
+        plan.status == NativeTabSlotGrowthStatus::invalid_minimum);
+    plan = plan_native_tab_slot_growth(ten, ten, 11);
+    ERUI_TEST_CHECK(
+        plan.status == NativeTabSlotGrowthStatus::invalid_minimum);
+}
+
+void test_slot_growth_active_count_never_exceeds_real_logical_routes() {
+    ERUI_TEST_CHECK(native_tab_active_slot_target(8, 9) == 8);
+    ERUI_TEST_CHECK(native_tab_active_slot_target(10, 8) == 8);
+    ERUI_TEST_CHECK(native_tab_active_slot_target(9, 9) == 9);
+    ERUI_TEST_CHECK(native_tab_active_slot_target(10, 9) == 9);
+    ERUI_TEST_CHECK(native_tab_active_slot_target(10, 10) == 10);
+    ERUI_TEST_CHECK(native_tab_active_slot_target(10, 58) == 10);
+
+    ERUI_TEST_CHECK(native_tab_active_slot_target(7, 9) == 0);
+    ERUI_TEST_CHECK(native_tab_active_slot_target(11, 11) == 0);
+    ERUI_TEST_CHECK(native_tab_active_slot_target(10, 7) == 0);
+}
 
 void test_live_geometry_requires_one_dimensional_trailing_capacity() {
     NativeTabLiveGeometry geometry{};
@@ -37,6 +102,13 @@ void test_live_geometry_requires_one_dimensional_trailing_capacity() {
     ERUI_TEST_CHECK(geometry.active_slot_count == 9);
     ERUI_TEST_CHECK(geometry.authored_cell_count == 10);
     ERUI_TEST_CHECK(geometry.selected_slot == 8);
+
+    // Extra third-party-authored cells may remain dormant beyond the active
+    // native count; the host never needs to delete them.
+    ERUI_TEST_CHECK(validate_native_tab_live_geometry(
+        9, 9, 8, 1, 11, geometry));
+    ERUI_TEST_CHECK(geometry.active_slot_count == 9);
+    ERUI_TEST_CHECK(geometry.authored_cell_count == 11);
 
     // The exact active+1 boundary is accepted, but a strip without its
     // authored trailing cell is not.
@@ -372,6 +444,8 @@ static_assert(!std::is_move_constructible_v<NativeTabRuntimeState>);
 static_assert(noexcept(NativeTabRuntimeState::create(0)));
 
 int main() {
+    test_slot_growth_plan_requires_symmetric_contiguous_cells();
+    test_slot_growth_active_count_never_exceeds_real_logical_routes();
     test_live_geometry_requires_one_dimensional_trailing_capacity();
     test_allocates_only_actual_tab_count();
     test_entry_identity_is_stable_and_icon_state_is_independent();

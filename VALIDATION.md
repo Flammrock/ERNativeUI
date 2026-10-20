@@ -219,6 +219,34 @@ restart; do not treat an INI edit made while the game is running as a test.
   smoke test so the shipped default does not inherit state from the disabled
   run.
 
+### Physical System tab-slot configuration
+
+Use the custom-tabs stress example for all three runs. Fully exit and restart
+the game after each INI change; do not compare configurations within one
+process.
+
+- [ ] Set `[Tabs] MinimumTabSlots = 8`. Confirm the ordinary eight-slot strip,
+  custom-tab overflow markers, single and held L1/R1 movement, wrapping,
+  pointer selection, Back, close, and reopen.
+- [ ] Set `MinimumTabSlots = 9`. Confirm nine physical slots are visible and
+  selectable, the custom-tab viewport uses the added slot, and all navigation
+  checks above remain stable.
+- [ ] Set `MinimumTabSlots = 10`. Confirm ten physical slots are visible and
+  selectable without overlapping the shoulder prompts or leaving the screen,
+  and repeat the complete navigation and reopen checks.
+- [ ] For each run, confirm the ordinary log reports the requested minimum and
+  completed authored GFX capacity as the expected value, with no `WARN`,
+  `ERROR`, or `FATAL` entry. The visible selectable slots and successful
+  navigation provide the live native-record/selector check without enabling
+  high-volume diagnostics.
+- [ ] Restore the shipped `MinimumTabSlots = 8` default after testing. Values
+  outside `8..10` must fail closed to the default; there is no
+  `MaximumTabSlots` setting.
+
+These are physical strip capacities, not custom-tab registration limits. The
+stress example still contributes 50 logical custom tabs in every run, and the
+viewport must keep all of them reachable.
+
 ### Elden Ring 2.7.2.0 live validation
 
 The current development host exposing ERUI API 1.3 was live-validated on

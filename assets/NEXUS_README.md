@@ -50,6 +50,12 @@ fallbacks remain available, but ERNativeUI adds no rows or widget presentation
 and API 1.3 title-screen text is disabled. Compatible structures already
 authored into the effective movie remain available.
 
+`[Tabs] MinimumTabSlots = 8` keeps the vanilla physical strip. With runtime
+GFX patching enabled, players may select 8, 9, or 10; ten is Elden Ring's hard
+native ceiling. This does not limit registered custom tabs: ERNativeUI keeps
+additional logical tabs reachable through its shifting `...` viewport. There
+is no `MaximumTabSlots` setting, and changing the minimum requires a restart.
+
 ## Configuration
 
 `ERNativeUI.ini` belongs beside `ERNativeUI.dll`. The host creates its embedded

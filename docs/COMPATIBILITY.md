@@ -181,6 +181,13 @@ A third-party replacement remains compatible when its relevant panel, widget,
 or title-information structure can be validated; ERNativeUI adds only the
 missing supported rows and presentation.
 
+The same structural policy applies to the System tab strip. With patching
+enabled, `[Tabs] MinimumTabSlots` requests a minimum of 8, 9, or 10 physical
+slots without shrinking a compatible larger input. Ten is the hard native
+ceiling; there is no `MaximumTabSlots` setting. This physical limit is
+independent of the 1,024 logical custom-tab catalogue, whose overflow remains
+reachable through the shifting viewport.
+
 Mod Engine 2 can still expose only one loose replacement for a given path.
 Load order does not merge two independent binary edits. If the winning movie
 is malformed or its relevant structure is unrecognized, ERNativeUI leaves its

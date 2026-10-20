@@ -124,6 +124,8 @@ Only one copy of ERNativeUI.dll should be loaded. The example DLLs included with
 
 By default, ERNativeUI completes supported settings GFX in memory while Elden Ring loads it, expanding ordinary settings pages and supplying matching TextInput/ColorPicker presentation without loose ERNativeUI GFX files. Structurally compatible GFX supplied by other mods remains supported; unrecognized layouts are kept unchanged rather than modified speculatively. Players can set [font=Courier New]EnableRuntimePatching = 0[/font] in ERNativeUI.ini's GFX section and restart to leave every effective GFX file untouched; custom tabs and functional widget fallbacks remain available, ERNativeUI adds no rows or presentation, and API 1.3 title-screen text is disabled. Compatible structures already authored into the effective movie remain available.
 
+[font=Courier New]MinimumTabSlots = 8[/font] keeps the vanilla System strip. With runtime GFX patching enabled, players may request 8, 9 or 10 physical slots; ten is Elden Ring's hard native ceiling and there is no MaximumTabSlots override. This is separate from logical custom tabs: additional registered tabs remain reachable through ERNativeUI's shifting [font=Courier New]...[/font] viewport. Restart after changing the value.
+
 [url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/player-installation.md][b]READ THE COMPLETE PLAYER INSTALLATION GUIDE[/b][/url]
 
 [center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]

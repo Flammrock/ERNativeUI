@@ -1,8 +1,11 @@
 #include "tab_viewport.hpp"
+#include "tab_initial_presentation_refresh.hpp"
+#include "tab_icon_retirement_policy.hpp"
 #include "tab_pointer_dwell.hpp"
 #include "tab_record_epoch.hpp"
 #include "tab_transition_input_gate.hpp"
 #include "native_tab_runtime_state.hpp"
+#include "native_tab_slot_growth_policy.hpp"
 
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
 #include "addresses.hpp"
@@ -25,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <new>
@@ -40,6 +44,10 @@ namespace {
 
 using erui::detail::TabBoundaryBehavior;
 using erui::detail::TabDirection;
+using erui::detail::DeferredTabPresentationRefresh;
+using erui::detail::DeferredTabPresentationRefreshPoll;
+using erui::detail::Rgba8HostRemovalPlan;
+using erui::detail::Rgba8RetirementLimits;
 using erui::detail::TabOverflowIndicator;
 using erui::detail::TabPointerDwell;
 using erui::detail::TabPointerDwellEdge;
@@ -50,7 +58,12 @@ using erui::detail::TabTransitionInputAction;
 using erui::detail::TabTransitionSelectorAnchor;
 using erui::detail::TabViewport;
 using erui::detail::TabViewportChange;
+using erui::detail::NativeTabSlotGrowthPlan;
 using erui::detail::invalid_tab_index;
+using erui::detail::native_tab_active_slot_target;
+using erui::detail::plan_rgba8_host_removal;
+using erui::detail::plan_rgba8_retirement_reconciliation;
+using erui::detail::plan_native_tab_slot_growth;
 using erui::detail::should_cancel_pointer_dwell_for_composite_input;
 using erui::detail::tab_overflow_indicator;
 using erui::detail::tab_overflow_indicators_changed;
@@ -133,6 +146,24 @@ struct NativeTabsBuildProfile {
     std::uintptr_t dynamic_shape_vtable{};
 
     std::uintptr_t graphics_panel_materializer{};
+
+    // Configuration construction seams used only when the immutable player
+    // configuration requests more than the eight stock physical slots.  Keep
+    // the complete ownership-sensitive profile beside the viewport profile:
+    // no coordinate is inferred from a neighbouring executable build.
+    std::uintptr_t top_constructor{};
+    std::uintptr_t early_slot_growth{};
+    std::uintptr_t first_count_publication{};
+    std::uintptr_t selector_geometry_dispatch{};
+    std::uintptr_t post_geometry_observation{};
+    std::uintptr_t count_propagation_dispatch{};
+    std::uintptr_t post_constructor_observation{};
+    std::uintptr_t category_append{};
+    std::uintptr_t category_count_getter{};
+    std::uintptr_t selector_set_active_count{};
+    std::uintptr_t selector_geometry_enumerator{};
+    std::uintptr_t category_list_vtable{};
+    std::uintptr_t scene_obj_proxy_value_vtable{};
 };
 
 constexpr std::array<NativeTabsBuildProfile, 2>
@@ -154,6 +185,9 @@ constexpr std::array<NativeTabsBuildProfile, 2>
             0x2CBF988, 0x10DDD10, 0x10DE0D0, 0x10DE510, 0x10E26D0,
             0x2CBE5C0, 0x10D4460, 0x2CBD4E0, 0x2CC6268, 0x2CBD158,
             0x95C050,
+            0x9672C0, 0x96773F, 0x967757, 0x967935, 0x96793E,
+            0x96795B, 0x8074A7, 0x968CF0, 0x968DA0, 0x739C10,
+            0x738AB0, 0x2B16B10, 0x2A97AD8,
         },
         {
             "2.7.2.0", 0x6AABF7E7, 0x5DFD600,
@@ -172,6 +206,9 @@ constexpr std::array<NativeTabsBuildProfile, 2>
             0x2CC1C38, 0x10DF400, 0x10DF7C0, 0x10DFC00, 0x10E3DC0,
             0x2CC0870, 0x10D5B50, 0x2CBF790, 0x2CC8518, 0x2CBF408,
             0x95C500,
+            0x967770, 0x967BEF, 0x967C07, 0x967DE5, 0x967DEE,
+            0x967E0B, 0x807957, 0x9691A0, 0x969250, 0x73A0C0,
+            0x738F60, 0x2B18C00, 0x2A99BC8,
         },
     }};
 static_assert(
@@ -182,7 +219,9 @@ static_assert(
     kNativeTabsBuildProfiles[0].scaleform_global_heap == 0x45972D0 &&
     kNativeTabsBuildProfiles[0].top_vtable == 0x2B16B48 &&
     kNativeTabsBuildProfiles[0].as3_value_interface_vtable == 0x2CBF988 &&
-    kNativeTabsBuildProfiles[0].graphics_panel_materializer == 0x95C050);
+    kNativeTabsBuildProfiles[0].graphics_panel_materializer == 0x95C050 &&
+    kNativeTabsBuildProfiles[0].early_slot_growth == 0x96773F &&
+    kNativeTabsBuildProfiles[0].category_append == 0x968CF0);
 static_assert(
     kNativeTabsBuildProfiles[1].timestamp == 0x6AABF7E7 &&
     kNativeTabsBuildProfiles[1].selection_callback == 0x9689C0 &&
@@ -191,7 +230,9 @@ static_assert(
     kNativeTabsBuildProfiles[1].scaleform_global_heap == 0x459A2F0 &&
     kNativeTabsBuildProfiles[1].top_vtable == 0x2B18C38 &&
     kNativeTabsBuildProfiles[1].as3_value_interface_vtable == 0x2CC1C38 &&
-    kNativeTabsBuildProfiles[1].graphics_panel_materializer == 0x95C500);
+    kNativeTabsBuildProfiles[1].graphics_panel_materializer == 0x95C500 &&
+    kNativeTabsBuildProfiles[1].early_slot_growth == 0x967BEF &&
+    kNativeTabsBuildProfiles[1].category_append == 0x9691A0);
 
 const NativeTabsBuildProfile* g_native_tabs_build_profile{};
 
@@ -341,6 +382,32 @@ constexpr NativeTabsRva kAlternateAuthoredIconVtable271Rva{
     &NativeTabsBuildProfile::alternate_authored_icon_vtable};
 constexpr NativeTabsRva kDynamicShapeVtable271Rva{
     &NativeTabsBuildProfile::dynamic_shape_vtable};
+constexpr NativeTabsRva kTopConstructorRva{
+    &NativeTabsBuildProfile::top_constructor};
+constexpr NativeTabsRva kEarlySlotGrowthRva{
+    &NativeTabsBuildProfile::early_slot_growth};
+constexpr NativeTabsRva kFirstCountPublicationRva{
+    &NativeTabsBuildProfile::first_count_publication};
+constexpr NativeTabsRva kSelectorGeometryDispatchRva{
+    &NativeTabsBuildProfile::selector_geometry_dispatch};
+constexpr NativeTabsRva kPostGeometryObservationRva{
+    &NativeTabsBuildProfile::post_geometry_observation};
+constexpr NativeTabsRva kCountPropagationDispatchRva{
+    &NativeTabsBuildProfile::count_propagation_dispatch};
+constexpr NativeTabsRva kPostConstructorObservationRva{
+    &NativeTabsBuildProfile::post_constructor_observation};
+constexpr NativeTabsRva kCategoryAppendRva{
+    &NativeTabsBuildProfile::category_append};
+constexpr NativeTabsRva kCategoryCountGetterRva{
+    &NativeTabsBuildProfile::category_count_getter};
+constexpr NativeTabsRva kSelectorSetActiveCountRva{
+    &NativeTabsBuildProfile::selector_set_active_count};
+constexpr NativeTabsRva kSelectorGeometryEnumeratorRva{
+    &NativeTabsBuildProfile::selector_geometry_enumerator};
+constexpr NativeTabsRva kCategoryListVtableRva{
+    &NativeTabsBuildProfile::category_list_vtable};
+constexpr NativeTabsRva kSceneObjProxyValueVtableRva{
+    &NativeTabsBuildProfile::scene_obj_proxy_value_vtable};
 
 // The GridControl frame clears provenance before it enters input dispatch.
 // Pointer selection is published by the earlier input helper. Non-pointer
@@ -375,9 +442,11 @@ constexpr std::size_t kSelectorActiveCountOffset = 0x00D0;
 constexpr std::size_t kSelectorSelectedIndexOffset = 0x00D4;
 constexpr std::size_t kSelectorHorizontalExtentOffset = 0x00D8;
 constexpr std::size_t kSelectorVerticalExtentOffset = 0x00DC;
+constexpr std::size_t kCategoryListOffset = 0x1200;
 constexpr std::size_t kCategoryStorageOffset = 0x1208;
 constexpr std::size_t kCategoryCountOffset = 0x1760;
 constexpr std::size_t kCompositeOffset = 0x1768;
+constexpr std::size_t kTopControllerOffset = 0x1870;
 constexpr std::size_t kCompositePanelCacheOffset = 0x68;
 constexpr std::size_t kCompositeCurrentPanelOffset = 0xB8;
 constexpr std::size_t kCategoryRecordSize = 0x88;
@@ -399,8 +468,12 @@ constexpr std::size_t kPhysicalTabCapacity = 10;
 constexpr std::size_t kTabHostCapacity = kPhysicalTabCapacity * 2U;
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
 static_assert(
+    kStockLogicalTabCount == erui::detail::native_tab_stock_slot_count);
+static_assert(
     kPhysicalTabCapacity ==
         erui::detail::native_tab_physical_slot_capacity);
+static_assert(
+    kPhysicalTabCapacity == erui::detail::native_tab_growth_capacity);
 static_assert(
     kTabHostCapacity == erui::detail::native_tab_physical_host_capacity);
 #endif
@@ -756,6 +829,9 @@ using ScaleformImageResourceCtorFn = void*(__fastcall*)(
     std::uint32_t kind);
 using ScaleformImageResourceAddRefFn = void(__fastcall*)(void* resource);
 using ScaleformImageResourceReleaseFn = void(__fastcall*)(void* resource);
+using CategoryAppendFn = void(__fastcall*)(
+    void* storage,
+    const void* source_record);
 
 struct RawImageSize {
     std::uint32_t width{};
@@ -1142,6 +1218,57 @@ struct alignas(16) ResolvedTabProxy {
 static_assert(alignof(ResolvedTabProxy) == 16);
 static_assert(sizeof(ResolvedTabProxy) == 0x70);
 
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+constexpr std::size_t kSlotGrowthProbeCellCount = 6U;
+
+struct SlotGrowthMovieFingerprint final {
+    void* proxy_owner{};
+    void* object_interface{};
+    std::uint32_t flags{};
+    void* object_payload{};
+    void* auxiliary{};
+    void* owner_link{};
+    void* movie_root{};
+};
+
+struct SlotGrowthCellProof final {
+    SlotGrowthMovieFingerprint movie{};
+    bool resolver_returned_destination{};
+    bool existence_call_exact{};
+    bool exists{};
+    bool fingerprint_exact{};
+    bool lineage_exact{};
+    bool cleanup_exact{};
+    unsigned long seh_code{};
+};
+
+struct SlotGrowthCellStorage final {
+    ResolvedTabProxy proxy{};
+    bool poisoned{};
+};
+
+struct SlotGrowthConstructionContext final {
+    void* top{};
+    void* scene_proxy{};
+    SlotGrowthMovieFingerprint movie{};
+    bool active{};
+    bool title_menu{};
+    bool early_seam_seen{};
+    bool late_seam_seen{};
+    bool mutation_attempted{};
+    bool mutation_committed{};
+    bool early_proof_exact{};
+    bool late_proof_exact{};
+    bool live_cells_symmetric{};
+    std::size_t configured_minimum{kStockLogicalTabCount};
+    std::size_t discovered_capacity{kStockLogicalTabCount};
+    std::size_t active_target{kStockLogicalTabCount};
+    std::size_t append_checkpoints{};
+    std::uint64_t count_before{};
+    std::int32_t active_before{-1};
+};
+#endif
+
 struct ResolvedTabLayers {
     std::array<ResolvedTabProxy, kPhysicalTabCapacity> tab_list{};
     std::array<ResolvedTabProxy, kPhysicalTabCapacity> back_tab_list{};
@@ -1223,6 +1350,12 @@ using PendingTransitionCommitResult = TabTransitionCommitResult;
 struct PendingTransition {
     bool active{};
     bool diagnose_wrap{};
+    // A retained RGBA8 catalogue is published after the first native
+    // composite. If that publication changes a currently visible custom icon
+    // from its vector fallback to its real raster, schedule the same
+    // ownership-safe Shape handoff as a viewport remap without pretending
+    // that the logical selection or record window changed.
+    bool presentation_refresh{};
     void* top{};
     TabViewport candidate{};
     std::uint32_t native_physical{};
@@ -1328,6 +1461,7 @@ struct RuntimeState {
     std::array<std::byte, kPresentationSize> overflow_presentation{};
     TabViewport viewport{};
     PendingTransition pending{};
+    DeferredTabPresentationRefresh catalogue_presentation_refresh{};
     std::uint64_t presentation_epoch{};
     std::uint64_t completed_shape_replacement_transitions{};
     bool destructive_transition_failed{};
@@ -1486,6 +1620,7 @@ TabPointerDwellTiming g_pointer_dwell_timing{
     kPointerDwellMinimumDelayMs,
 };
 std::atomic_bool g_native_tabs_installed{};
+std::size_t g_minimum_tab_slots{kStockLogicalTabCount};
 #else
 constexpr std::size_t g_custom_tab_count{kCustomTabCount};
 constexpr std::size_t g_navigation_margin{kNavigationMargin};
@@ -1516,6 +1651,18 @@ SafetyHookMid g_pointer_dispatch_source_hook{};
 SafetyHookMid g_horizontal_navigation_source_hook{};
 SafetyHookMid g_selection_dispatch_hook{};
 SafetyHookMid g_pointer_cell_sample_hook{};
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+SafetyHookMid g_slot_growth_early_hook{};
+SafetyHookMid g_slot_growth_late_hook{};
+SafetyHookMid g_slot_growth_post_constructor_hook{};
+std::atomic_bool g_slot_growth_callbacks_armed{};
+CategoryAppendFn g_category_append{};
+thread_local bool g_inside_slot_growth_append{};
+thread_local SlotGrowthConstructionContext g_slot_growth_construction{};
+thread_local std::array<
+    SlotGrowthCellStorage,
+    kSlotGrowthProbeCellCount> g_slot_growth_cell_storage{};
+#endif
 // Hook creation is transactional only until the first target is exposed. Once
 // enable() has been attempted, hook objects and all borrowed runtime storage
 // remain process-lifetime. Every callback stays inert until the complete set
@@ -1616,6 +1763,12 @@ AtomicTabHostMask g_icon_bank_b_hosts{};
 // reconcile downward after an observed RawImage refcount drop.
 constexpr std::uint32_t kMaximumRgba8RetirementDebt =
     static_cast<std::uint32_t>(kTabHostCapacity);
+constexpr Rgba8RetirementLimits kRgba8RetirementLimits{
+    // Active and inactive property banks may coexist during one atomic
+    // handoff, so the policy bounds both complete host sets.
+    static_cast<std::uint32_t>(kTabHostCapacity * 2U),
+    kMaximumRgba8RetirementDebt,
+};
 #if !defined(ER_NATIVE_UI_PRODUCTION_TABS)
 std::array<std::atomic_uint32_t, kCustomTabCount>
     g_rgba8_retirement_debt{};
@@ -2879,25 +3032,30 @@ bool reconcile_rgba8_retirement_debt(
 
         const Rgba8ReferenceSnapshot refs =
             snapshot_rgba8_references(asset);
-        const std::uint32_t minimum_raw = 1U + active;
-        const std::uint32_t maximum_raw = minimum_raw + prior_debt;
+        const auto retirement = plan_rgba8_retirement_reconciliation(
+            active,
+            prior_debt,
+            refs.raw,
+            kRgba8RetirementLimits);
         if (!refs.resource_read || !refs.raw_read || refs.resource != 1U ||
-            refs.raw < minimum_raw || refs.raw > maximum_raw) {
+            !retirement.accepted()) {
             log_failure(
-                "RGBA8 retirement reconciliation phase=%s asset=%zu refs={resourceRead:%u resource:%u rawRead:%u raw:%u allowed:%u..%u} active=%u debt=%u",
+                "RGBA8 retirement reconciliation phase=%s asset=%zu refs={resourceRead:%u resource:%u rawRead:%u raw:%u allowed:%u..%u} active=%u debt=%u policy=%u",
                 phase ? phase : "unknown",
                 asset,
                 refs.resource_read ? 1U : 0U,
                 static_cast<unsigned>(refs.resource),
                 refs.raw_read ? 1U : 0U,
                 static_cast<unsigned>(refs.raw),
-                static_cast<unsigned>(minimum_raw),
-                static_cast<unsigned>(maximum_raw),
+                static_cast<unsigned>(retirement.minimum_raw),
+                static_cast<unsigned>(retirement.maximum_raw),
                 static_cast<unsigned>(active),
-                static_cast<unsigned>(prior_debt));
+                static_cast<unsigned>(prior_debt),
+                static_cast<unsigned>(retirement.status));
             return false;
         }
-        const std::uint32_t observed_debt = refs.raw - minimum_raw;
+        const std::uint32_t observed_debt =
+            retirement.retirement_debt_after;
         if (observed_debt < prior_debt) {
             if (!set_rgba8_retirement_debt(asset, observed_debt)) {
                 log_failure(
@@ -8395,6 +8553,629 @@ bool destroy_proxy(ResolvedTabProxy& proxy) noexcept {
 #endif
 }
 
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+bool read_slot_growth_movie_fingerprint(
+    const void* scene_proxy,
+    SlotGrowthMovieFingerprint& fingerprint) noexcept {
+    fingerprint = {};
+    if (!scene_proxy) return false;
+
+    const auto* const proxy = static_cast<const std::byte*>(scene_proxy);
+    const auto* const wrapper = proxy + kSceneObjProxyValueOffset;
+    void* proxy_vtable{};
+    void* proxy_getter{};
+    void* proxy_self0{};
+    void* proxy_self1{};
+    void* proxy_self2{};
+    void* wrapper_vtable{};
+    void* owner_link{};
+    void* movie_root{};
+    void* movie_vtable{};
+    void* create_object{};
+    DisplayValueView view{};
+
+    if (!guarded_read(proxy, proxy_vtable) ||
+        proxy_vtable != g_game.base + kSceneObjProxyVtableRva ||
+        !guarded_read(
+            static_cast<const std::byte*>(proxy_vtable) + sizeof(void*),
+            proxy_getter) ||
+        proxy_getter != g_game.base + kSceneObjProxyGetValueRva ||
+        !guarded_read(proxy + 0x08, proxy_self0) ||
+        !guarded_read(proxy + 0x10, proxy_self1) ||
+        !guarded_read(proxy + 0x18, proxy_self2) ||
+        proxy_self0 != scene_proxy || proxy_self1 != scene_proxy ||
+        proxy_self2 != scene_proxy ||
+        !guarded_read(proxy + 0x20, fingerprint.proxy_owner) ||
+        !fingerprint.proxy_owner ||
+        !guarded_read(wrapper, wrapper_vtable) ||
+        wrapper_vtable != g_game.base + kSceneObjProxyValueVtableRva ||
+        !inspect_display_value(wrapper, view) ||
+        !exact_as3_display_bridge(view) ||
+        !guarded_read(wrapper + 0x30, fingerprint.auxiliary) ||
+        !guarded_read(
+            static_cast<const std::byte*>(view.object_interface) + 0x08,
+            owner_link) ||
+        !owner_link ||
+        !guarded_read(
+            static_cast<const std::byte*>(owner_link) + 0x18,
+            movie_root) ||
+        !movie_root ||
+        !guarded_read(movie_root, movie_vtable) ||
+        movie_vtable != g_game.base + kAs3MovieVtable271Rva ||
+        !guarded_read(
+            static_cast<const std::byte*>(movie_vtable) + 0x170,
+            create_object) ||
+        create_object != g_game.base + kAs3MovieCreateObject271Rva) {
+        fingerprint = {};
+        return false;
+    }
+
+    fingerprint.object_interface = view.object_interface;
+    fingerprint.flags = view.flags;
+    fingerprint.object_payload = view.object_payload;
+    fingerprint.owner_link = owner_link;
+    fingerprint.movie_root = movie_root;
+    return true;
+}
+
+bool same_slot_growth_movie(
+    const SlotGrowthMovieFingerprint& left,
+    const SlotGrowthMovieFingerprint& right) noexcept {
+    return left.proxy_owner && left.object_interface && left.object_payload &&
+        left.owner_link && left.movie_root &&
+        left.proxy_owner == right.proxy_owner &&
+        left.object_interface == right.object_interface &&
+        left.flags == right.flags &&
+        left.object_payload == right.object_payload &&
+        left.auxiliary == right.auxiliary &&
+        left.owner_link == right.owner_link &&
+        left.movie_root == right.movie_root;
+}
+
+bool same_slot_growth_movie_lineage(
+    const SlotGrowthMovieFingerprint& child,
+    const SlotGrowthMovieFingerprint& root) noexcept {
+    return child.object_interface && child.owner_link && child.movie_root &&
+        child.object_interface == root.object_interface &&
+        child.owner_link == root.owner_link &&
+        child.movie_root == root.movie_root;
+}
+
+SlotGrowthCellProof probe_slot_growth_cell(
+    void* movie_context,
+    const char* path,
+    const SlotGrowthMovieFingerprint& root,
+    SlotGrowthCellStorage& storage) noexcept {
+    SlotGrowthCellProof proof{};
+    if (!movie_context || !path || storage.poisoned ||
+        storage.proxy.constructed || !g_resolve_path || !g_value_exists ||
+        !g_destroy_scaleform_value) {
+        return proof;
+    }
+
+    storage.proxy.storage.fill(std::byte{});
+    void* result{};
+#if defined(_MSC_VER)
+    __try {
+#endif
+        result = g_resolve_path(
+            movie_context, storage.proxy.storage.data(), path);
+#if defined(_MSC_VER)
+    } __except (proof.seh_code = GetExceptionCode(),
+               EXCEPTION_EXECUTE_HANDLER) {
+        result = nullptr;
+    }
+#endif
+    if (result != storage.proxy.storage.data() || proof.seh_code != 0) {
+        // ResolvePath constructs an owning value. A mismatched return leaves
+        // ownership ambiguous, so retain this process-lifetime TLS storage and
+        // never attempt to destroy or reuse it.
+        storage.poisoned = true;
+        return proof;
+    }
+
+    storage.proxy.constructed = true;
+    proof.resolver_returned_destination = true;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        proof.exists = g_value_exists(storage.proxy.storage.data());
+        proof.existence_call_exact = true;
+#if defined(_MSC_VER)
+    } __except (proof.seh_code = GetExceptionCode(),
+               EXCEPTION_EXECUTE_HANDLER) {
+        proof.existence_call_exact = false;
+    }
+#endif
+    if (proof.exists && proof.seh_code == 0) {
+        proof.fingerprint_exact = read_slot_growth_movie_fingerprint(
+            storage.proxy.storage.data(), proof.movie);
+        proof.lineage_exact = proof.fingerprint_exact &&
+            same_slot_growth_movie_lineage(proof.movie, root);
+    }
+
+    proof.cleanup_exact = destroy_proxy(storage.proxy);
+    if (proof.cleanup_exact) {
+        storage.proxy.storage.fill(std::byte{});
+    } else {
+        storage.poisoned = true;
+    }
+    return proof;
+}
+
+bool exact_slot_growth_cell_proof(
+    const SlotGrowthCellProof& proof) noexcept {
+    if (!proof.resolver_returned_destination ||
+        !proof.existence_call_exact || !proof.cleanup_exact ||
+        proof.seh_code != 0) {
+        return false;
+    }
+    return !proof.exists ||
+        (proof.fingerprint_exact && proof.lineage_exact &&
+            proof.movie.object_payload);
+}
+
+bool discover_slot_growth_target(
+    void* top,
+    const SlotGrowthMovieFingerprint& root,
+    std::size_t configured_minimum,
+    NativeTabSlotGrowthPlan& plan,
+    bool& symmetric) noexcept {
+    plan = {};
+    symmetric = false;
+    if (!top) return false;
+
+    std::array<SlotGrowthCellProof, kSlotGrowthProbeCellCount> proofs{};
+    std::size_t proof_index{};
+    constexpr std::array<const char*, 2> kStripNames{
+        "TabList", "BackTabList"};
+    for (const char* strip : kStripNames) {
+        for (std::size_t cell = 8U; cell <= 10U; ++cell) {
+            char path[64]{};
+            const int written = _snprintf_s(
+                path,
+                std::size(path),
+                _TRUNCATE,
+                "%s/Item_0_%zu",
+                strip,
+                cell);
+            if (written <= 0 || proof_index >= proofs.size()) return false;
+            proofs[proof_index] = probe_slot_growth_cell(
+                static_cast<std::byte*>(top) + kMovieContextOffset,
+                path,
+                root,
+                g_slot_growth_cell_storage[proof_index]);
+            ++proof_index;
+        }
+    }
+
+    if (proof_index != proofs.size()) return false;
+    for (const SlotGrowthCellProof& proof : proofs) {
+        if (!exact_slot_growth_cell_proof(proof)) return false;
+    }
+
+    const std::array<bool, 3> front{
+        proofs[0].exists, proofs[1].exists, proofs[2].exists};
+    const std::array<bool, 3> back{
+        proofs[3].exists, proofs[4].exists, proofs[5].exists};
+    symmetric = front == back;
+    plan = plan_native_tab_slot_growth(front, back, configured_minimum);
+    if (!plan.structure_exact()) return false;
+
+    std::array<void*, kSlotGrowthProbeCellCount> payloads{};
+    std::size_t payload_count{};
+    for (const SlotGrowthCellProof& proof : proofs) {
+        if (!proof.exists) continue;
+        if (proof.movie.object_payload == root.object_payload) return false;
+        for (std::size_t earlier = 0; earlier < payload_count; ++earlier) {
+            if (payloads[earlier] == proof.movie.object_payload) return false;
+        }
+        payloads[payload_count++] = proof.movie.object_payload;
+    }
+
+    return plan.discovered_slot_count >= kStockLogicalTabCount &&
+        plan.discovered_slot_count <= kPhysicalTabCapacity;
+}
+
+bool read_slot_growth_record(
+    void* top,
+    std::size_t index,
+    RecordFields& fields) noexcept {
+    const std::byte* const record = record_at(top, index);
+    void* vtable{};
+    return record && guarded_read(record, vtable) &&
+        vtable == g_game.base + kCategoryRecordVtableRva &&
+        guarded_read(record + kTitleOffset, fields.title) && fields.title &&
+        guarded_read(record + kCategoryIdOffset, fields.category) &&
+        guarded_copy(
+            fields.presentation.data(),
+            record + kPresentationOffset,
+            fields.presentation.size());
+}
+
+bool slot_growth_records_exact(
+    void* top,
+    std::size_t count,
+    const RecordFields* graphics_snapshot = nullptr) noexcept {
+    if (!top || count < kStockLogicalTabCount ||
+        count > kPhysicalTabCapacity) {
+        return false;
+    }
+    RecordFields graphics{};
+    for (std::size_t index = 0; index < count; ++index) {
+        RecordFields current{};
+        if (!read_slot_growth_record(top, index, current)) return false;
+        const std::int32_t expected = index < kExpectedStockCategories.size()
+            ? kExpectedStockCategories[index]
+            : kExpectedStockCategories.back();
+        if (current.category != expected) return false;
+        if (index == kStockLogicalTabCount - 1U) graphics = current;
+        if (index >= kStockLogicalTabCount &&
+            (current.title != graphics.title ||
+                current.presentation != graphics.presentation)) {
+            return false;
+        }
+    }
+    return !graphics_snapshot ||
+        (graphics.title == graphics_snapshot->title &&
+            graphics.category == graphics_snapshot->category &&
+            graphics.presentation == graphics_snapshot->presentation);
+}
+
+bool slot_growth_geometry_supports_capacity(
+    void* top,
+    std::size_t required_capacity) noexcept {
+    if (!top || required_capacity < kStockLogicalTabCount ||
+        required_capacity > kPhysicalTabCapacity) {
+        return false;
+    }
+    const auto* const selector =
+        static_cast<const std::byte*>(top) + kSelectorOffset;
+    void* selector_vtable{};
+    std::int32_t horizontal{};
+    std::int32_t vertical{};
+    if (!guarded_read(selector, selector_vtable) ||
+        selector_vtable != g_game.base + kSelectorVtableRva ||
+        !guarded_read(
+            selector + kSelectorHorizontalExtentOffset, horizontal) ||
+        !guarded_read(
+            selector + kSelectorVerticalExtentOffset, vertical) ||
+        horizontal <= 0 || vertical <= 0 ||
+        horizontal > 32 || vertical > 64 ||
+        (horizontal != 1 && vertical != 1)) {
+        return false;
+    }
+    // A third-party movie may author additional dormant cells beyond the
+    // native ten-record ceiling. Keep them untouched and require only the
+    // complete prefix needed by the capped native capacity.
+    return static_cast<std::int64_t>(horizontal) * vertical >=
+        static_cast<std::int64_t>(required_capacity + 1U);
+}
+
+[[noreturn]] void fail_fast_after_slot_growth(
+    const char* stage,
+    const SlotGrowthConstructionContext& context) noexcept {
+    erui::detail::logf(
+        erui::LogLevel::fatal,
+        "NativeTabs slot growth lost exact state after owned append "
+        "(stage=%s configuredMinimum=%zu discoveredCapacity=%zu "
+        "activeTarget=%zu "
+        "checkpoints=%zu); terminating before the mutated Configuration "
+        "object can escape",
+        stage ? stage : "unknown",
+        context.configured_minimum,
+        context.discovered_capacity,
+        context.active_target,
+        context.append_checkpoints);
+    RaiseFailFastException(nullptr, nullptr, 0);
+    std::terminate();
+}
+
+void append_graphics_records_at_construction_seam(
+    safetyhook::Context& cpu) noexcept {
+    if (!g_slot_growth_callbacks_armed.load(std::memory_order_acquire) ||
+        g_inside_slot_growth_append) {
+        return;
+    }
+
+    SlotGrowthConstructionContext& context = g_slot_growth_construction;
+    void* const top = reinterpret_cast<void*>(cpu.rdi);
+    if (!top || context.active) return;
+    context = {};
+    context.active = true;
+    context.top = top;
+    context.early_seam_seen = true;
+    context.title_menu = cpu.r15 != 0;
+    context.configured_minimum = g_minimum_tab_slots;
+    if (context.title_menu) {
+        // The same constructor also serves the title-menu options movie.
+        // Physical custom tabs belong only to the in-game Configuration
+        // movie, so leave that unrelated object completely untouched.
+        context = {};
+        return;
+    }
+
+    auto* const storage = static_cast<std::byte*>(top) +
+        kCategoryStorageOffset;
+    auto* const list = static_cast<std::byte*>(top) + kCategoryListOffset;
+    auto* const selector = static_cast<std::byte*>(top) + kSelectorOffset;
+    auto* const composite = static_cast<std::byte*>(top) + kCompositeOffset;
+    auto* const controller = static_cast<std::byte*>(top) +
+        kTopControllerOffset;
+    std::byte* const graphics = record_at(
+        top, kStockLogicalTabCount - 1U);
+
+    void* scene_proxy{};
+    void* frame_top{};
+    void* top_vtable{};
+    void* list_vtable{};
+    void* selector_vtable{};
+    void* geometry_enumerator{};
+    SlotGrowthMovieFingerprint caller_movie{};
+    SlotGrowthMovieFingerprint top_movie{};
+    RecordFields graphics_snapshot{};
+    const bool scene_proxy_read = guarded_read(
+        reinterpret_cast<const void*>(cpu.rsp + 0x50), scene_proxy);
+    const bool caller_movie_exact = scene_proxy_read &&
+        read_slot_growth_movie_fingerprint(scene_proxy, caller_movie);
+    const bool top_movie_exact = read_slot_growth_movie_fingerprint(
+        static_cast<std::byte*>(top) + kMovieContextOffset, top_movie);
+    const bool movie_exact = caller_movie_exact && top_movie_exact &&
+        same_slot_growth_movie(caller_movie, top_movie);
+    const bool frame_top_read = cpu.rbp >= 0x58 && guarded_read(
+        reinterpret_cast<const void*>(cpu.rbp - 0x58), frame_top);
+    const bool register_frame_exact =
+        cpu.rbx == reinterpret_cast<std::uintptr_t>(storage) &&
+        cpu.r13 == reinterpret_cast<std::uintptr_t>(list) &&
+        cpu.r14 == reinterpret_cast<std::uintptr_t>(selector) &&
+        cpu.r12 == reinterpret_cast<std::uintptr_t>(composite) &&
+        cpu.rsi == reinterpret_cast<std::uintptr_t>(controller) &&
+        cpu.r15 == 0 && frame_top_read && frame_top == top;
+    const bool identities_exact =
+        guarded_read(top, top_vtable) &&
+        top_vtable == g_game.base + kTopVtableRva &&
+        guarded_read(list, list_vtable) &&
+        list_vtable == g_game.base + kCategoryListVtableRva &&
+        guarded_read(selector, selector_vtable) &&
+        selector_vtable == g_game.base + kSelectorVtableRva &&
+        guarded_read(
+            static_cast<const std::byte*>(selector_vtable) +
+                3U * sizeof(void*),
+            geometry_enumerator) &&
+        geometry_enumerator ==
+            g_game.base + kSelectorGeometryEnumeratorRva;
+    const bool count_exact = guarded_read(
+        static_cast<std::byte*>(top) + kCategoryCountOffset,
+        context.count_before) &&
+        context.count_before == kStockLogicalTabCount;
+    const bool active_readable = guarded_read(
+        selector + kSelectorActiveCountOffset,
+        context.active_before);
+    const bool stock_exact = slot_growth_records_exact(
+        top, kStockLogicalTabCount);
+    const bool snapshot_exact = read_slot_growth_record(
+        top, kStockLogicalTabCount - 1U, graphics_snapshot);
+    constexpr std::array<std::uint8_t, 16> kCategoryAppendEntry{
+        0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7,
+        0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48};
+    const bool append_pristine = entry_matches(
+        kCategoryAppendRva, kCategoryAppendEntry);
+    bool symmetric{};
+    NativeTabSlotGrowthPlan plan{};
+    const bool cells_exact = movie_exact && discover_slot_growth_target(
+        top,
+        caller_movie,
+        context.configured_minimum,
+        plan,
+        symmetric);
+    context.scene_proxy = scene_proxy;
+    context.movie = caller_movie;
+    context.discovered_capacity = plan.discovered_slot_count;
+    context.active_target = native_tab_active_slot_target(
+        context.discovered_capacity, active_logical_tab_count());
+    context.live_cells_symmetric = symmetric;
+
+    const bool competing_native_tweaks =
+        GetModuleHandleW(L"NativeTweaks.dll") != nullptr;
+    context.early_proof_exact = !competing_native_tweaks &&
+        g_category_append && register_frame_exact && movie_exact &&
+        identities_exact && count_exact && active_readable && stock_exact &&
+        snapshot_exact && append_pristine && cells_exact;
+    if (!context.early_proof_exact) {
+        if (competing_native_tweaks) {
+            if (context.configured_minimum > kStockLogicalTabCount) {
+                log_line(
+                    "WARNING: physical tab growth was left to NativeTweaks.dll because its competing constructor mutation path is loaded (configuredMinimum=%zu authoredCapacity=%zu)",
+                    context.configured_minimum,
+                    context.discovered_capacity);
+            }
+        } else {
+            log_line(
+                "ERROR: physical tab growth refused before mutation: exact same-construction proof failed (configuredMinimum=%zu discovered=%zu symmetric=%u)",
+                context.configured_minimum,
+                context.discovered_capacity,
+                context.live_cells_symmetric ? 1U : 0U);
+        }
+        return;
+    }
+    if (!plan.minimum_satisfied()) {
+        log_line(
+            "ERROR: physical tab growth refused before mutation: current GFX exposes %zu compatible slots, below configured MinimumTabSlots=%zu",
+            context.discovered_capacity,
+            context.configured_minimum);
+        return;
+    }
+    if (context.active_target < kStockLogicalTabCount ||
+        context.active_target > context.discovered_capacity) {
+        log_line(
+            "ERROR: physical tab growth refused before mutation: invalid active target %zu for authored capacity %zu and logical count %zu",
+            context.active_target,
+            context.discovered_capacity,
+            active_logical_tab_count());
+        return;
+    }
+    if (context.active_target == kStockLogicalTabCount) return;
+
+    context.mutation_attempted = true;
+    for (std::size_t expected_count = kStockLogicalTabCount + 1U;
+         expected_count <= context.active_target;
+         ++expected_count) {
+        g_inside_slot_growth_append = true;
+        // The helper increments the owned-vector count before copy
+        // construction. Do not catch native faults: no safe rollback exists
+        // for a partially constructed counted record.
+        g_category_append(storage, graphics);
+        g_inside_slot_growth_append = false;
+
+        std::uint64_t count_after{};
+        std::int32_t active_after{-1};
+        const bool checkpoint_exact = guarded_read(
+                static_cast<std::byte*>(top) + kCategoryCountOffset,
+                count_after) &&
+            count_after == expected_count &&
+            guarded_read(
+                selector + kSelectorActiveCountOffset, active_after) &&
+            active_after == context.active_before &&
+            slot_growth_records_exact(
+                top, expected_count, &graphics_snapshot);
+        if (!checkpoint_exact) {
+            fail_fast_after_slot_growth("append-checkpoint", context);
+        }
+        ++context.append_checkpoints;
+    }
+    context.mutation_committed =
+        context.append_checkpoints ==
+            context.active_target - kStockLogicalTabCount &&
+        slot_growth_records_exact(
+            top, context.active_target, &graphics_snapshot);
+    if (!context.mutation_committed) {
+        fail_fast_after_slot_growth("append-commit", context);
+    }
+}
+
+void observe_slot_growth_post_geometry(safetyhook::Context& cpu) noexcept {
+    if (!g_slot_growth_callbacks_armed.load(std::memory_order_acquire) ||
+        g_inside_slot_growth_append) {
+        return;
+    }
+    SlotGrowthConstructionContext& context = g_slot_growth_construction;
+    void* const top = reinterpret_cast<void*>(cpu.rdi);
+    if (!context.active || !context.mutation_attempted ||
+        context.top != top || context.late_seam_seen) {
+        return;
+    }
+    context.late_seam_seen = true;
+
+    void* scene_proxy{};
+    void* frame_top{};
+    SlotGrowthMovieFingerprint caller_movie{};
+    SlotGrowthMovieFingerprint top_movie{};
+    std::uint64_t count{};
+    std::int32_t active{-1};
+    const bool exact = guarded_read(
+            reinterpret_cast<const void*>(cpu.rsp + 0x50), scene_proxy) &&
+        scene_proxy == context.scene_proxy &&
+        read_slot_growth_movie_fingerprint(scene_proxy, caller_movie) &&
+        read_slot_growth_movie_fingerprint(
+            static_cast<std::byte*>(top) + kMovieContextOffset, top_movie) &&
+        same_slot_growth_movie(caller_movie, context.movie) &&
+        same_slot_growth_movie(top_movie, context.movie) &&
+        cpu.rbp >= 0x58 && guarded_read(
+            reinterpret_cast<const void*>(cpu.rbp - 0x58), frame_top) &&
+        frame_top == top &&
+        cpu.r13 == reinterpret_cast<std::uintptr_t>(
+            static_cast<std::byte*>(top) + kCategoryListOffset) &&
+        cpu.r14 == reinterpret_cast<std::uintptr_t>(
+            static_cast<std::byte*>(top) + kSelectorOffset) &&
+        cpu.r12 == reinterpret_cast<std::uintptr_t>(
+            static_cast<std::byte*>(top) + kCompositeOffset) &&
+        cpu.rsi == reinterpret_cast<std::uintptr_t>(
+            static_cast<std::byte*>(top) + kTopControllerOffset) &&
+        cpu.r15 == 0 &&
+        guarded_read(
+            static_cast<std::byte*>(top) + kCategoryCountOffset, count) &&
+        count == context.active_target &&
+        guarded_read(
+            static_cast<std::byte*>(top) + kSelectorOffset +
+                kSelectorActiveCountOffset,
+            active) &&
+        active == context.active_before &&
+        slot_growth_records_exact(top, context.active_target) &&
+        slot_growth_geometry_supports_capacity(
+            top, context.discovered_capacity);
+    context.late_proof_exact = exact;
+}
+
+void observe_slot_growth_post_constructor(
+    safetyhook::Context& cpu) noexcept {
+    if (!g_slot_growth_callbacks_armed.load(std::memory_order_acquire)) return;
+    const SlotGrowthConstructionContext pending = g_slot_growth_construction;
+    if (!pending.active || !pending.top) return;
+    g_slot_growth_construction = {};
+    if (!pending.mutation_attempted) return;
+
+    void* top_vtable{};
+    void* list_vtable{};
+    void* count_getter{};
+    void* selector_vtable{};
+    std::uint64_t count{};
+    std::int32_t active{-1};
+    std::int32_t selected{-2};
+    SlotGrowthMovieFingerprint caller_movie{};
+    SlotGrowthMovieFingerprint top_movie{};
+    const auto* const list = static_cast<const std::byte*>(pending.top) +
+        kCategoryListOffset;
+    const auto* const selector = static_cast<const std::byte*>(pending.top) +
+        kSelectorOffset;
+    const bool exact = pending.early_seam_seen && pending.late_seam_seen &&
+        pending.early_proof_exact && pending.late_proof_exact &&
+        pending.mutation_committed &&
+        pending.append_checkpoints ==
+            pending.active_target - kStockLogicalTabCount &&
+        reinterpret_cast<void*>(cpu.rax) == pending.top &&
+        reinterpret_cast<void*>(cpu.rdi) == pending.top &&
+        read_slot_growth_movie_fingerprint(
+            pending.scene_proxy, caller_movie) &&
+        read_slot_growth_movie_fingerprint(
+            static_cast<std::byte*>(pending.top) + kMovieContextOffset,
+            top_movie) &&
+        same_slot_growth_movie(caller_movie, pending.movie) &&
+        same_slot_growth_movie(top_movie, pending.movie) &&
+        guarded_read(pending.top, top_vtable) &&
+        top_vtable == g_game.base + kTopVtableRva &&
+        guarded_read(list, list_vtable) &&
+        list_vtable == g_game.base + kCategoryListVtableRva &&
+        guarded_read(
+            static_cast<const std::byte*>(list_vtable) + sizeof(void*),
+            count_getter) &&
+        count_getter == g_game.base + kCategoryCountGetterRva &&
+        guarded_read(selector, selector_vtable) &&
+        selector_vtable == g_game.base + kSelectorVtableRva &&
+        guarded_read(
+            static_cast<const std::byte*>(pending.top) +
+                kCategoryCountOffset,
+            count) &&
+        count == pending.active_target &&
+        guarded_read(selector + kSelectorActiveCountOffset, active) &&
+        active == static_cast<std::int32_t>(pending.active_target) &&
+        guarded_read(selector + kSelectorSelectedIndexOffset, selected) &&
+        selected >= -1 && selected < active &&
+        slot_growth_geometry_supports_capacity(
+            pending.top, pending.discovered_capacity) &&
+        slot_growth_records_exact(pending.top, pending.active_target);
+    if (!exact) fail_fast_after_slot_growth("post-constructor", pending);
+
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "NativeTabs physical tab growth committed: configuredMinimum=%zu authoredCapacity=%zu activeTarget=%zu nativeCount=%llu selectorActive=%d",
+        pending.configured_minimum,
+        pending.discovered_capacity,
+        pending.active_target,
+        static_cast<unsigned long long>(count),
+        active);
+}
+#endif
+
 bool destroy_proxies(
     std::array<ResolvedTabProxy, kPhysicalTabCapacity>& proxies) noexcept {
     bool exact{true};
@@ -9438,6 +10219,12 @@ enum class InjectedIconDetachResult : std::uint8_t {
     different_movie,
 };
 
+enum class InjectedIconsClearResult : std::uint8_t {
+    failed,
+    waiting_for_renderer_retirement,
+    cleared,
+};
+
 constexpr bool is_undefined_gfx_value(std::uint32_t flags) noexcept {
     return (flags & 0x8FU) == 0;
 }
@@ -9843,14 +10630,19 @@ bool detach_rgba8_host_for_replacement(
     const Rgba8ReferenceSnapshot refs_before = asset_index_exact
         ? snapshot_rgba8_references(asset_index)
         : Rgba8ReferenceSnapshot{};
-    const std::uint32_t raw_expected_before =
-        1U + active_before + debt_before;
+    const auto source_retirement =
+        plan_rgba8_retirement_reconciliation(
+            active_before,
+            debt_before,
+            refs_before.raw,
+            kRgba8RetirementLimits);
     const bool ownership_before_exact = reconciled_before &&
         (injected_before & mask) != 0 && (rgba_before & mask) != 0 &&
         asset_index_exact && active_before > 0U &&
         debt_before < kMaximumRgba8RetirementDebt &&
         refs_before.resource_read && refs_before.resource == 1U &&
-        refs_before.raw_read && refs_before.raw == raw_expected_before;
+        refs_before.raw_read && source_retirement.accepted() &&
+        source_retirement.retirement_debt_after == debt_before;
 
     const InjectedIconDetachResult detach_result = ownership_before_exact
         ? clear_injected_icon_host(
@@ -9864,40 +10656,42 @@ bool detach_rgba8_host_for_replacement(
         asset_index_exact
         ? snapshot_rgba8_references(asset_index)
         : Rgba8ReferenceSnapshot{};
-    const std::uint32_t active_after = active_before > 0U
-        ? active_before - 1U
-        : 0U;
-    const std::uint32_t minimum_raw_after = 1U + active_after;
-    const std::uint32_t maximum_debt_after = debt_before + 1U;
-    const std::uint32_t maximum_raw_after =
-        minimum_raw_after + maximum_debt_after;
+    const Rgba8HostRemovalPlan retirement =
+        plan_rgba8_host_removal(
+            active_before,
+            debt_before,
+            refs_before.raw,
+            refs_after.raw,
+            kRgba8RetirementLimits);
     const bool detach_transition_exact = ownership_before_exact &&
         detach_result == InjectedIconDetachResult::removed &&
         refs_after.resource_read && refs_after.resource == 1U &&
-        refs_after.raw_read && refs_after.raw >= minimum_raw_after &&
-        refs_after.raw <= maximum_raw_after;
+        refs_after.raw_read && retirement.accepted();
 
     std::uint32_t recorded_debt = debt_before;
     bool ledger_exact{};
     if (detach_transition_exact) {
-        recorded_debt = refs_after.raw - minimum_raw_after;
-        g_injected_icon_hosts.fetch_and(
-            ~mask,
-            std::memory_order_acq_rel);
-        g_rgba8_icon_hosts.fetch_and(
-            ~mask,
-            std::memory_order_acq_rel);
-        g_rgba8_host_assets[bit].store(0, std::memory_order_release);
-        g_rgba8_retirement_debt[asset_index].store(
-            recorded_debt, std::memory_order_release);
+        recorded_debt = retirement.retirement_debt_after;
+        const bool debt_published = set_rgba8_retirement_debt(
+            asset_index, recorded_debt);
+        if (debt_published) {
+            g_injected_icon_hosts.fetch_and(
+                ~mask,
+                std::memory_order_acq_rel);
+            g_rgba8_icon_hosts.fetch_and(
+                ~mask,
+                std::memory_order_acq_rel);
+            g_rgba8_host_assets[bit].store(0, std::memory_order_release);
 
-        ledger_exact =
-            (g_injected_icon_hosts.load(std::memory_order_acquire) & mask) ==
-                0 &&
-            (g_rgba8_icon_hosts.load(std::memory_order_acquire) & mask) == 0 &&
-            g_rgba8_host_assets[bit].load(std::memory_order_acquire) == 0 &&
-            g_rgba8_retirement_debt[asset_index].load(
-                std::memory_order_acquire) == recorded_debt;
+            ledger_exact =
+                (g_injected_icon_hosts.load(
+                     std::memory_order_acquire) & mask) == 0 &&
+                (g_rgba8_icon_hosts.load(
+                     std::memory_order_acquire) & mask) == 0 &&
+                g_rgba8_host_assets[bit].load(
+                    std::memory_order_acquire) == 0 &&
+                rgba8_retirement_debt(asset_index) == recorded_debt;
+        }
         if (ledger_exact) {
             g_rgba8_successful_detach_count.fetch_add(
                 1, std::memory_order_relaxed);
@@ -9920,11 +10714,11 @@ bool detach_rgba8_host_for_replacement(
         static_cast<unsigned>(refs_before.raw),
         refs_after.raw_read ? 1U : 0U,
         static_cast<unsigned>(refs_after.raw),
-        static_cast<unsigned>(raw_expected_before),
-        static_cast<unsigned>(minimum_raw_after),
-        static_cast<unsigned>(maximum_raw_after),
+        static_cast<unsigned>(source_retirement.maximum_raw),
+        static_cast<unsigned>(retirement.minimum_raw_after),
+        static_cast<unsigned>(retirement.maximum_raw_after),
         static_cast<unsigned>(active_before),
-        static_cast<unsigned>(active_after),
+        static_cast<unsigned>(retirement.active_hosts_after),
         static_cast<unsigned>(debt_before),
         static_cast<unsigned>(recorded_debt),
         static_cast<unsigned>(
@@ -10024,7 +10818,7 @@ bool detach_vector_host_for_replacement(
         detach_result == InjectedIconDetachResult::removed && ledger_exact;
 }
 
-bool clear_injected_icons(
+InjectedIconsClearResult clear_injected_icons(
     void* top,
     bool allow_already_absent = false) noexcept {
     const TabHostMask active_tracked = g_injected_icon_hosts.load(
@@ -10033,9 +10827,18 @@ bool clear_injected_icons(
         g_staged_injected_icon_hosts.load(std::memory_order_acquire);
     if ((active_tracked | staged_tracked) == 0) {
         log_rgba8_lifecycle_snapshot("clear-no-hosts", top);
+        if (!reconcile_rgba8_retirement_debt(
+                "epoch-clear-no-hosts")) {
+            return InjectedIconsClearResult::failed;
+        }
+        if (!all_rgba8_retirement_debts_zero()) {
+            return allow_already_absent
+                ? InjectedIconsClearResult::waiting_for_renderer_retirement
+                : InjectedIconsClearResult::failed;
+        }
         g_injected_movie_fingerprint = {};
         g_icon_bank_b_hosts.store(0, std::memory_order_release);
-        return true;
+        return InjectedIconsClearResult::cleared;
     }
 
     bool all_cleared{true};
@@ -10060,6 +10863,44 @@ bool clear_injected_icons(
                     std::memory_order_acquire)
                 : g_rgba8_host_assets[bit].load(
                     std::memory_order_acquire);
+            const bool asset_index_exact = was_rgba && prior_asset > 0U &&
+                prior_asset <= active_custom_tab_count() &&
+                catalogue_icon_requires_raster(prior_asset - 1U);
+            const std::size_t asset_index = asset_index_exact
+                ? prior_asset - 1U
+                : invalid_tab_index;
+            const std::uint32_t active_before = asset_index_exact
+                ? count_active_rgba8_asset_hosts(asset_index)
+                : 0U;
+            std::uint32_t debt_before = asset_index_exact
+                ? rgba8_retirement_debt(asset_index)
+                : 0U;
+            const Rgba8ReferenceSnapshot refs_before =
+                asset_index_exact
+                ? snapshot_rgba8_references(asset_index)
+                : Rgba8ReferenceSnapshot{};
+            bool epoch_source_exact = allow_already_absent &&
+                asset_index_exact && refs_before.resource_read &&
+                refs_before.resource == 1U && refs_before.raw_read;
+            if (epoch_source_exact) {
+                const auto reconciliation =
+                    plan_rgba8_retirement_reconciliation(
+                        active_before,
+                        debt_before,
+                        refs_before.raw,
+                        kRgba8RetirementLimits);
+                epoch_source_exact = reconciliation.accepted();
+                if (epoch_source_exact &&
+                    reconciliation.retirement_debt_after != debt_before) {
+                    epoch_source_exact = set_rgba8_retirement_debt(
+                        asset_index,
+                        reconciliation.retirement_debt_after);
+                    if (epoch_source_exact) {
+                        debt_before =
+                            reconciliation.retirement_debt_after;
+                    }
+                }
+            }
             const std::uint8_t property_bank = staged
                 ? static_cast<std::uint8_t>(
                     active_icon_property_bank(bit) ^ 1U)
@@ -10067,13 +10908,38 @@ bool clear_injected_icons(
             const InjectedIconDetachResult result =
                 clear_injected_icon_host(
                     top, layer, physical, property_bank);
+            const Rgba8ReferenceSnapshot refs_after =
+                asset_index_exact &&
+                    result == InjectedIconDetachResult::removed
+                ? snapshot_rgba8_references(asset_index)
+                : Rgba8ReferenceSnapshot{};
+            const Rgba8HostRemovalPlan epoch_retirement =
+                plan_rgba8_host_removal(
+                    active_before,
+                    debt_before,
+                    refs_before.raw,
+                    refs_after.raw,
+                    kRgba8RetirementLimits);
+            const bool epoch_removed_ref_proven =
+                allow_already_absent && was_rgba && epoch_source_exact &&
+                result == InjectedIconDetachResult::removed &&
+                refs_after.resource_read && refs_after.resource == 1U &&
+                refs_after.raw_read && epoch_retirement.accepted() &&
+                set_rgba8_retirement_debt(
+                    asset_index,
+                    epoch_retirement.retirement_debt_after);
             const bool removed_ref_proven =
                 result == InjectedIconDetachResult::removed &&
-                (!was_rgba || rgba8_references_match_tracked_hosts(
-                    staged ? "post-remove-staged" : "post-remove",
-                    bit,
-                    0,
-                    staged));
+                (!was_rgba ||
+                    (allow_already_absent
+                        ? epoch_removed_ref_proven
+                        : rgba8_references_match_tracked_hosts(
+                            staged
+                                ? "post-remove-staged"
+                                : "post-remove",
+                            bit,
+                            0,
+                            staged)));
             const bool absent_boundary_released =
                 allow_already_absent &&
                 result == InjectedIconDetachResult::already_absent &&
@@ -10107,12 +10973,34 @@ bool clear_injected_icons(
                     g_rgba8_host_assets[bit].store(
                         0, std::memory_order_release);
                 }
-                if (was_rgba) {
+                const TabHostMask injected_after = staged
+                    ? g_staged_injected_icon_hosts.load(
+                        std::memory_order_acquire)
+                    : g_injected_icon_hosts.load(
+                        std::memory_order_acquire);
+                const TabHostMask rgba_after = staged
+                    ? g_staged_rgba8_icon_hosts.load(
+                        std::memory_order_acquire)
+                    : g_rgba8_icon_hosts.load(
+                        std::memory_order_acquire);
+                const std::size_t asset_after = staged
+                    ? g_staged_rgba8_host_assets[bit].load(
+                        std::memory_order_acquire)
+                    : g_rgba8_host_assets[bit].load(
+                        std::memory_order_acquire);
+                const bool ledger_exact =
+                    (injected_after & mask) == 0 &&
+                    (rgba_after & mask) == 0 && asset_after == 0 &&
+                    (!epoch_removed_ref_proven ||
+                        rgba8_retirement_debt(asset_index) ==
+                            epoch_retirement.retirement_debt_after);
+                if (was_rgba && ledger_exact) {
                     g_rgba8_successful_detach_count.fetch_add(
                         1, std::memory_order_relaxed);
                 }
                 log_line(
-                    "iconDetach ownershipCleared=1 bank=%s layer=%u physical=%zu rgba=%u asset=%u result=%u refsProven=%u",
+                    "iconDetach ownershipCleared=%u bank=%s layer=%u physical=%zu rgba=%u asset=%u result=%u refsProven=%u retirement={active:%u->%u debt:%u->%u policy:%u}",
+                    ledger_exact ? 1U : 0U,
                     staged ? "staged" : "active",
                     static_cast<unsigned>(layer),
                     physical,
@@ -10122,7 +11010,23 @@ bool clear_injected_icons(
                     (!was_rgba || removed_ref_proven ||
                         absent_boundary_released || movie_boundary_released)
                         ? 1U
-                        : 0U);
+                        : 0U,
+                    static_cast<unsigned>(active_before),
+                    static_cast<unsigned>(
+                        epoch_retirement.active_hosts_after),
+                    static_cast<unsigned>(debt_before),
+                    static_cast<unsigned>(
+                        epoch_retirement.retirement_debt_after),
+                    static_cast<unsigned>(epoch_retirement.status));
+                if (!ledger_exact) {
+                    log_failure(
+                        "iconDetach ownership proof succeeded but the host/debt ledger did not publish exactly (bank=%s layer=%u physical=%zu rgba=%u)",
+                        staged ? "staged" : "active",
+                        static_cast<unsigned>(layer),
+                        physical,
+                        was_rgba ? 1U : 0U);
+                    all_cleared = false;
+                }
                 if (absent_boundary_released && was_rgba) {
                     log_line(
                         "iconDetach accepted already-absent RGBA8 host at an epoch boundary only after every resource/raw image returned to root refcount 1 (bank=%s layer=%u physical=%zu)",
@@ -10141,10 +11045,11 @@ bool clear_injected_icons(
             } else {
                 if (result == InjectedIconDetachResult::removed && was_rgba) {
                     log_failure(
-                        "iconDetach removed a tracked RGBA8 Shape but its RawImage reference did not reach the exact remaining-host count; ownership ledger retained (bank=%s layer=%u physical=%zu)",
+                        "iconDetach removed a tracked RGBA8 Shape but its RawImage retirement transition was not exact; ownership ledger retained (bank=%s layer=%u physical=%zu policy=%u)",
                         staged ? "staged" : "active",
                         static_cast<unsigned>(layer),
-                        physical);
+                        physical,
+                        static_cast<unsigned>(epoch_retirement.status));
                 } else if (result ==
                     InjectedIconDetachResult::already_absent) {
                     log_failure(
@@ -10163,15 +11068,34 @@ bool clear_injected_icons(
     // intact source bank. Retire that staged bank first, then the active bank.
     clear_bank(true);
     clear_bank(false);
-    log_rgba8_lifecycle_snapshot(
-        all_cleared ? "post-clear" : "post-clear-failed", top);
-    if (all_cleared &&
+    const bool host_ledgers_empty =
         g_injected_icon_hosts.load(std::memory_order_acquire) == 0 &&
-        g_staged_injected_icon_hosts.load(std::memory_order_acquire) == 0) {
+        g_staged_injected_icon_hosts.load(std::memory_order_acquire) == 0;
+    const bool retirement_exact = all_cleared && host_ledgers_empty &&
+        reconcile_rgba8_retirement_debt("epoch-clear-post-remove");
+    const bool retirement_complete = retirement_exact &&
+        all_rgba8_retirement_debts_zero();
+    const InjectedIconsClearResult clear_result = !all_cleared ||
+            !host_ledgers_empty || !retirement_exact
+        ? InjectedIconsClearResult::failed
+        : (retirement_complete
+            ? InjectedIconsClearResult::cleared
+            : (allow_already_absent
+                ? InjectedIconsClearResult::waiting_for_renderer_retirement
+                : InjectedIconsClearResult::failed));
+    log_rgba8_lifecycle_snapshot(
+        clear_result == InjectedIconsClearResult::cleared
+            ? "post-clear"
+            : (clear_result ==
+                    InjectedIconsClearResult::waiting_for_renderer_retirement
+                ? "post-clear-waiting-retirement"
+                : "post-clear-failed"),
+        top);
+    if (clear_result == InjectedIconsClearResult::cleared) {
         g_injected_movie_fingerprint = {};
         g_icon_bank_b_hosts.store(0, std::memory_order_release);
     }
-    return all_cleared;
+    return clear_result;
 }
 
 bool sample_current_movie_fingerprint(
@@ -10648,7 +11572,8 @@ void invoke_refresh_title(void* top) noexcept {
 bool restore_previous_mapping(
     void* top,
     const std::array<RecordFields, kPhysicalTabCapacity>& previous) noexcept {
-    const bool overlays_cleared = clear_injected_icons(top);
+    const bool overlays_cleared = clear_injected_icons(top) ==
+        InjectedIconsClearResult::cleared;
     const bool records_restored = overlays_cleared &&
         write_record_fields(top, previous);
     ResolvedTabLayers rollback_layers{};
@@ -10758,13 +11683,65 @@ bool restore_previous_mapping(
         (output.rgba_mask & output.vector_mask) == 0;
 }
 
+[[nodiscard]] bool same_injected_host_layout(
+    const InjectedHostLayout& left,
+    const InjectedHostLayout& right) noexcept {
+    if (left.injected_mask != right.injected_mask ||
+        left.rgba_mask != right.rgba_mask ||
+        left.vector_mask != right.vector_mask) {
+        return false;
+    }
+    for (std::size_t bit = 0; bit < active_tab_host_count(); ++bit) {
+        if (left.assets[bit] != right.assets[bit]) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool exact_initial_catalogue_upgrade(
+    const InjectedHostLayout& source,
+    const InjectedHostLayout& target) noexcept {
+    const bool topology_exact = source.rgba_mask == 0 &&
+        target.rgba_mask != 0 &&
+        source.injected_mask == target.injected_mask &&
+        source.vector_mask ==
+            (target.vector_mask | target.rgba_mask) &&
+        (target.vector_mask & target.rgba_mask) == 0;
+    if (!topology_exact) return false;
+
+    for (std::size_t bit = 0; bit < active_tab_host_count(); ++bit) {
+        const TabHostMask mask = TabHostMask{1} << bit;
+        if (source.assets[bit] != 0 ||
+            (((target.rgba_mask & mask) != 0) !=
+                (target.assets[bit] != 0))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool pending_requests_catalogue_presentation_refresh(
+    void* top,
+    const TabViewport& viewport) noexcept {
+    const PendingTransition& pending = g_runtime.pending;
+    return pending.active && pending.presentation_refresh &&
+        pending.top == top && g_runtime.active && g_runtime.top == top &&
+        pending.candidate.mapping_generation() ==
+            viewport.mapping_generation() &&
+        pending.candidate.window_start() == viewport.window_start() &&
+        pending.candidate.selected_logical() ==
+            viewport.selected_logical();
+}
+
 [[nodiscard]] bool shape_replacement_plan(
     void* top,
     const TabViewport& viewport,
     Rgba8ReplacementPlan& output) noexcept {
+    const bool catalogue_presentation_refresh =
+        pending_requests_catalogue_presentation_refresh(top, viewport);
     const bool transition_required = g_runtime.active &&
         g_runtime.top == top &&
-        (tab_overflow_indicators_changed(g_runtime.viewport, viewport) ||
+        (catalogue_presentation_refresh ||
+            tab_overflow_indicators_changed(g_runtime.viewport, viewport) ||
             viewport.mapping_generation() !=
                 g_runtime.viewport.mapping_generation());
     if (!transition_required ||
@@ -10778,6 +11755,15 @@ bool restore_previous_mapping(
     if (!snapshot_injected_host_layout(source) ||
         !derive_injected_host_layout(viewport, target)) {
         return false;
+    }
+
+    if (catalogue_presentation_refresh) {
+        // This deferred first-epoch repair is deliberately narrower than a
+        // generic same-mapping repaint. Before catalogue publication every
+        // injected host is a vector Shape. Afterwards, only visible custom
+        // hosts may become RGBA8; overflow markers remain vectors. Refuse any
+        // other ownership topology before touching the display tree.
+        if (!exact_initial_catalogue_upgrade(source, target)) return false;
     }
 
     output = {};
@@ -10837,7 +11823,8 @@ bool apply_mapping(
     Rgba8ReplacementPlan replacement_plan{};
     const bool transition_required = g_runtime.active &&
         g_runtime.top == top &&
-        (tab_overflow_indicators_changed(g_runtime.viewport, viewport) ||
+        (pending_requests_catalogue_presentation_refresh(top, viewport) ||
+            tab_overflow_indicators_changed(g_runtime.viewport, viewport) ||
             viewport.mapping_generation() !=
                 g_runtime.viewport.mapping_generation());
     const bool shape_replacement_transition =
@@ -11528,7 +12515,8 @@ bool apply_mapping(
     // Script-created children survive native timeline repainting. Remove every
     // tracked child while its current parent mapping is still valid, then let
     // the desired repaint recreate only the custom icons it actually needs.
-    if (!clear_injected_icons(top)) {
+    if (clear_injected_icons(top) !=
+        InjectedIconsClearResult::cleared) {
         destroy_tab_layers(layers);
         log_failure(
             "slot remapping aborted because injected icons could not be cleared");
@@ -12286,9 +13274,13 @@ bool initialize_runtime(
                 std::memory_order_acquire)) != 0) {
         log_line(
             "Viewport initialization found a surviving injected-icon ledger; reconciling it before publishing a new catalogue");
-        if (!clear_injected_icons(top, true)) {
-            log_failure(
-                "Viewport initialization refused to overwrite a surviving injected-icon ledger");
+        const InjectedIconsClearResult clear_result =
+            clear_injected_icons(top, true);
+        if (clear_result != InjectedIconsClearResult::cleared) {
+            if (clear_result == InjectedIconsClearResult::failed) {
+                log_failure(
+                    "Viewport initialization refused to overwrite a surviving injected-icon ledger");
+            }
             return false;
         }
     } else {
@@ -12476,6 +13468,31 @@ bool initialize_runtime(
         return false;
     }
     g_runtime.active = true;
+
+    // Raster resources are process-owned, while every Configuration movie
+    // has a fresh display tree. Initial publication intentionally uses the
+    // safe vector fallback because RuntimeState is not active until the
+    // mapping is complete. Schedule one ownership-checked presentation pass
+    // for every new movie epoch so an already-published RGBA8 catalogue is
+    // rebound after close/reopen just as it is after first publication.
+    const bool presentation_refresh_requested =
+        !g_rgba8_publication_disabled.load(std::memory_order_acquire) &&
+        g_runtime.catalogue_presentation_refresh.request_if_needed(
+            g_runtime.viewport,
+            kStockLogicalTabCount,
+            g_runtime.presentation_epoch,
+            g_composite_frame_sequence);
+    log_line(
+        "Configuration epoch deferred initial presentation refresh=%u epoch=%llu window=%zu generation=%llu catalogueReady=%u",
+        presentation_refresh_requested ? 1U : 0U,
+        static_cast<unsigned long long>(
+            g_runtime.presentation_epoch),
+        g_runtime.viewport.window_start(),
+        static_cast<unsigned long long>(
+            g_runtime.viewport.mapping_generation()),
+        g_rgba8_catalogue_ready.load(std::memory_order_acquire)
+            ? 1U
+            : 0U);
     invoke_refresh_title(top);
 
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
@@ -12593,9 +13610,13 @@ bool ensure_runtime(void* top) noexcept {
                     "same-address movie fingerprint changed");
                 g_runtime.pending = {};
                 reset_pointer_dwell("same-address movie epoch changed");
-                if (!clear_injected_icons(top, true)) {
-                    log_failure(
-                        "same-address movie change could not reconcile the retained icon ledger; viewport remains suspended");
+                const InjectedIconsClearResult clear_result =
+                    clear_injected_icons(top, true);
+                if (clear_result != InjectedIconsClearResult::cleared) {
+                    if (clear_result == InjectedIconsClearResult::failed) {
+                        log_failure(
+                            "same-address movie change could not reconcile the retained icon ledger; viewport remains suspended");
+                    }
                     return false;
                 }
                 if (!restore_preserved_stock_records(top)) {
@@ -12619,9 +13640,13 @@ bool ensure_runtime(void* top) noexcept {
                     "stock layout was republished during the transaction");
                 g_runtime.pending = {};
                 reset_pointer_dwell("configuration epoch reset");
-                if (!clear_injected_icons(top, true)) {
-                    log_failure(
-                        "same-address stock reset could not clear tracked custom icons; viewport remains suspended");
+                const InjectedIconsClearResult clear_result =
+                    clear_injected_icons(top, true);
+                if (clear_result != InjectedIconsClearResult::cleared) {
+                    if (clear_result == InjectedIconsClearResult::failed) {
+                        log_failure(
+                            "same-address stock reset could not clear tracked custom icons; viewport remains suspended");
+                    }
                     return false;
                 }
                 log_line(
@@ -12656,9 +13681,13 @@ bool ensure_runtime(void* top) noexcept {
         // them. If both are exactly Undefined, the fresh movie already owns a
         // clean parent and this proven epoch boundary may discard the stale
         // bit. Every partial or unexpected state still fails closed.
-        if (!clear_injected_icons(top, true)) {
-            log_failure(
-                "Configuration instance changed but retained tab-strip icons could not be cleared through the new top; viewport remains suspended");
+        const InjectedIconsClearResult clear_result =
+            clear_injected_icons(top, true);
+        if (clear_result != InjectedIconsClearResult::cleared) {
+            if (clear_result == InjectedIconsClearResult::failed) {
+                log_failure(
+                    "Configuration instance changed but retained tab-strip icons could not be cleared through the new top; viewport remains suspended");
+            }
             return false;
         }
         if (!restore_preserved_stock_records(top)) {
@@ -13385,6 +14414,114 @@ TabViewportChange calculate_transition(
     return candidate.select_physical_aligned(new_physical);
 }
 
+bool arm_catalogue_presentation_refresh(void* top) noexcept {
+    if (!g_runtime.catalogue_presentation_refresh.pending()) return false;
+
+    InPlaceRgba8RebindTransaction& transaction =
+        g_in_place_rgba8_rebind_transaction;
+    if (!top || !g_runtime.active || g_runtime.top != top ||
+        !g_rgba8_catalogue_ready.load(std::memory_order_acquire) ||
+        g_rgba8_publication_disabled.load(std::memory_order_acquire) ||
+        g_mutating_viewport || g_runtime.pending.active ||
+        transaction.active || transaction.failed ||
+        g_runtime.destructive_transition_failed ||
+        !all_rgba8_retirement_debts_zero() ||
+        !validate_top(top) ||
+        !records_match_mapping(top, g_runtime.viewport)) {
+        return false;
+    }
+
+    const DeferredTabPresentationRefreshPoll refresh_poll =
+        g_runtime.catalogue_presentation_refresh.poll(
+            g_runtime.presentation_epoch,
+            g_runtime.viewport.mapping_generation(),
+            g_composite_frame_sequence);
+    if (refresh_poll != DeferredTabPresentationRefreshPoll::ready) {
+        return false;
+    }
+
+    InjectedMovieFingerprint current_fingerprint{};
+    const bool fingerprint_exact =
+        sample_current_movie_fingerprint(top, current_fingerprint) &&
+        same_movie_fingerprint(
+            current_fingerprint, g_injected_movie_fingerprint) &&
+        g_injected_movie_fingerprint.presentation_epoch ==
+            g_runtime.presentation_epoch;
+    if (!fingerprint_exact) return false;
+
+    InjectedHostLayout source{};
+    InjectedHostLayout target{};
+    if (!snapshot_injected_host_layout(source) ||
+        !derive_injected_host_layout(g_runtime.viewport, target)) {
+        g_runtime.catalogue_presentation_refresh.consume();
+        log_failure(
+            "initial catalogue presentation refresh could not derive an exact source/target host layout; vector fallbacks remain visible");
+        return false;
+    }
+
+    if (same_injected_host_layout(source, target)) {
+        // Capacities eight and nine expose only stock tabs plus the overflow
+        // marker on the initial window, so catalogue publication changes no
+        // visible presentation and needs no display-tree mutation.
+        g_runtime.catalogue_presentation_refresh.consume();
+        log_line(
+            "initial catalogue presentation refresh not required for the current viewport");
+        return false;
+    }
+
+    if (!exact_initial_catalogue_upgrade(source, target)) {
+        g_runtime.catalogue_presentation_refresh.consume();
+        log_failure(
+            "initial catalogue presentation refresh refused a non-vector-to-RGBA ownership topology (source={injected:0x%08X rgba:0x%08X vector:0x%08X} target={injected:0x%08X rgba:0x%08X vector:0x%08X}); vector fallbacks remain visible",
+            static_cast<unsigned>(source.injected_mask),
+            static_cast<unsigned>(source.rgba_mask),
+            static_cast<unsigned>(source.vector_mask),
+            static_cast<unsigned>(target.injected_mask),
+            static_cast<unsigned>(target.rgba_mask),
+            static_cast<unsigned>(target.vector_mask));
+        return false;
+    }
+
+    std::uint32_t selected_physical{};
+    const std::size_t selected_logical =
+        g_runtime.viewport.selected_logical();
+    const std::size_t expected_physical =
+        g_runtime.viewport.selected_physical();
+    const LogicalTab* const selected_tab =
+        runtime_logical_tab(selected_logical);
+    if (!selected_tab ||
+        expected_physical >= active_physical_tab_count() ||
+        !read_selected_physical(top, selected_physical) ||
+        selected_physical != expected_physical) {
+        return false;
+    }
+
+    PendingTransition refresh{};
+    refresh.active = true;
+    refresh.presentation_refresh = true;
+    refresh.top = top;
+    refresh.candidate = g_runtime.viewport;
+    refresh.native_physical = selected_physical;
+    refresh.desired_physical = selected_physical;
+    refresh.provisional_logical = selected_logical;
+    refresh.desired_logical = selected_logical;
+    refresh.previous_logical = selected_logical;
+    refresh.provisional_category = selected_tab->category;
+    refresh.desired_category = selected_tab->category;
+    refresh.requested_qpc = query_performance_ticks();
+    g_runtime.pending = refresh;
+    g_runtime.catalogue_presentation_refresh.consume();
+    log_line(
+        "initial catalogue presentation refresh armed epoch=%llu window=%zu generation=%llu sourceVector=0x%08X targetRgba=0x%08X",
+        static_cast<unsigned long long>(g_runtime.presentation_epoch),
+        g_runtime.viewport.window_start(),
+        static_cast<unsigned long long>(
+            g_runtime.viewport.mapping_generation()),
+        static_cast<unsigned>(source.vector_mask),
+        static_cast<unsigned>(target.rgba_mask));
+    return true;
+}
+
 void abandon_pending_to_native_selection() noexcept {
     if (!g_runtime.pending.active) return;
     const std::uint32_t native_physical =
@@ -13434,6 +14571,7 @@ PendingTransitionCommitResult commit_pending_transition(
     }
 
     const bool repaint_required =
+        pending.presentation_refresh ||
         pending.candidate.mapping_generation() !=
             g_runtime.viewport.mapping_generation() ||
         pending.candidate.window_start() !=
@@ -13578,13 +14716,15 @@ PendingTransitionCommitResult commit_pending_transition(
         }
     }
 
-    log_research_carrier_selection(top, "commit",
-        pending.desired_logical, pending.desired_category);
+    if (!pending.presentation_refresh) {
+        log_research_carrier_selection(top, "commit",
+            pending.desired_logical, pending.desired_category);
+    }
     if (pending.diagnose_wrap) {
         log_wrap_panel_state(top, "commit-after-switch",
             pending.previous_logical, pending.desired_logical);
     }
-    invoke_refresh_title(top);
+    if (!pending.presentation_refresh) invoke_refresh_title(top);
 
     const std::uint32_t event =
         g_transition_log_count.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -13592,7 +14732,9 @@ PendingTransitionCommitResult commit_pending_transition(
         log_line(
             "remap[%u] kind=%s nativePhysical=%u desiredPhysical=%u provisionalLogical=%zu desiredLogical=%zu category=%d->%d window=%zu->%zu generation=%llu",
             static_cast<unsigned>(event),
-            repaint_required ? "presentation" : "content-only",
+            pending.presentation_refresh
+                ? "catalogue-refresh"
+                : (repaint_required ? "presentation" : "content-only"),
             static_cast<unsigned>(pending.native_physical),
             static_cast<unsigned>(pending.desired_physical),
             pending.provisional_logical, pending.desired_logical,
@@ -13602,14 +14744,27 @@ PendingTransitionCommitResult commit_pending_transition(
             static_cast<unsigned long long>(
                 pending.candidate.mapping_generation()));
     }
+    const bool completed_catalogue_refresh =
+        pending.presentation_refresh;
     const std::uint64_t ticket = pending.pointer_dwell_ticket;
     g_runtime.viewport = pending.candidate;
     pending = {};
     g_mutating_viewport = false;
-    finish_pointer_dwell_transition(
-        ticket, repaint_required
-            ? "viewport remap committed"
-            : "content-only carrier route committed");
+    if (!completed_catalogue_refresh) {
+        finish_pointer_dwell_transition(
+            ticket, repaint_required
+                ? "viewport remap committed"
+                : "content-only carrier route committed");
+    }
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    if (completed_catalogue_refresh) {
+        erui::detail::logf(
+            erui::LogLevel::info,
+            "NativeTabs initial custom-icon presentation refresh completed: physical=%zu logical=%zu",
+            active_physical_tab_count(),
+            active_logical_tab_count());
+    }
+#endif
     return PendingTransitionCommitResult::committed;
 }
 
@@ -13937,6 +15092,7 @@ void __fastcall selection_callback_detour(
         g_runtime.pending = {
             true,
             diagnose_wrap,
+            false,
             top,
             candidate,
             static_cast<std::uint32_t>(new_physical),
@@ -14211,8 +15367,11 @@ void __fastcall composite_frame_detour(
             // two-phase transaction had already entered a destructive stage.
         } else {
             static_cast<void>(true) /* Graphics is the rows-only carrier */;
+            (void)arm_catalogue_presentation_refresh(top);
             if (g_runtime.pending.active &&
                 g_runtime.pending.top == top) {
+                const bool catalogue_presentation_refresh =
+                    g_runtime.pending.presentation_refresh;
                 const bool diagnose_wrap =
                     g_runtime.pending.diagnose_wrap;
                 const std::size_t previous_logical =
@@ -14241,6 +15400,17 @@ void __fastcall composite_frame_detour(
                 }
                 if (input_action ==
                     TabTransitionInputAction::invoke_with_live_input) {
+                    if (catalogue_presentation_refresh) {
+                        // This internal repair was not initiated by native
+                        // selection input. Keep its commit frame free of a
+                        // simultaneous L1/R1 or pointer callback; ordinary
+                        // live input resumes on the following frame.
+                        std::uint8_t blocked_input{};
+                        ScopedBooleanTrue blocking{
+                            g_blocking_composite_input};
+                        original(composite, frame_value, &blocked_input);
+                        return;
+                    }
                     // The logical mapping, selector, page, title, and icon
                     // presentation are coherent now. Preserve Elden Ring's
                     // real input gate on this frame so its native held-button
@@ -14334,7 +15504,35 @@ void __fastcall composite_frame_detour(
     if (!g_mutating_viewport && !g_runtime.pending.active) {
         (void)reconcile_rgba8_retirement_debt(
             "post-native-composite");
+        const bool catalogue_ready_before =
+            g_rgba8_catalogue_ready.load(std::memory_order_acquire);
         run_raw_image_lifecycle_probe(post_top);
+        const bool catalogue_ready_after =
+            g_rgba8_catalogue_ready.load(std::memory_order_acquire);
+        if (!catalogue_ready_before && catalogue_ready_after && post_top &&
+            g_runtime.active && g_runtime.top == post_top &&
+            !g_runtime.destructive_transition_failed) {
+            // Input may have remapped the viewport while the process-wide
+            // catalogue was being constructed. Rebase the epoch request to
+            // the mapping that is current at the readiness boundary; later
+            // Configuration epochs schedule independently during initialize.
+            const bool requested =
+                !g_rgba8_publication_disabled.load(
+                    std::memory_order_acquire) &&
+                g_runtime.catalogue_presentation_refresh.request_if_needed(
+                    g_runtime.viewport,
+                    kStockLogicalTabCount,
+                    g_runtime.presentation_epoch,
+                    frame_sequence);
+            log_line(
+                "RGBA8 catalogue publication rebased epoch presentation refresh=%u epoch=%llu window=%zu generation=%llu",
+                requested ? 1U : 0U,
+                static_cast<unsigned long long>(
+                    g_runtime.presentation_epoch),
+                g_runtime.viewport.window_start(),
+                static_cast<unsigned long long>(
+                    g_runtime.viewport.mapping_generation()));
+        }
         run_bitmapdata_property_survival_verification(
             post_top, frame_sequence);
         run_deferred_bitmapdata_constructor_probe(
@@ -14399,6 +15597,14 @@ void reset_hooks() noexcept {
         return;
     }
     g_viewport_callbacks_armed.store(false, std::memory_order_release);
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    g_slot_growth_callbacks_armed.store(false, std::memory_order_release);
+    g_slot_growth_early_hook.reset();
+    g_slot_growth_late_hook.reset();
+    g_slot_growth_post_constructor_hook.reset();
+    g_category_append = nullptr;
+    g_slot_growth_construction = {};
+#endif
     g_research_switch_hook.reset();
     g_original_research_switch.store(nullptr, std::memory_order_release);
     g_composite_frame_hook.reset();
@@ -14570,6 +15776,45 @@ bool install_hooks_and_interfaces(
     constexpr std::array<std::uint8_t, 16> kDestructor271Entry{
         0x48, 0x89, 0x4C, 0x24, 0x08, 0x53, 0x48, 0x83,
         0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE};
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    constexpr std::array<std::uint8_t, 16> kTopConstructorEntry{
+        0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41,
+        0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D, 0xAC};
+    constexpr std::array<std::uint8_t, 16> kEarlySlotGrowth271{
+        0x4C, 0x8D, 0x05, 0xB2, 0x8F, 0x17, 0x02, 0x48,
+        0x8D, 0x55, 0x50, 0x48, 0x8B, 0x4C, 0x24, 0x50};
+    constexpr std::array<std::uint8_t, 16> kEarlySlotGrowth272{
+        0x4C, 0x8D, 0x05, 0xF2, 0xAB, 0x17, 0x02, 0x48,
+        0x8D, 0x55, 0x50, 0x48, 0x8B, 0x4C, 0x24, 0x50};
+    constexpr std::array<std::uint8_t, 16> kFirstCountPublication{
+        0x49, 0x8B, 0x45, 0x00, 0x49, 0x8B, 0xCD, 0xFF,
+        0x50, 0x08, 0x8B, 0xD0, 0x48, 0x8D, 0x4B, 0x18};
+    constexpr std::array<std::uint8_t, 16> kSelectorGeometryDispatch{
+        0x49, 0x8B, 0x06, 0x49, 0x8B, 0xCE, 0xFF, 0x50,
+        0x18, 0x0F, 0xBF, 0x9D, 0x74, 0x01, 0x00, 0x00};
+    constexpr std::array<std::uint8_t, 16> kPostGeometryObservation{
+        0x0F, 0xBF, 0x9D, 0x74, 0x01, 0x00, 0x00, 0x4C,
+        0x89, 0x6C, 0x24, 0x40, 0x49, 0x8D, 0x8E, 0xE0};
+    constexpr std::array<std::uint8_t, 17> kCountPropagationDispatch{
+        0x45, 0x33, 0xC9, 0x44, 0x8B, 0xC3, 0x49, 0x8B,
+        0xD5, 0x49, 0x8B, 0xCE, 0xE8, 0xD4, 0xF7, 0xFF,
+        0xFF};
+    constexpr std::array<std::uint8_t, 16> kPostConstructorObservation{
+        0x48, 0x8B, 0xF8, 0xEB, 0x03, 0x48, 0x8B, 0xFB,
+        0xF6, 0xC3, 0x01, 0x74, 0x11, 0x83, 0xE3, 0xFE};
+    constexpr std::array<std::uint8_t, 16> kCategoryAppendEntry{
+        0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7,
+        0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48};
+    constexpr std::array<std::uint8_t, 7> kCategoryCountGetterEntry{
+        0x8B, 0x81, 0x60, 0x05, 0x00, 0x00, 0xC3};
+    constexpr std::array<std::uint8_t, 16> kSelectorCountSetterEntry{
+        0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83,
+        0xEC, 0x20, 0x8B, 0xFA, 0x48, 0x8B, 0xD9, 0x85};
+    constexpr std::array<std::uint8_t, 20> kGeometryEnumeratorEntry{
+        0x48, 0x8B, 0xC4, 0x55, 0x56, 0x57, 0x41, 0x54,
+        0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D,
+        0xA8, 0xE8, 0xFE, 0xFF};
+#endif
 
     if (!g_native_tabs_build_profile) {
         log_line(
@@ -14621,6 +15866,33 @@ bool install_hooks_and_interfaces(
         entry_matches(
             kNativePointerSelectRva,
             kNativePointerSelect271Entry);
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    const bool early_slot_growth_matches =
+        tabs_build().timestamp == kNativeTabsBuildProfiles[0].timestamp
+        ? entry_matches(kEarlySlotGrowthRva, kEarlySlotGrowth271)
+        : entry_matches(kEarlySlotGrowthRva, kEarlySlotGrowth272);
+    const bool slot_growth_interfaces_match =
+        entry_matches(kTopConstructorRva, kTopConstructorEntry) &&
+        early_slot_growth_matches &&
+        entry_matches(
+            kFirstCountPublicationRva, kFirstCountPublication) &&
+        entry_matches(
+            kSelectorGeometryDispatchRva, kSelectorGeometryDispatch) &&
+        entry_matches(
+            kPostGeometryObservationRva, kPostGeometryObservation) &&
+        entry_matches(
+            kCountPropagationDispatchRva, kCountPropagationDispatch) &&
+        entry_matches(
+            kPostConstructorObservationRva,
+            kPostConstructorObservation) &&
+        entry_matches(kCategoryAppendRva, kCategoryAppendEntry) &&
+        entry_matches(
+            kCategoryCountGetterRva, kCategoryCountGetterEntry) &&
+        entry_matches(
+            kSelectorSetActiveCountRva, kSelectorCountSetterEntry) &&
+        entry_matches(
+            kSelectorGeometryEnumeratorRva, kGeometryEnumeratorEntry);
+#endif
 
     const bool pristine_resolve_path_entry_matches =
         entry_matches(kResolvePathRva, kResolvePathEntry);
@@ -14715,7 +15987,11 @@ bool install_hooks_and_interfaces(
         !entry_matches(kRefreshTitleRva, kRefreshTitleEntry) ||
         !constructor_entry_matches ||
         !shape_helper_entries_match ||
-        !destructor_entry_matches) {
+        !destructor_entry_matches
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        || !slot_growth_interfaces_match
+#endif
+        ) {
         log_line(
             "ERROR: one or more viewport interfaces differ from the validated executable; no hooks installed (resolvePath={pristine:%u hostOwned:%u accepted:%u} selectorSelect={pristine:%u solidApproved:%u accepted:%u})",
             pristine_resolve_path_entry_matches ? 1U : 0U,
@@ -14762,6 +16038,10 @@ bool install_hooks_and_interfaces(
         g_game.base + kScaleformSetVisible271Rva);
     g_destroy_scaleform_value = reinterpret_cast<ScaleformDestructorFn>(
         g_game.base + destructor_rva);
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    g_category_append = reinterpret_cast<CategoryAppendFn>(
+        g_game.base + kCategoryAppendRva);
+#endif
 
     if (!install_hooks) return true;
 
@@ -14856,6 +16136,47 @@ bool install_hooks_and_interfaces(
     g_pointer_cell_sample_hook =
         std::move(*pointer_cell_sample_hook);
 
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    auto slot_growth_early_hook = SafetyHookMid::create(
+        g_game.base + kEarlySlotGrowthRva,
+        &append_graphics_records_at_construction_seam,
+        SafetyHookMid::StartDisabled);
+    if (!slot_growth_early_hook) {
+        log_line(
+            "ERROR: could not prepare physical-tab growth hook (SafetyHook error type %u)",
+            static_cast<unsigned>(slot_growth_early_hook.error().type));
+        reset_hooks();
+        return false;
+    }
+    auto slot_growth_late_hook = SafetyHookMid::create(
+        g_game.base + kPostGeometryObservationRva,
+        &observe_slot_growth_post_geometry,
+        SafetyHookMid::StartDisabled);
+    if (!slot_growth_late_hook) {
+        log_line(
+            "ERROR: could not prepare physical-tab post-geometry proof hook (SafetyHook error type %u)",
+            static_cast<unsigned>(slot_growth_late_hook.error().type));
+        reset_hooks();
+        return false;
+    }
+    auto slot_growth_post_constructor_hook = SafetyHookMid::create(
+        g_game.base + kPostConstructorObservationRva,
+        &observe_slot_growth_post_constructor,
+        SafetyHookMid::StartDisabled);
+    if (!slot_growth_post_constructor_hook) {
+        log_line(
+            "ERROR: could not prepare physical-tab post-constructor proof hook (SafetyHook error type %u)",
+            static_cast<unsigned>(
+                slot_growth_post_constructor_hook.error().type));
+        reset_hooks();
+        return false;
+    }
+    g_slot_growth_early_hook = std::move(*slot_growth_early_hook);
+    g_slot_growth_late_hook = std::move(*slot_growth_late_hook);
+    g_slot_growth_post_constructor_hook =
+        std::move(*slot_growth_post_constructor_hook);
+#endif
+
     if (!prepare_hook(
             kSwitchPanelRva,
             reinterpret_cast<void*>(&research_switch_panel_detour),
@@ -14918,7 +16239,28 @@ bool install_hooks_and_interfaces(
     }
 #endif
     g_viewport_callbacks_armed.store(false, std::memory_order_release);
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    g_slot_growth_callbacks_armed.store(false, std::memory_order_release);
+#endif
     g_viewport_hooks_exposed.store(true, std::memory_order_release);
+
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    // Publish the post-constructor observer first. Until all three hooks are
+    // visible and the callback gate is armed, every callback is a native
+    // no-op. This ordering ensures an attempted append can never escape
+    // without the final ownership/count proof.
+    if (!enable_hook(
+            g_slot_growth_post_constructor_hook,
+            "physical-tab post-constructor proof") ||
+        !enable_hook(
+            g_slot_growth_late_hook,
+            "physical-tab post-geometry proof") ||
+        !enable_hook(
+            g_slot_growth_early_hook,
+            "physical-tab growth")) {
+        return false;
+    }
+#endif
 
     const auto state_copy_enabled = g_panel_state_copy_hook.enable();
     if (!state_copy_enabled) {
@@ -14950,7 +16292,14 @@ bool install_hooks_and_interfaces(
         return false;
     }
 
+    // Make the complete viewport operational before native record growth can
+    // run. A Configuration construction racing this publication may safely
+    // retain the stock eight records, but it can never expose appended records
+    // to an unarmed viewport.
     g_viewport_callbacks_armed.store(true, std::memory_order_release);
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    g_slot_growth_callbacks_armed.store(true, std::memory_order_release);
+#endif
 
     log_line(
         "STRESS startup hooks installed: protocol=GraphicsCarrierV2 selection=eldenring.exe+0x%llX source={frame:+0x%llX pointer:+0x%llX horizontal:+0x%llX dispatch:+0x%llX cellSample:+0x%llX} nativePoll={status:%s position:+0x%llX hit:+0x%llX select:+0x%llX} compositeFrame=+0x%llX panelStateIsolation=+0x%llX->+0x%llX rowsCarrier=category8/selector11 parking=category5 textureLookup=+0x%llX imageBind=+0x%llX cross=%ls overflow=%ls alias=%ls; logical=%zu physical=%zu margin=%zu dwell={initial:%llums repeat:%llums decay:%llums minimum:%llums} imageProbe={nativeResource:dynamic-shape-rgba8 rawImageLifecycle:%s nativeResourceLifecycle:%s bitmapDataOwnership:%s pixelMutation:%s}",
@@ -15096,6 +16445,18 @@ bool install_native_tabs(
     detail::RuntimeState& host_runtime = detail::runtime_state();
     if (!host_runtime.menu) return false;
     const auto custom = catalogue.custom_entries();
+    const std::size_t configured_minimum =
+        catalogue.navigation_settings().minimum_tab_slots;
+    if (configured_minimum < kStockLogicalTabCount ||
+        configured_minimum > kPhysicalTabCapacity) {
+        detail::logf(
+            LogLevel::error,
+            "NativeTabs rejected MinimumTabSlots=%zu; native physical capacity is %zu..%zu",
+            configured_minimum,
+            kStockLogicalTabCount,
+            kPhysicalTabCapacity);
+        return false;
+    }
     std::unique_ptr<detail::NativeTabRuntimeState> runtime_candidate =
         detail::NativeTabRuntimeState::create(custom.size());
     if (!runtime_candidate) {
@@ -15165,6 +16526,11 @@ bool install_native_tabs(
     g_native_tab_catalogue = &catalogue;
     g_native_tab_runtime = std::move(runtime_candidate);
     g_logical_tab_catalogue = std::move(logical_candidate);
+    // The configuration catalogue is immutable after registration freezes.
+    // Constructor callbacks read only this process-lifetime scalar floor;
+    // the exact live movie may safely raise the constructor-local target to a
+    // larger compatible strip, up to the hard native capacity of ten.
+    g_minimum_tab_slots = configured_minimum;
     g_navigation_margin = catalogue.navigation_settings().navigation_margin;
     g_mouse_dwell_enabled =
         catalogue.navigation_settings().mouse_dwell_enabled;
@@ -15194,9 +16560,11 @@ bool install_native_tabs(
     g_native_tabs_installed.store(true, std::memory_order_release);
     detail::logf(
         LogLevel::info,
-        "NativeTabs installed: logical=%zu custom=%zu margin=%zu mouseDwell=%u",
+        "NativeTabs installed: logical=%zu custom=%zu minimumPhysicalSlots=%zu hardPhysicalCapacity=%zu margin=%zu mouseDwell=%u",
         active_logical_tab_count(),
         active_custom_tab_count(),
+        g_minimum_tab_slots,
+        kPhysicalTabCapacity,
         g_navigation_margin,
         g_mouse_dwell_enabled ? 1U : 0U);
     return true;

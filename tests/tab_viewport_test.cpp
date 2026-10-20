@@ -1,4 +1,5 @@
 #include "tab_viewport.hpp"
+#include "tab_initial_presentation_refresh.hpp"
 
 #include "test_assertions.hpp"
 
@@ -827,6 +828,183 @@ void test_final_stress_configuration_traversal() {
         tab_overflow_indicators_changed(selected_left_edge, viewport));
 }
 
+void test_initial_stress_presentation_by_physical_capacity() {
+    using namespace erui::detail;
+
+    constexpr std::size_t stock_tab_count = 8;
+    constexpr std::size_t logical_count = stock_tab_count + 50;
+
+    TabViewport eight_slots;
+    ERUI_TEST_CHECK(eight_slots.initialize(logical_count, 8, 1));
+    std::size_t logical{invalid_tab_index};
+    ERUI_TEST_CHECK(eight_slots.logical_for_physical(7, logical));
+    ERUI_TEST_CHECK(logical == 7);
+    ERUI_TEST_CHECK(
+        tab_overflow_indicator(eight_slots, 7) ==
+        TabOverflowIndicator::next);
+    ERUI_TEST_CHECK(!tab_viewport_exposes_custom_icon(
+        eight_slots, stock_tab_count));
+
+    TabViewport nine_slots;
+    ERUI_TEST_CHECK(nine_slots.initialize(logical_count, 9, 1));
+    ERUI_TEST_CHECK(nine_slots.logical_for_physical(8, logical));
+    ERUI_TEST_CHECK(logical == stock_tab_count);
+    ERUI_TEST_CHECK(
+        tab_overflow_indicator(nine_slots, 8) ==
+        TabOverflowIndicator::next);
+    ERUI_TEST_CHECK(!tab_viewport_exposes_custom_icon(
+        nine_slots, stock_tab_count));
+
+    TabViewport ten_slots;
+    ERUI_TEST_CHECK(ten_slots.initialize(logical_count, 10, 1));
+    ERUI_TEST_CHECK(ten_slots.logical_for_physical(8, logical));
+    ERUI_TEST_CHECK(logical == stock_tab_count);
+    ERUI_TEST_CHECK(
+        tab_overflow_indicator(ten_slots, 8) ==
+        TabOverflowIndicator::none);
+    ERUI_TEST_CHECK(ten_slots.logical_for_physical(9, logical));
+    ERUI_TEST_CHECK(logical == stock_tab_count + 1);
+    ERUI_TEST_CHECK(
+        tab_overflow_indicator(ten_slots, 9) ==
+        TabOverflowIndicator::next);
+    ERUI_TEST_CHECK(tab_viewport_exposes_custom_icon(
+        ten_slots, stock_tab_count));
+}
+
+void test_deferred_initial_presentation_refresh_is_one_shot() {
+    using namespace erui::detail;
+
+    constexpr std::size_t stock_tab_count = 8;
+    constexpr std::size_t logical_count = stock_tab_count + 50;
+    constexpr std::uint64_t epoch = 41;
+    constexpr std::uint64_t frame = 100;
+
+    DeferredTabPresentationRefresh refresh;
+    ERUI_TEST_CHECK(!refresh.pending());
+    ERUI_TEST_CHECK(
+        refresh.poll(epoch, 1, frame) ==
+        DeferredTabPresentationRefreshPoll::idle);
+
+    TabViewport nine_slots;
+    ERUI_TEST_CHECK(nine_slots.initialize(logical_count, 9, 1));
+    ERUI_TEST_CHECK(!refresh.request_if_needed(
+        nine_slots, stock_tab_count, epoch, frame));
+    ERUI_TEST_CHECK(!refresh.pending());
+
+    TabViewport ten_slots;
+    ERUI_TEST_CHECK(ten_slots.initialize(logical_count, 10, 1));
+    const std::uint64_t generation = ten_slots.mapping_generation();
+    ERUI_TEST_CHECK(refresh.request_if_needed(
+        ten_slots, stock_tab_count, epoch, frame));
+    ERUI_TEST_CHECK(refresh.pending());
+    ERUI_TEST_CHECK(
+        refresh.poll(epoch, generation, frame) ==
+        DeferredTabPresentationRefreshPoll::waiting);
+    ERUI_TEST_CHECK(refresh.pending());
+    ERUI_TEST_CHECK(
+        refresh.poll(epoch, generation, frame + 1) ==
+        DeferredTabPresentationRefreshPoll::ready);
+    ERUI_TEST_CHECK(refresh.pending());
+    refresh.consume();
+    ERUI_TEST_CHECK(!refresh.pending());
+    ERUI_TEST_CHECK(
+        refresh.poll(epoch, generation, frame + 2) ==
+        DeferredTabPresentationRefreshPoll::idle);
+
+    // The retained RGBA8 catalogue can already be ready when System is
+    // reopened. A new Configuration presentation epoch must therefore be
+    // able to schedule its own repaint even when the viewport happens to
+    // begin with the same mapping generation as the preceding epoch.
+    constexpr std::uint64_t reopened_epoch = epoch + 1;
+    constexpr std::uint64_t reopened_frame = frame + 20;
+    ERUI_TEST_CHECK(refresh.request_if_needed(
+        ten_slots,
+        stock_tab_count,
+        reopened_epoch,
+        reopened_frame));
+    ERUI_TEST_CHECK(
+        refresh.poll(reopened_epoch, generation, reopened_frame) ==
+        DeferredTabPresentationRefreshPoll::waiting);
+    ERUI_TEST_CHECK(
+        refresh.poll(reopened_epoch, generation, reopened_frame + 1) ==
+        DeferredTabPresentationRefreshPoll::ready);
+    refresh.consume();
+    ERUI_TEST_CHECK(!refresh.pending());
+
+    ERUI_TEST_CHECK(refresh.request_if_needed(
+        ten_slots, stock_tab_count, epoch, frame));
+    ERUI_TEST_CHECK(
+        refresh.poll(epoch + 1, generation, frame + 1) ==
+        DeferredTabPresentationRefreshPoll::stale);
+    ERUI_TEST_CHECK(!refresh.pending());
+
+    ERUI_TEST_CHECK(refresh.request_if_needed(
+        ten_slots, stock_tab_count, epoch, frame));
+    ERUI_TEST_CHECK(
+        refresh.poll(epoch, generation + 1, frame + 1) ==
+        DeferredTabPresentationRefreshPoll::stale);
+    ERUI_TEST_CHECK(!refresh.pending());
+
+    // If input remaps the strip while the retained catalogue is becoming
+    // ready, the publication edge rebases the request to the current mapping
+    // rather than abandoning the visible vector fallback indefinitely.
+    TabViewport remapped = ten_slots;
+    const std::uint64_t initial_generation =
+        remapped.mapping_generation();
+    ERUI_TEST_CHECK(refresh.request_if_needed(
+        remapped, stock_tab_count, epoch, frame));
+    for (std::size_t step = 0;
+         step < remapped.logical_count() &&
+             remapped.mapping_generation() == initial_generation;
+         ++step) {
+        ERUI_TEST_CHECK(remapped.move(
+            TabDirection::next,
+            TabBoundaryBehavior::wrap).valid);
+    }
+    ERUI_TEST_CHECK(
+        remapped.mapping_generation() != initial_generation);
+    ERUI_TEST_CHECK(
+        refresh.poll(
+            epoch,
+            remapped.mapping_generation(),
+            frame + 1) == DeferredTabPresentationRefreshPoll::stale);
+    ERUI_TEST_CHECK(refresh.request_if_needed(
+        remapped,
+        stock_tab_count,
+        epoch,
+        frame + 1));
+    ERUI_TEST_CHECK(
+        refresh.poll(
+            epoch,
+            remapped.mapping_generation(),
+            frame + 1) == DeferredTabPresentationRefreshPoll::waiting);
+    ERUI_TEST_CHECK(
+        refresh.poll(
+            epoch,
+            remapped.mapping_generation(),
+            frame + 2) == DeferredTabPresentationRefreshPoll::ready);
+    refresh.consume();
+    ERUI_TEST_CHECK(!refresh.pending());
+
+    // The frame sequence is allowed to wrap; only the exact scheduling frame
+    // is deferred. Epoch and mapping-generation equality carry identity.
+    ERUI_TEST_CHECK(refresh.request_if_needed(
+        ten_slots,
+        stock_tab_count,
+        epoch,
+        std::numeric_limits<std::uint64_t>::max()));
+    ERUI_TEST_CHECK(
+        refresh.poll(epoch, generation, 0) ==
+        DeferredTabPresentationRefreshPoll::ready);
+    ERUI_TEST_CHECK(refresh.pending());
+    refresh.consume();
+    ERUI_TEST_CHECK(!refresh.pending());
+
+    ERUI_TEST_CHECK(!refresh.request_if_needed(
+        ten_slots, stock_tab_count, 0, frame));
+    ERUI_TEST_CHECK(!refresh.pending());
+}
+
 void test_public_capacity_traversal() {
     using namespace erui::detail;
 
@@ -1019,6 +1197,8 @@ int main() {
     test_margins_and_single_slot();
     test_wrap_and_direct_selection();
     test_final_stress_configuration_traversal();
+    test_initial_stress_presentation_by_physical_capacity();
+    test_deferred_initial_presentation_refresh_is_one_shot();
     test_public_capacity_traversal();
     test_size_max_boundaries();
     test_exhaustive_state_matrix();

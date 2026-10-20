@@ -382,11 +382,21 @@ void test_order_and_configuration_rejections() {
             NativeTabCatalogueError::tab_order_mismatch,
             0);
     }
-    {
+    for (const std::uint32_t accepted : std::array{8u, 9u, 10u}) {
+        auto compiled = one_tab_menu();
+        auto configuration = default_configuration();
+        configuration.settings.minimum_tab_slots = accepted;
+        const auto result = erui::detail::build_native_tab_catalogue(
+            *compiled, configuration);
+        ERUI_TEST_CHECK(result);
+        ERUI_TEST_CHECK(
+            result.catalogue->navigation_settings().minimum_tab_slots ==
+            accepted);
+    }
+    for (const std::uint32_t rejected : std::array{7u, 11u, 14u}) {
         auto compiled = one_tab_menu();
         auto invalid = default_configuration();
-        invalid.settings.minimum_tab_slots =
-            erui::detail::kMaximumConfigurableMinimumTabSlots + 1;
+        invalid.settings.minimum_tab_slots = rejected;
         expect_error(
             erui::detail::build_native_tab_catalogue(*compiled, invalid),
             NativeTabCatalogueError::invalid_configuration);

@@ -119,6 +119,9 @@ InjectionCooldownMs = 250
 [GFX]
 EnableRuntimePatching = 1
 
+[Tabs]
+MinimumTabSlots = 8
+
 [Diagnostics]
 EnableDiagnostics = 0
 ```
@@ -139,6 +142,16 @@ remain usable and the controls retain their functional fallbacks.
 `MinimumTabSlots` cannot grow the movie, and API 1.3 title-screen text is
 unavailable. The host therefore does not advertise
 `Capability::title_screen_text` while the setting is disabled.
+
+`[Tabs] MinimumTabSlots = 8` is the normal default. With runtime GFX
+patching enabled, players may request a compatible physical System tab strip
+of 8, 9, or 10 slots. The value is a minimum: a validated effective movie
+that already provides more slots is not reduced. Ten is Elden Ring's hard
+native physical-slot ceiling, so there is no `MaximumTabSlots` setting and
+values outside `8..10` are rejected. This physical capacity does not limit
+custom-tab registration; additional logical tabs remain reachable through
+ERNativeUI's shifting `...` viewport. Restart the game after changing the
+value.
 
 Locale files use effective language identifiers and belong in `locales` beside
 the host. `Language = auto` follows Elden Ring's current Steam game language.

@@ -44,6 +44,35 @@ Set `EnableRuntimePatching = 1` and restart to restore the behavior described
 throughout the rest of this guide. Client mods must continue to check optional
 capabilities; they must not edit this host-wide player setting.
 
+## Configure the physical System tab strip
+
+The shipped player setting requests the vanilla eight-slot layout:
+
+```ini
+[Tabs]
+MinimumTabSlots = 8
+```
+
+With runtime patching enabled, `MinimumTabSlots` accepts `8`, `9`, or `10`.
+It is a requested minimum rather than an exact replacement: a compatible
+effective movie whose validated strip is already larger is not reduced.
+Changing the value requires a full game restart.
+
+The setting controls available layout capacity, not empty placeholders. If
+fewer real logical routes exist than the authored capacity, ERNativeUI
+activates only the records that have a real tab to own them.
+
+Ten is the hard physical ceiling imposed by Elden Ring's native Configuration
+object. ERNativeUI never creates an eleventh native record, and there is no
+configurable `MaximumTabSlots` override. The physical ceiling is separate
+from the logical custom-tab limit: ERNativeUI can merge up to 1,024 committed
+custom tabs and exposes those that do not simultaneously fit by shifting the
+visible window with `...` cells.
+
+When `EnableRuntimePatching = 0`, `MinimumTabSlots` cannot add GFX cells.
+Compatible capacity already present in the effective movie can still be used,
+subject to the same ten-slot native ceiling.
+
 ## What the host completes
 
 For `02_040_optionsetting.gfx`, the host ensures these visual capacities:

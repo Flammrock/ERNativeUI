@@ -811,6 +811,15 @@ if(_ernativeui_enable_tests)
     add_test(NAME ERNativeUI.TabTransitionInputGate
         COMMAND ERNativeUITabTransitionInputGateTests)
 
+    add_executable(ERNativeUITabIconRetirementPolicyTests
+        tests/tab_icon_retirement_policy_test.cpp)
+    target_include_directories(ERNativeUITabIconRetirementPolicyTests PRIVATE
+        src tests)
+    target_compile_features(ERNativeUITabIconRetirementPolicyTests PRIVATE
+        cxx_std_20)
+    add_test(NAME ERNativeUI.TabIconRetirementPolicy
+        COMMAND ERNativeUITabIconRetirementPolicyTests)
+
     add_executable(ERNativeUITabConfigurationTests
         tests/tab_configuration_test.cpp src/tab_configuration.cpp)
     target_include_directories(ERNativeUITabConfigurationTests PRIVATE

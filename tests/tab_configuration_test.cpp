@@ -121,7 +121,7 @@ void test_tabs_settings_validation() {
 
     const auto invalid = parse_tab_configuration(
         "[Tabs]\n"
-        "MinimumTabSlots=9\n"
+        "MinimumTabSlots=7\n"
         "NavigationMargin=-1\n"
         "MouseDwellEnabled=2\n"
         "MouseDwellInitialDelayMs=5001\n"
@@ -164,15 +164,40 @@ void test_tabs_settings_validation() {
     const auto minimum_slots = parse_tab_configuration(
         "[Tabs]\n"
         "MinimumTabSlots=8\n"
-        "MinimumTabSlots=8\n"
-        "MinimumTabSlots=9\n");
-    ERUI_TEST_CHECK(minimum_slots.settings.minimum_tab_slots == 8);
+        "MinimumTabSlots=9\n"
+        "MinimumTabSlots=10\n"
+        "MinimumTabSlots=11\n");
+    ERUI_TEST_CHECK(minimum_slots.settings.minimum_tab_slots == 10);
     ERUI_TEST_CHECK(count_diagnostic(
         minimum_slots,
-        TabConfigurationDiagnosticCode::duplicate_tabs_setting) == 1);
+        TabConfigurationDiagnosticCode::duplicate_tabs_setting) == 2);
     ERUI_TEST_CHECK(count_diagnostic(
         minimum_slots,
         TabConfigurationDiagnosticCode::invalid_tabs_setting) == 1);
+}
+
+void test_minimum_tab_slots_range() {
+    using erui::detail::parse_tab_configuration;
+
+    for (const std::uint32_t accepted : std::array{8u, 9u, 10u}) {
+        const auto configuration = parse_tab_configuration(
+            "[Tabs]\nMinimumTabSlots=" + std::to_string(accepted) + "\n");
+        ERUI_TEST_CHECK(
+            configuration.settings.minimum_tab_slots == accepted);
+        ERUI_TEST_CHECK(count_diagnostic(
+            configuration,
+            TabConfigurationDiagnosticCode::invalid_tabs_setting) == 0);
+    }
+
+    for (const std::uint32_t rejected : std::array{7u, 11u, 14u}) {
+        const auto configuration = parse_tab_configuration(
+            "[Tabs]\nMinimumTabSlots=" + std::to_string(rejected) + "\n");
+        ERUI_TEST_CHECK(configuration.settings.minimum_tab_slots ==
+            erui::detail::kDefaultMinimumTabSlots);
+        ERUI_TEST_CHECK(count_diagnostic(
+            configuration,
+            TabConfigurationDiagnosticCode::invalid_tabs_setting) == 1);
+    }
 }
 
 void test_order_parser_duplicate_and_malformed_policy() {
@@ -303,6 +328,7 @@ void test_diagnostic_report_is_stable_and_complete() {
 
     const auto configuration = parse_tab_configuration(
         "[Tabs]\n"
+        "MinimumTabSlots=10\n"
         "MouseDwellMinimumDelayMs=20\n"
         "Unknown=bad\\\"value\n"
         "[TabOrder]\n"
@@ -318,7 +344,7 @@ void test_diagnostic_report_is_stable_and_complete() {
     ERUI_TEST_CHECK(first == second);
     ERUI_TEST_CHECK(first.starts_with("format=ERNativeUI-tabs-v1\n"));
     ERUI_TEST_CHECK(first.find(
-        "setting MinimumTabSlots=8\n") != std::string::npos);
+        "setting MinimumTabSlots=10\n") != std::string::npos);
     ERUI_TEST_CHECK(first.find(
         "setting MouseDwellMinimumDelayMs=20\n") != std::string::npos);
     ERUI_TEST_CHECK(first.find(
@@ -329,7 +355,7 @@ void test_diagnostic_report_is_stable_and_complete() {
     // timing must not make the player-facing report change between runs.
     ERUI_TEST_CHECK(first.find("source_index") == std::string::npos);
     ERUI_TEST_CHECK(first.find(
-        "stale_override key=\"stale/tab\" order=20 source_line=6\n") !=
+        "stale_override key=\"stale/tab\" order=20 source_line=7\n") !=
         std::string::npos);
     ERUI_TEST_CHECK(first.find(
         "code=unknown_tabs_setting") != std::string::npos);
@@ -461,6 +487,7 @@ int main() {
     test_identifier_and_stable_key_contract();
     test_defaults_and_exact_case_sections();
     test_tabs_settings_validation();
+    test_minimum_tab_slots_range();
     test_order_parser_duplicate_and_malformed_policy();
     test_deterministic_resolution_and_stale_overrides();
     test_invalid_catalogue_is_not_publishable();

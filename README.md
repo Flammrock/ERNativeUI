@@ -171,7 +171,10 @@ options, screenshots, and links to its native implementation research.
 ## More than controls
 
 - Give a mod its own top-level Configuration tab with a localized title and
-  custom RGBA8 icon. [Learn about custom tabs](docs/guides/custom-tabs.md).
+  custom RGBA8 icon. The physical strip defaults to eight slots and can be
+  configured up to Elden Ring's hard ceiling of ten, while overflow keeps up
+  to 1,024 logical custom tabs reachable.
+  [Learn about custom tabs](docs/guides/custom-tabs.md).
 - Add copied version or status lines to any title-screen corner, using Elden
   Ring's native text color or an explicit RGB color.
   [Learn about title-screen text](docs/guides/title-screen-text.md), then see

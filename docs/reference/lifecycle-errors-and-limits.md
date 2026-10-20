@@ -352,6 +352,7 @@ service behind it.
 | Providers in one process | 256 |
 | Logical pages per provider | 4,096 |
 | Rows per provider | 4,096 |
+| Physical System tab slots | 8 by default; `MinimumTabSlots` accepts 8..10; hard native ceiling 10 |
 | Committed custom tabs | 1,024 process-wide |
 | Custom-tab ID | 1..255 ASCII bytes, provider-local and using the machine-ID grammar |
 | Custom-tab title | 1..95 valid UTF-16 code units |
@@ -389,6 +390,12 @@ service ceilings, not a demonstrated practical size for Elden Ring's native
 binding screens. Keep player-facing catalogs small enough to navigate
 comfortably. Native vector growth at very large catalogs remains an open
 research question; see [Input bindings](../research/case-studies/input-bindings.md#unresolved-questions).
+
+Physical System tab slots and logical custom tabs are separate limits. The
+physical strip can contain at most ten native records and has no configurable
+maximum override. Logical tabs that do not fit simultaneously remain
+available through the shifting viewport rather than consuming more physical
+records.
 
 Storage section/key identifiers accept ASCII letters, digits, `.`, `_`, `-`,
 and internal spaces. Leading/trailing spaces and the complete names `.` and

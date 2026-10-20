@@ -14,12 +14,14 @@ silently make this example heavier.
 
 ## Important: run this example alone
 
-Custom-tab capacity is shared by every ERNativeUI provider in the process; it
-is not a per-mod allowance. This example deliberately requests 50 slots and is
-meant for repeatable stress testing, screenshots, and implementation study. Do
-not load another custom-tab client at the same time. If fewer than 50 slots
-remain, this provider's transactional registration fails instead of publishing
-a partial menu.
+Logical custom-tab capacity is shared by every ERNativeUI provider in the
+process; it is not a per-mod allowance. This example deliberately requests 50
+logical tabs and is meant for repeatable stress testing, screenshots, and
+implementation study. Those tabs do not require 50 physical strip slots:
+ERNativeUI exposes them through its shifting viewport over the configured
+8-to-10-slot native strip. Do not load another custom-tab client at the same
+time. If fewer than 50 logical-tab registrations remain, this provider's
+transactional registration fails instead of publishing a partial menu.
 
 For an ordinary mod, start with the
 [Custom Configuration tabs guide](../../docs/guides/custom-tabs.md) and the
