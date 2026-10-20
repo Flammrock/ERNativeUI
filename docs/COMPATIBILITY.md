@@ -163,29 +163,39 @@ Solid Uncapper has not yet been regression-tested with the 2.7.2.0 profile;
 no compatibility claim is made for that combination.
 
 The same integration also accounts for Solid Uncapper's already-materialized
-Game Options row when selecting the root pagination plan. ERNativeUI completes
-the supported Game Options panel to 13 rows before Scaleform consumes it. Four
-game rows plus Solid Uncapper then leave eight slots. This prevents a provider
-or navigation row from being appended beyond the completed movie's actual
-placements.
+Game Options row when selecting the root pagination plan. With default runtime
+GFX patching enabled, ERNativeUI completes the supported Game Options panel to
+13 rows before Scaleform consumes it. Four game rows plus Solid Uncapper then
+leave eight slots. This prevents a provider or navigation row from being
+appended beyond the completed movie's actual placements.
 
 Report the exact game and Solid Uncapper versions when describing a
 compatibility result.
 
 ## Modified GFX and other asset mods
 
-ERNativeUI transforms the effective supported settings and title movies in
-memory after the game or mod loader selects them. No ERNativeUI loose GFX
-replacement is normally required. A third-party replacement remains
-compatible when its relevant panel, widget, or title-information structure can
-be validated; ERNativeUI adds only the missing supported rows and
-presentation.
+With the default `[GFX] EnableRuntimePatching = 1`, ERNativeUI transforms the
+effective supported settings and title movies in memory after the game or mod
+loader selects them. No ERNativeUI loose GFX replacement is normally required.
+A third-party replacement remains compatible when its relevant panel, widget,
+or title-information structure can be validated; ERNativeUI adds only the
+missing supported rows and presentation.
 
 Mod Engine 2 can still expose only one loose replacement for a given path.
 Load order does not merge two independent binary edits. If the winning movie
 is malformed or its relevant structure is unrecognized, ERNativeUI leaves its
 bytes unchanged instead of guessing. See
 [Runtime GFX completion and presentation](guides/presentation-and-gfx.md).
+
+For a strict pass-through compatibility test, set
+`[GFX] EnableRuntimePatching = 0` and restart. ERNativeUI then does not install
+the Scaleform file-opening hook and leaves the selected GFX bytes untouched.
+Pages continue to paginate against the live capacity and custom tabs remain
+available. ERNativeUI adds no rows or TextInput/ColorPicker presentation;
+compatible structures already authored into the effective movie remain
+available, and otherwise those controls use functional fallbacks.
+`MinimumTabSlots` cannot grow the movie, and API 1.3 title-screen text is
+unavailable.
 
 ## Seamless Co-op
 

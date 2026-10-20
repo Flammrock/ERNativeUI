@@ -23,6 +23,10 @@ retain its source string. Each line must be non-empty, contain no line break,
 and fit within the public API limit. The process-wide limit is 16 committed
 title-screen lines across all ERNativeUI clients.
 
+The example checks `Capability::title_screen_text` before registration. If the
+player has disabled runtime GFX patching in `ERNativeUI.ini`, the capability is
+absent and the example exits without publishing a partial provider.
+
 ## Relevant source
 
 The complete registration is intentionally small:

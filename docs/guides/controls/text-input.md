@@ -156,13 +156,14 @@ table and check host support.
 |---|---|
 | First public API | 1.1 |
 | Capability | `erui::Capability::text_input` / `ERUI_CAP_TEXT_INPUT` |
-| GFX presentation | ERNativeUI completes the native brackets and red empty-state presentation at runtime |
+| GFX presentation | With runtime patching enabled, ERNativeUI completes the native brackets and red empty-state presentation |
 | Enabled option | Not exposed; omit the `add_text_input` call when the row should not exist |
 | Runtime value | Copied UTF-16 text |
 
-No loose GFX file is required. If an asset mod supplies an unrecognized
-settings movie, ERNativeUI keeps that movie unchanged and TextInput retains its
-functional fallback presentation. See
+No loose GFX file is required. If runtime patching is disabled, or an asset mod
+supplies an unrecognized settings movie, ERNativeUI keeps that movie unchanged
+and TextInput retains its functional fallback presentation. Compatible
+presentation already authored into the effective movie remains available. See
 [Runtime GFX completion and presentation](../presentation-and-gfx.md).
 
 ## Value and confirmation behavior

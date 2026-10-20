@@ -32,13 +32,13 @@ upgrade its runtime API when the player installs a newer compatible host.
 | Feature | What the player sees | Minimum API and capability | GFX presentation | Important limits and examples |
 |---|---|---|---|---|
 | Shared host and provider merge | Rows from several client mods appear together in Elden Ring's native **System → Game Options** page. | 1.0; core registration has no separate capability bit. | No. | One process-wide `ERNativeUI.dll`; provider topology is fixed after startup. See [How it works](how-it-works.md). |
-| [Toggle](guides/controls/toggle.md) | A native on/off row. | 1.0; `ERUI_CAP_TOGGLE` | Uses a stock widget; runtime completion increases supported page capacity. | Value is a host-owned byte; player changes notify the client. |
-| [Slider](guides/controls/slider.md) | A native byte-valued slider. | 1.0; `ERUI_CAP_SLIDER` | Uses a stock widget; runtime completion increases supported page capacity. | Bounds, step, initial value, and enabled state are declared at registration. |
-| [Button](guides/controls/button.md) | A native action row invoking client code. | 1.0; `ERUI_CAP_BUTTON` | Runtime completion supplies the matching left-label field on affected action rows. | Runs synchronously on Elden Ring's UI thread; keep callbacks short. |
+| [Toggle](guides/controls/toggle.md) | A native on/off row. | 1.0; `ERUI_CAP_TOGGLE` | Uses a stock widget; when runtime patching is enabled, completion increases supported page capacity. | Value is a host-owned byte; player changes notify the client. |
+| [Slider](guides/controls/slider.md) | A native byte-valued slider. | 1.0; `ERUI_CAP_SLIDER` | Uses a stock widget; when runtime patching is enabled, completion increases supported page capacity. | Bounds, step, initial value, and enabled state are declared at registration. |
+| [Button](guides/controls/button.md) | A native action row invoking client code. | 1.0; `ERUI_CAP_BUTTON` | When runtime patching is enabled, completion supplies the matching left-label field on affected action rows. | Runs synchronously on Elden Ring's UI thread; keep callbacks short. |
 | [Submenu](guides/controls/submenu.md) | A native row opening a provider-owned settings page with native focus, transitions, and Back behavior. | 1.0; `ERUI_CAP_SUBMENU` | No; the shared action-row/capacity improvements above still apply. | A disabled submenu is omitted because the native action-row constructor has no proven disabled presentation. |
 | [Inline choice](guides/controls/inline-choice.md) | A named value changed in place with left/right input. | 1.0; `ERUI_CAP_INLINE_CHOICE` | No. | 1–32 non-empty labels; callbacks and getters use a zero-based index. Choice rows have no supported disabled state. |
-| [Popup choice](guides/controls/popup-choice.md) | An action row opening Elden Ring's native selection list. | 1.0; `ERUI_CAP_POPUP_CHOICE` | Runtime completion supplies affected action-row presentation. | Same 1–32 labels and zero-based value model as inline choice. [Showcase](../examples/tarnished_ui_showcase/README.md). |
-| Automatic pagination | Native Next/Previous rows when logical content exceeds the current panel capacity. | 1.0; `ERUI_CAP_PAGINATION` | Runtime completion expands supported ordinary pages before live capacity is measured. | The host subtracts every row already materialized by the game or an earlier compatible hook. Clients add logical content only; they must not create their own pagination rows. |
+| [Popup choice](guides/controls/popup-choice.md) | An action row opening Elden Ring's native selection list. | 1.0; `ERUI_CAP_POPUP_CHOICE` | When runtime patching is enabled, completion supplies affected action-row presentation. | Same 1–32 labels and zero-based value model as inline choice. [Showcase](../examples/tarnished_ui_showcase/README.md). |
+| Automatic pagination | Native Next/Previous rows when logical content exceeds the current panel capacity. | 1.0; `ERUI_CAP_PAGINATION` | When runtime patching is enabled, completion expands supported ordinary pages before live capacity is measured. | The host always paginates against live capacity and subtracts every row already materialized by the game or an earlier compatible hook. Clients add logical content only; they must not create their own pagination rows. |
 | Page presentation | Provider submenu headings and base titles, default `Title (n/t)` pagination suffixes, and an optional startup formatter. | 1.0; `ERUI_CAP_PAGE_PRESENTATION` | No. | The shared Game Options heading remains game-owned. Formatters run during startup compilation, not when a page opens. |
 | [Native modal alerts](guides/native-dialogs.md) | Bottom or centered native messages with dismiss-only, OK, CANCEL, YES, NO, OK+CANCEL, or YES+NO responses. | 1.0; `ERUI_CAP_ALERT` | No. | Requests share a bounded FIFO. Completion is asynchronous; only one owned modal is presented at a time. [Localized example](../examples/localized_greeting/README.md). |
 | [Game language and localization](guides/localization.md) | Client text can follow Elden Ring's selected Steam game language or one explicit host-wide locale; unknown identifiers remain available for forward-compatible localization. | 1.0; `ERUI_CAP_GAME_LANGUAGE` | No. Host-owned Previous/Next translations use separate locale INI files. | `Language = auto` uses Steam; an explicit identifier affects the host and every client. Fall back when unavailable or when the client has no translation for the exact identifier. [Localized example](../examples/localized_greeting/README.md). |
@@ -49,9 +49,9 @@ upgrade its runtime API when the player installs a newer compatible host.
 | Feature | What the player sees | Minimum API and capability | GFX presentation | Important limits and examples |
 |---|---|---|---|---|
 | Explicit connection lifecycle | No new widget; clients wait for host startup and language selection before registering through one negotiated connection. | 1.1; no separate capability bit. | No. | `erui::connect()` runs on a worker after `DllMain`, requests the exact API selected by its SDK header, and never silently downgrades. |
-| [Text input](guides/controls/text-input.md) | A native editable text row with a placeholder and confirmed value. | 1.1; `ERUI_CAP_TEXT_INPUT` | Runtime completion supplies the red empty state and bracketed character-name frame. | Fixed per-row limit of 1–35 UTF-16 code units; default 16. Only a changed confirmation notifies the client. [Template](../examples/template/README.md). |
-| [RGB color picker](guides/controls/color-picker.md) | A row opening Elden Ring's native character-creation color editor. | 1.1; `ERUI_CAP_COLOR_PICKER` | Runtime completion supplies the standalone bracketed live color swatch. | RGB only; no public alpha or packed game value. One editor may be open process-wide. [Showcase](../examples/tarnished_ui_showcase/README.md). |
-| Additional built-in pages | Ordinary ERNativeUI rows can appear in Camera Options, Display, Sound, Network, Keyboard/Mouse Settings, and Graphics as well as Game Options. | 1.1; `ERUI_CAP_BUILTIN_PAGES` | Runtime completion expands supported ordinary pages to their safe capacities before materialization. | Each destination resolves and paginates independently. Network uses ten rows to preserve its warning; Controller Settings is intentionally not an ordinary destination. |
+| [Text input](guides/controls/text-input.md) | A native editable text row with a placeholder and confirmed value. | 1.1; `ERUI_CAP_TEXT_INPUT` | When runtime patching is enabled, completion supplies the red empty state and bracketed character-name frame; otherwise the functional fallback remains. | Fixed per-row limit of 1–35 UTF-16 code units; default 16. Only a changed confirmation notifies the client. [Template](../examples/template/README.md). |
+| [RGB color picker](guides/controls/color-picker.md) | A row opening Elden Ring's native character-creation color editor. | 1.1; `ERUI_CAP_COLOR_PICKER` | When runtime patching is enabled, completion supplies the standalone bracketed live color swatch; otherwise the functional action-row fallback remains. | RGB only; no public alpha or packed game value. One editor may be open process-wide. [Showcase](../examples/tarnished_ui_showcase/README.md). |
+| Additional built-in pages | Ordinary ERNativeUI rows can appear in Camera Options, Display, Sound, Network, Keyboard/Mouse Settings, and Graphics as well as Game Options. | 1.1; `ERUI_CAP_BUILTIN_PAGES` | When runtime patching is enabled, completion expands supported ordinary pages to their safe capacities before materialization. | Each destination resolves and paginates independently against live capacity. Network uses ten rows to preserve its warning when completion is enabled; Controller Settings is intentionally not an ordinary destination. |
 | [Native input bindings](guides/input-bindings.md) | Provider sections and actions appear in Button Settings and/or Keyboard/Mouse Settings according to their supported controller, keyboard, and mouse slots. | 1.1; `ERUI_CAP_INPUT_BINDINGS` | No additional GFX transformation. | One alternative per device family; global rising-edge observation does not consume game input. Modifier chords, Escape, and F1–F12 are not exposed. [Template](../examples/template/README.md). |
 | [Live binding updates](guides/input-bindings.md#8-how-do-i-query-or-change-a-live-action) | Player assignment/Clear updates both the native rows and action dispatch; clients may bind, unbind, query, or reset an action programmatically. | 1.1; `ERUI_CAP_INPUT_BINDINGS` | No. | Programmatic changes are silent. Player changes use one optional provider-wide batch callback. |
 | [Provider storage](guides/storage.md) | Mods may explicitly load, mutate, and atomically save typed INI data, including semantic input assignments. | 1.1; `ERUI_CAP_STORAGE` | No. | Host-backed: it requires a successful API 1.1 connection and active provider registration to open. Nothing loads or saves automatically. The default directory uses the provider ID when that cannot create a Windows path alias; otherwise it uses an isolated `~<sha256>` name. |
@@ -72,21 +72,24 @@ frozen API 1.1 prefix.
 | Feature | What the player sees | Minimum API and capability | GFX presentation | Important limits and examples |
 |---|---|---|---|---|
 | [Custom Configuration tabs](guides/custom-tabs.md) | A client-owned title and optional custom icon in the top-level System tab strip, with native selection, overflow and page content. | 1.3; `ERUI_CAP_CUSTOM_TABS` | No. | Exact 32x32 RGBA8 icon or host fallback; 1,024 committed custom tabs process-wide; returned pages use ordinary controls and automatic pagination. [Screenshot helper](../examples/showcase_screenshot_helper/README.md); [stress example](../examples/custom_tabs_stress/README.md). |
-| [Title-screen status text](guides/title-screen-text.md) | One or more copied provider status/version lines in an explicitly selected screen corner, optionally using an opaque RGB color. | 1.3; `ERUI_CAP_TITLE_SCREEN_TEXT` | Runtime transformation of the effective title GFX. | Mandatory top-left, top-right, bottom-left, or bottom-right corner; 1..255 UTF-16 code units per line; 16 committed lines process-wide; inherited native color or explicit RGB. [Example](../examples/title_screen_text/README.md). |
+| [Title-screen status text](guides/title-screen-text.md) | One or more copied provider status/version lines in an explicitly selected screen corner, optionally using an opaque RGB color. | 1.3; `ERUI_CAP_TITLE_SCREEN_TEXT`; runtime GFX patching must be enabled. | Runtime transformation of the effective title GFX. | Mandatory top-left, top-right, bottom-left, or bottom-right corner; 1..255 UTF-16 code units per line; 16 committed lines process-wide; inherited native color or explicit RGB. [Example](../examples/title_screen_text/README.md). |
 
 The API 1.3 C function table appends `add_tab` and
 `add_title_screen_text` after the frozen API 1.2 prefix. Capability checks
 describe the negotiated host surface. Custom tabs and title-screen text remain
-independently game-build-gated: an API 1.3 connection can succeed while either
-capability is absent when its required native boundary has not been validated.
+independently gated: an API 1.3 connection can succeed while either capability
+is absent when its required native boundary has not been validated. Disabling
+runtime GFX patching additionally removes the title-screen-text capability but
+does not remove custom tabs.
 
 ## Runtime GFX completion
 
-ERNativeUI intercepts the supported settings and title movies at their
-validated Scaleform file-opening boundary. It structurally validates the
-effective bytes, adds only missing row placements, widget presentation, and
-registered title-screen fields, serializes and reparses the result, then
-publishes it in memory. No loose ERNativeUI GFX files are normally required.
+With the default `[GFX] EnableRuntimePatching = 1`, ERNativeUI intercepts the
+supported settings and title movies at their validated Scaleform file-opening
+boundary. It structurally validates the effective bytes, adds only missing row
+placements, widget presentation, and registered title-screen fields,
+serializes and reparses the result, then publishes it in memory. No loose
+ERNativeUI GFX files are normally required.
 
 The ordinary target capacities are 13 rows for Game, Camera, Display, Sound,
 Keyboard/Mouse, and Graphics, and 10 for Network so its native restriction
@@ -96,7 +99,11 @@ when missing.
 
 Structurally compatible replacements supplied by other mods remain supported.
 Already-complete inputs are unchanged; unrecognized inputs continue with their
-original bytes. See
+original bytes. Setting `EnableRuntimePatching = 0` and restarting prevents the
+hook from being installed, leaves every effective GFX file unchanged, and
+disables the additions described above. Logical pages still paginate against
+the live capacity, custom tabs remain available, and TextInput and ColorPicker
+retain their functional fallbacks; title-screen text is not advertised. See
 [runtime GFX completion and presentation](guides/presentation-and-gfx.md).
 
 ## Future API research, not currently supported

@@ -33,14 +33,22 @@ the example DLLs unless you want their example menus.
 
 ## Runtime GFX completion
 
-ERNativeUI expands supported settings pages and supplies its TextInput and
-ColorPicker presentation in memory while the game loads the effective GFX.
-No loose ERNativeUI GFX files or mod-loader entry are normally required.
+By default, ERNativeUI expands supported settings pages and supplies its
+TextInput and ColorPicker presentation in memory while the game loads the
+effective GFX. No loose ERNativeUI GFX files or mod-loader entry are normally
+required.
 
 Structurally compatible GFX replacements from other mods remain supported.
 Unrecognized layouts are left unchanged instead of being patched by guesswork.
 Read [Runtime GFX completion and presentation](https://github.com/Flammrock/ERNativeUI/blob/main/docs/guides/presentation-and-gfx.md)
 when combining ERNativeUI with another mod that replaces the same movies.
+
+Players can set `[GFX] EnableRuntimePatching = 0` in `ERNativeUI.ini` and
+restart to prevent ERNativeUI from installing its GFX hook. The effective GFX
+then remains untouched: custom tabs and functional TextInput/ColorPicker
+fallbacks remain available, but ERNativeUI adds no rows or widget presentation
+and API 1.3 title-screen text is disabled. Compatible structures already
+authored into the effective movie remain available.
 
 ## Configuration
 

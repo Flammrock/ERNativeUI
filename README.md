@@ -192,8 +192,9 @@ options, screenshots, and links to its native implementation research.
   header-only input-assignment codec with another storage system.
   [Learn about storage](docs/guides/storage.md).
 - Let the host complete supported settings GFX at runtime for expanded page
-  capacity and native TextInput and ColorPicker presentation. Structurally
-  compatible GFX supplied by other mods remains supported.
+  capacity and native TextInput and ColorPicker presentation. This default-on
+  behavior can be disabled globally when a player needs untouched effective
+  GFX; structurally compatible GFX supplied by other mods remains supported.
   [Learn about runtime GFX completion](docs/guides/presentation-and-gfx.md).
 
 The complete supported surface, minimum API versions, capabilities, and limits

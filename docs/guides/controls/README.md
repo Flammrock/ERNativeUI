@@ -136,11 +136,12 @@ handle. It does not unregister the committed provider.
 
 ## Runtime presentation
 
-Most controls use stock native widgets. ERNativeUI completes supported
-settings movies at runtime to provide the matching left label on affected
-action rows and richer TextInput and ColorPicker appearances. No loose GFX
-asset is normally required. Structurally compatible movies from other mods
-remain supported; see
+Most controls use stock native widgets. By default, ERNativeUI completes
+supported settings movies at runtime to provide the matching left label on
+affected action rows and richer TextInput and ColorPicker appearances. No
+loose GFX asset is normally required. Players can disable this host-wide
+patching while retaining functional control fallbacks. Structurally compatible
+movies from other mods remain supported; see
 [Runtime GFX completion and presentation](../presentation-and-gfx.md).
 
 For the complete ownership, limits, and error contract, see

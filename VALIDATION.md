@@ -167,13 +167,13 @@ For the shipped showcase, verify:
     affecting another tab.
 11. Manual Back, reopening pages, mouse/controller input, and repeated menu
    visits do not duplicate rows or crash.
-12. With no loose settings movie, confirm runtime GFX completion reports the
-    original and completed capacities and the constructed page exposes the
-    completed capacity. Repeat with a compatible independently modified movie
-    and verify completed structures remain unchanged while missing structures
-    are added. With one compatible mod row materialized first, verify the page
-    planner subtracts that row from the free slots rather than treating it as
-    provider capacity.
+12. With `[GFX] EnableRuntimePatching = 1` and no loose settings movie, confirm
+    runtime GFX completion reports the original and completed capacities and
+    the constructed page exposes the completed capacity. Repeat with a
+    compatible independently modified movie and verify completed structures
+    remain unchanged while missing structures are added. With one compatible
+    mod row materialized first, verify the page planner subtracts that row
+    from the free slots rather than treating it as provider capacity.
 13. Exercise the showcase alert matrix: all seven button layouts in both bottom
    and center placement. Verify controller/mouse page movement, row activation,
    and the page's native Back path remain blocked while popup actions work.
@@ -186,6 +186,38 @@ For the shipped showcase, verify:
    button as a second client. Temporarily enqueue two alerts from one callback
    and verify FIFO dismissal without page input leaking through either dialog;
    do not ship that duplicate-request test in a real mod.
+
+### Runtime GFX patching configuration
+
+Complete this A/B matrix before release. Each change requires a full process
+restart; do not treat an INI edit made while the game is running as a test.
+
+- [ ] Start with `[GFX] EnableRuntimePatching = 1`. Confirm the runtime loader
+  hook installs, supported settings movies reach their documented capacities,
+  TextInput and ColorPicker use their completed presentations, and an API 1.3
+  connection advertises `ERUI_CAP_TITLE_SCREEN_TEXT`.
+- [ ] Remove `EnableRuntimePatching` from an existing INI and restart. Confirm
+  the missing key preserves the enabled behavior for upgrades from older
+  installations, then restore the explicit shipped default.
+- [ ] Set `EnableRuntimePatching = 0`, restart, and confirm the ordinary log
+  reports the intentional disabled state without a warning. Confirm no
+  per-movie transformation occurs and the effective vanilla or mod-supplied
+  GFX capacities remain unchanged.
+- [ ] In the disabled run, confirm ordinary and custom pages paginate against
+  the unchanged movie's live capacity. Exercise custom-tab L1/R1 navigation,
+  wrapping, mouse selection, Back, close, and reopen to prove that the custom
+  tab backend remains independent.
+- [ ] In the disabled run with the stock, unmodified settings GFX, open
+  TextInput and ColorPicker rows. Confirm editing, confirmation, cancellation,
+  values, and callbacks remain functional through their fallback
+  presentations, while the TextInput brackets/empty state and standalone
+  ColorPicker swatch are absent.
+- [ ] In the disabled run, confirm a valid API 1.3 connection omits
+  `ERUI_CAP_TITLE_SCREEN_TEXT`, guarded clients skip their title lines cleanly,
+  and no provider title text is inserted into `05_000_title.gfx`.
+- [ ] Restore `EnableRuntimePatching = 1`, restart, and repeat the enabled
+  smoke test so the shipped default does not inherit state from the disabled
+  run.
 
 ### Elden Ring 2.7.2.0 live validation
 

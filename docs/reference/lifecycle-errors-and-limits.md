@@ -149,9 +149,11 @@ The current C++ wrapper accepts API 1.3 only when `add_tab`,
 `add_title_screen_text`, the complete Numeric Slider and Custom Slider blocks,
 and the retained API 1.1 surface are present. The custom-tab and title-screen
 text capabilities remain game-build-sensitive, so a valid API 1.3 connection
-can omit either capability. Checks near individual builders document their
-dependency and guard bad tables; they are not an automatic downgrade path to
-a partial table or an older API.
+can omit either capability. Title-screen text additionally requires
+`[GFX] EnableRuntimePatching = 1`; disabling it removes that capability while
+custom tabs remain independent. Checks near individual builders document
+their dependency and guard bad tables; they are not an automatic downgrade
+path to a partial table or an older API.
 
 A capability says the host implements the public surface. A game-build-
 sensitive operation can still return `ERUI_NOT_SUPPORTED`, or final native
@@ -395,7 +397,9 @@ CR, or LF; empty values and `=`, `#`, and `;` are preserved.
 
 Native panel capacity is deliberately not a fixed public limit. Declare the
 logical rows the mod needs and let ERNativeUI paginate against the live page
-capacity after supported settings GFX has been completed at runtime.
+capacity. With runtime GFX patching enabled, that measurement follows
+supported settings completion; with it disabled, the measurement comes from
+the effective unchanged movie.
 
 ## Strict-C structure rules
 

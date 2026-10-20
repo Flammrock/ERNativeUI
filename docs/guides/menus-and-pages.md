@@ -127,10 +127,10 @@ Ring's real asynchronous page-pop path, so the game restores its own parent
 state rather than ERNativeUI imitating a Back animation.
 
 For example, the original Game Options movie has six visible slots. The
-runtime GFX transformer completes that supported panel to 13 rows before
-Scaleform consumes it. If Elden Ring and Solid Uncapper have materialized five
-rows, eight slots remain. An overflowing first slice can therefore contain
-seven provider rows and **Next**.
+default-on runtime GFX transformer completes that supported panel to 13 rows
+before Scaleform consumes it. If Elden Ring and Solid Uncapper have
+materialized five rows, eight slots remain. An overflowing first slice can
+therefore contain seven provider rows and **Next**.
 
 ![The middle slice of a three-page ERNativeUI submenu with Previous and Next rows](../assets/images/menus/pagination-middle-page.png)
 
@@ -141,6 +141,10 @@ ERNativeUI also completes the other supported ordinary settings panels to
 their safe target capacities. Network stops at ten rows to preserve its native
 restriction warning; provider content beyond that uses pagination. See
 [runtime GFX completion and presentation](presentation-and-gfx.md).
+
+If the player disables runtime GFX patching, no capacity is added. The same
+pagination algorithm instead uses the live capacity already authored into the
+effective movie.
 
 ## Understand ordering and merging
 

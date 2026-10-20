@@ -169,13 +169,14 @@ table and check host support.
 |---|---|
 | First public API | 1.1 |
 | Capability | `erui::Capability::color_picker` / `ERUI_CAP_COLOR_PICKER` |
-| GFX presentation | ERNativeUI completes the standalone bracketed live swatch at runtime |
+| GFX presentation | With runtime patching enabled, ERNativeUI completes the standalone bracketed live swatch |
 | Disabled behavior | `enabled = false` omits the row because this action path has no proven disabled appearance |
 | Runtime value | `erui::Color` with byte-sized red, green, and blue channels |
 
-No loose GFX file is required. If an asset mod supplies an unrecognized
-settings movie, ERNativeUI keeps that movie unchanged and ColorPicker retains
-its functional action-row fallback. See
+No loose GFX file is required. If runtime patching is disabled, or an asset mod
+supplies an unrecognized settings movie, ERNativeUI keeps that movie unchanged
+and ColorPicker retains its functional action-row fallback. Compatible
+presentation already authored into the effective movie remains available. See
 [Runtime GFX completion and presentation](../presentation-and-gfx.md).
 
 ## Value and confirmation behavior

@@ -138,8 +138,13 @@ a line-break character is rejected.
 
 `Capability::title_screen_text` is optional even on a valid API 1.3
 connection because the host must first validate the runtime presentation
-backend. A client whose only ERNativeUI feature is title text can check the
-connection before registering:
+backend. The capability is also intentionally absent when the player sets
+`[GFX] EnableRuntimePatching = 0`: title-screen text requires transforming the
+effective title movie. Custom tabs and ordinary client pages can remain
+available in that mode, but title lines cannot be inserted into unchanged GFX.
+A client must check the capability rather than inspect or modify the player's
+host configuration. A client whose only ERNativeUI feature is title text can
+check the connection before registering:
 
 ```cpp
 erui::Registration g_registration{};
@@ -275,7 +280,9 @@ the [GFX presentation case study](../research/case-studies/gfx-presentation.md).
 If a line does not appear:
 
 1. confirm that the client was built with the API 1.3 SDK;
-2. confirm `Capability::title_screen_text` before making the call;
+2. confirm `Capability::title_screen_text` before making the call; if it is
+   absent, check that the player's `ERNativeUI.ini` has
+   `[GFX] EnableRuntimePatching = 1` and fully restart the game;
 3. confirm that registration succeeded and its `Registration` was retained;
 4. remove other title-text clients temporarily to rule out the 16-line limit;
 5. test without a custom `05_000_title.gfx`, then check the modified-GFX

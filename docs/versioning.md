@@ -99,9 +99,12 @@ player's machine support a newer runtime API.
 
 API version and capability bits remain distinct parts of the C contract. The
 current C++ wrapper accepts API 1.3 only when its complete required function
-table is present. Capability checks still matter: custom tabs and title-screen
-text are independently game-build-gated, so `Capability::custom_tabs` or
-`Capability::title_screen_text` can be absent on a valid 1.3 connection.
+table is present. Capability checks still matter: custom tabs are
+game-build-gated, while title-screen text also requires the player's default-on
+runtime GFX patching setting. `Capability::custom_tabs` or
+`Capability::title_screen_text` can therefore be absent on a valid 1.3
+connection. Disabling runtime GFX patching removes title-screen text without
+removing custom tabs.
 Successful negotiation does not guarantee that every native path can be
 installed, so operations can still fail safely for reasons unrelated to
 either version number.

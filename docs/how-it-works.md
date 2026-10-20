@@ -133,13 +133,14 @@ needed later.
 
 ## Runtime GFX completion
 
-ERNativeUI's behavior comes from native game interfaces. At the validated
-Scaleform file-opening boundary, the host also parses the effective supported
-settings and title movies before Scaleform consumes them. It completes missing
-settings-row placements and widget presentation, and inserts copied API 1.3
-title-screen lines into validated corner geometry. This provides expanded
-ordinary-page capacity, TextInput and ColorPicker presentation, and title text
-without installing loose ERNativeUI GFX files.
+ERNativeUI's behavior comes from native game interfaces. With the default
+`[GFX] EnableRuntimePatching = 1`, the host also parses the effective supported
+settings and title movies at the validated Scaleform file-opening boundary
+before Scaleform consumes them. It completes missing settings-row placements
+and widget presentation, and inserts copied API 1.3 title-screen lines into
+validated corner geometry. This provides expanded ordinary-page capacity,
+TextInput and ColorPicker presentation, and title text without installing
+loose ERNativeUI GFX files.
 
 The input may be vanilla or supplied by another mod. The transformer validates
 the relevant structure, preserves unrelated definitions, serializes and
@@ -162,6 +163,11 @@ Pagination still reads the resulting live capacity and adapts to rows already
 materialized by the game or another supported hook. See the
 [feature overview](features.md) and
 [runtime GFX guide](guides/presentation-and-gfx.md).
+
+When `EnableRuntimePatching = 0`, the host does not install this file-opening
+hook. It leaves the effective bytes untouched, paginates against their existing
+capacity, and withholds the title-screen-text capability; the other native
+integration remains independent.
 
 ## Capabilities and failure behavior
 

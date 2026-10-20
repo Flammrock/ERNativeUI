@@ -84,11 +84,11 @@ player setup unless their demonstrations are wanted.
 
 ## 4. Runtime GFX presentation
 
-There is no separate GFX installation step. ERNativeUI completes supported
-settings and title movies in memory while Elden Ring loads them. This supplies
-expanded ordinary-page capacity, TextInput and ColorPicker presentation, and
-registered API 1.3 title-screen text without a loose `menu` directory or a Mod
-Engine 2 mod-loader entry.
+There is no separate GFX installation step. By default, ERNativeUI completes
+supported settings and title movies in memory while Elden Ring loads them.
+This supplies expanded ordinary-page capacity, TextInput and ColorPicker
+presentation, and registered API 1.3 title-screen text without a loose `menu`
+directory or a Mod Engine 2 mod-loader entry.
 
 If another mod supplies one of the same movies, ERNativeUI supports it when
 the relevant layout is structurally compatible. Unrecognized layouts are left
@@ -116,6 +116,9 @@ RegistrationMaxWaitMs = 5000
 SteamLanguageWaitMs = 5000
 InjectionCooldownMs = 250
 
+[GFX]
+EnableRuntimePatching = 1
+
 [Diagnostics]
 EnableDiagnostics = 0
 ```
@@ -124,6 +127,18 @@ Logging is disabled for normal play. When `EnableLog = 1`, the host writes
 `ERNativeUI.log` beside the DLL. Enable logging and diagnostics only for a
 bounded troubleshooting session; with logging disabled, the host does not
 create, truncate, append to, or flush a log file.
+
+`[GFX] EnableRuntimePatching = 1` is the normal default; an existing INI that
+omits this new key also uses `1`. Set it to `0` only when a compatibility or
+troubleshooting test needs ERNativeUI to leave the effective GFX bytes
+completely unchanged, then fully restart the game. In that mode, pages
+paginate against the capacity already present in the loaded movie and custom
+tabs remain available. ERNativeUI does not add rows or TextInput/ColorPicker
+artwork, but compatible structures already authored by the effective movie
+remain usable and the controls retain their functional fallbacks.
+`MinimumTabSlots` cannot grow the movie, and API 1.3 title-screen text is
+unavailable. The host therefore does not advertise
+`Capability::title_screen_text` while the setting is disabled.
 
 Locale files use effective language identifiers and belong in `locales` beside
 the host. `Language = auto` follows Elden Ring's current Steam game language.

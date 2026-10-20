@@ -930,6 +930,8 @@ DWORD run_host() noexcept {
             ini, L"Logging", L"EnableLog", 0) != 0;
         const bool diagnostics = read_ini(
             ini, L"Diagnostics", L"EnableDiagnostics", 0) != 0;
+        const bool runtime_gfx_patching_enabled = read_ini(
+            ini, L"GFX", L"EnableRuntimePatching", 1) != 0;
         const bool logging_ready = logging_enabled &&
             log::initialize(directory / L"ERNativeUI.log");
         log::set_diagnostics_enabled(diagnostics);
@@ -1029,6 +1031,12 @@ DWORD run_host() noexcept {
 
         bool title_text_backend_ready = false;
         TitleCataloguePublicationGuard title_catalogue_guard{};
+        if (!runtime_gfx_patching_enabled) {
+            log::write(
+                "Runtime GFX patching disabled by configuration; the "
+                "file-opening hook will not be installed and effective GFX "
+                "files will remain unchanged by ERNativeUI");
+        }
         HMODULE pinned_host{};
         if (!GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -1037,7 +1045,7 @@ DWORD run_host() noexcept {
             log::write(
                 erui::LogLevel::warning,
                 "Host module could not be pinned; do not hot-unload it");
-        } else {
+        } else if (runtime_gfx_patching_enabled) {
             erui::native::ModuleView game{};
             if (!game.initialize(GetModuleHandleW(nullptr))) {
                 log::write(
@@ -1098,6 +1106,10 @@ DWORD run_host() noexcept {
             }
             log::write(
                 "Runtime title-GFX backend installed; API 1.3 title-screen text is available");
+        } else if (!runtime_gfx_patching_enabled) {
+            log::write(
+                "API 1.3 title-screen text is unavailable because runtime "
+                "GFX patching is disabled by configuration");
         } else {
             log::write(
                 erui::LogLevel::warning,

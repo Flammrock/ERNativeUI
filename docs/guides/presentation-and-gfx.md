@@ -1,13 +1,48 @@
 # Runtime GFX completion and presentation
 
-ERNativeUI completes Elden Ring's supported settings and title movies in
-memory while the game loads them. A normal installation needs only the host
-DLL: players do not need to install loose `menu/win/*.gfx` files for expanded
-rows, TextInput, ColorPicker, or API 1.3 title-screen text presentation.
+By default, ERNativeUI completes Elden Ring's supported settings and title
+movies in memory while the game loads them. A normal installation needs only
+the host DLL: players do not need to install loose `menu/win/*.gfx` files for
+expanded rows, TextInput, ColorPicker, or API 1.3 title-screen text
+presentation.
 
 This happens after the game or mod loader selects the effective GFX file and
 before Scaleform consumes it. The input may therefore be the vanilla movie or
 a structurally compatible movie supplied by another mod.
+
+## Enable or disable runtime patching
+
+Runtime GFX patching is enabled by default. The player can disable every
+in-memory transformation in `ERNativeUI.ini`:
+
+```ini
+[GFX]
+EnableRuntimePatching = 0
+```
+
+Omitting the section or key has the same effect as setting it to `1`, so an
+existing INI from an earlier release keeps the normal behavior.
+
+Restart the game after changing this setting. When it is `0`, ERNativeUI does
+not install its Scaleform file-opening hook and leaves the effective vanilla
+or mod-supplied GFX bytes unchanged. This provides a clean compatibility and
+troubleshooting mode with these deliberate consequences:
+
+- ordinary and custom pages use the capacity already exposed by the loaded
+  GFX and continue to paginate against that live capacity;
+- custom Configuration tabs remain available because their native backend is
+  independent of runtime GFX patching;
+- TextInput and ColorPicker remain functional, but ERNativeUI does not inject
+  their brackets, empty state, or live swatch; when the effective movie does
+  not already provide that presentation, their safe fallbacks are used;
+- `MinimumTabSlots` cannot expand a movie while patching is disabled, although
+  capacity already authored into the effective movie remains available; and
+- API 1.3 title-screen text is unavailable, so the host does not advertise
+  `ERUI_CAP_TITLE_SCREEN_TEXT` / `Capability::title_screen_text`.
+
+Set `EnableRuntimePatching = 1` and restart to restore the behavior described
+throughout the rest of this guide. Client mods must continue to check optional
+capabilities; they must not edit this host-wide player setting.
 
 ## What the host completes
 
@@ -88,11 +123,11 @@ not be reported as that final adaptive-branch validation.
 
 ## Modified GFX compatibility
 
-ERNativeUI does not assume that the loaded movie is byte-for-byte vanilla. It
-parses the effective file, identifies supported panels and widgets by their
-structure, and applies only missing transformations. A compatible movie that
-already contains some or all of the additions is accepted; a complete movie
-is left unchanged.
+When runtime patching is enabled, ERNativeUI does not assume that the loaded
+movie is byte-for-byte vanilla. It parses the effective file, identifies
+supported panels and widgets by their structure, and applies only missing
+transformations. A compatible movie that already contains some or all of the
+additions is accepted; a complete movie is left unchanged.
 
 The transformation is deliberately conservative:
 
@@ -134,7 +169,7 @@ movie for the lifetime of the process.
 |---|---|---|
 | Logical menu | Client mod through the public API | Pages, controls, text, callbacks, and initial values |
 | Native integration | One `ERNativeUI.dll` | Game hooks, provider merge, pagination, values, input, and lifetime |
-| Runtime GFX completion | `ERNativeUI.dll` at the validated file-opening boundary | Missing row placements, supported widget presentation, and registered title-screen text |
+| Runtime GFX completion | `ERNativeUI.dll` at the validated file-opening boundary, when `[GFX] EnableRuntimePatching = 1` | Missing row placements, supported widget presentation, and registered title-screen text |
 | Optional replacement GFX | Another asset mod or a developer's experiment | Additional presentation changes outside ERNativeUI's normal runtime additions |
 
 ## Customize submenu titles

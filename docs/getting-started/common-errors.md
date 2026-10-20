@@ -163,7 +163,10 @@ by later compatible 1.x hosts through its unchanged function-table contract.
   native facility was unavailable. In particular, a valid API 1.3 connection
   may omit `ERUI_CAP_CUSTOM_TABS` or `ERUI_CAP_TITLE_SCREEN_TEXT` when the
   installed executable has not passed the corresponding native validation.
-  Inspect the capability and host log before blaming table negotiation.
+  Title-screen text is also absent when the player's
+  `[GFX] EnableRuntimePatching` setting is `0`; custom tabs remain independent.
+  Inspect the capability, host configuration, and host log before blaming
+  table negotiation.
 
 ## Provider registration or commit fails
 
@@ -253,18 +256,22 @@ provider modules because native rows retain callbacks.
 
 **Likely cause**
 
-The runtime GFX transformer did not recognize the effective settings or title
-movie, or the validated file-opening integration was unavailable for this
-Elden Ring build. Another asset mod may have changed a required panel, widget,
-or title-information contract. ERNativeUI leaves unrecognized bytes unchanged
-instead of applying a guessed edit, so controls retain their safe fallback
+Runtime GFX patching may be disabled in `ERNativeUI.ini`, the transformer may
+not have recognized the effective settings or title movie, or the validated
+file-opening integration may be unavailable for this Elden Ring build. Another
+asset mod may have changed a required panel, widget, or title-information
+contract. ERNativeUI leaves bytes unchanged when patching is disabled or the
+structure is unrecognized, so controls retain their safe fallback
 presentation, the host uses the capacity that actually loaded, and unsafe
 title fields are not inserted.
 
 **Fix**
 
+- Confirm `[GFX] EnableRuntimePatching = 1` in the `ERNativeUI.ini` beside the
+  loaded host, then fully restart the game. Keep it at `0` only when unchanged
+  effective GFX is the intended compatibility test.
 - Do not install an ERNativeUI loose GFX package; normal presentation is
-  completed by the DLL at runtime.
+  completed by the DLL at runtime when patching is enabled.
 - Enable logging, restart the game, and find the runtime GFX line for
   `02_040_optionsetting.gfx`, `02_042_pc_graphicsetting.gfx`, or
   `05_000_title.gfx`. It reports whether the movie was transformed, already
