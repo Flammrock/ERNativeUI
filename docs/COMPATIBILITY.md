@@ -22,30 +22,41 @@ called compatible or incompatible merely because its features look unrelated.
   host or a committed client is unsupported.
 
 The completed analysis and live regression matrix cover Windows
-`eldenring.exe` product versions `2.7.0.0` and `2.7.1.0`. Release notes remain
-the authority for the exact game builds supported by a packaged host.
+`eldenring.exe` product versions `2.7.0.0`, `2.7.1.0`, and `2.7.2.0`. Release
+notes remain the authority for the exact game builds supported by a packaged
+host.
 
 ## Elden Ring executable support
 
 The ERUI API version and the Elden Ring executable version are independent.
 A game compatibility patch can therefore keep the public API unchanged.
 
-| ERNativeUI host | Public APIs | Elden Ring 2.7.0.0 | Elden Ring 2.7.1.0 |
-|---|---|---|---|
-| `1.0.0` | API 1.0 | Supported | No declared support; use the current host |
-| `1.1.0` | APIs 1.0 and 1.1 | Supported | No declared support; use the current host |
-| `1.1.1` | APIs 1.0 and 1.1 | Live-validated | Live-validated |
-| `1.2.0` | APIs 1.0, 1.1, and 1.2 | Live-validated | Live-validated |
+| ERNativeUI host | Public APIs | Elden Ring 2.7.0.0 | Elden Ring 2.7.1.0 | Elden Ring 2.7.2.0 |
+|---|---|---|---|---|
+| `1.0.0` | API 1.0 | Supported | No declared support; use the current host | No declared support; use the current host |
+| `1.1.0` | APIs 1.0 and 1.1 | Supported | No declared support; use the current host | No declared support; use the current host |
+| `1.1.1` | APIs 1.0 and 1.1 | Live-validated | Live-validated | No declared support; use the current host |
+| `1.2.0` | APIs 1.0, 1.1, and 1.2 | Live-validated | Live-validated | No declared support; use the current host |
+| `1.2.1` | APIs 1.0, 1.1, and 1.2 | Live-validated | Live-validated | No declared support; use the current host |
+| Current unreleased `api-1.3` development branch | APIs 1.0 through 1.3 | Existing API 1.0–1.2 paths retained; the build profile is retained, but build-locked API 1.3 capabilities such as custom tabs are unavailable | Exact profile retained; current regression pending | Live-validated |
 
-Existing client DLLs compiled for ERUI API 1.0 or API 1.1 do not need to be
-rebuilt for the 1.2.0 host; players update the single host DLL.
+Existing client DLLs compiled for an earlier ERUI API do not need to be
+rebuilt for a host that retains that API; players update the single host DLL.
 
-The two exact runtime identities are:
+The three exact runtime identities are:
 
 | Game version | SHA-256 | PE timestamp | Image size |
 |---|---|---:|---:|
 | `2.7.0.0` | `D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134` | `0x69E9C9B9` | `0x5E09600` |
 | `2.7.1.0` | `1A3547101327F65D0C76DA2F9190AC0AA66871EA42BAE2AECC61E11A8B597891` | `0x6A96B418` | `0x5E0DA00` |
+| `2.7.2.0` | `F9118FEA2CFD8FA3901E8060BFADB1552CB2471771DED8A5B662C4E298FFB328` | `0x6AABF7E7` | `0x5DFD600` |
+
+The live-tested 2.7.2.0 / App 1.17.2 executable had a file size of 86,973,008
+bytes. The current development host exposing ERUI API 1.3 selected its exact
+profile, installed all required backends, completed the settings GFX at
+runtime, and successfully exercised 50 custom tabs with 1,000 rows (58
+logical tabs in total), controller and mouse navigation, Back, and menu
+reopening. The run produced no `WARN`, `ERROR`, or `FATAL` log entries.
 
 The host identifies the loaded image from the PE timestamp **and** image size,
 selects one private address profile, then validates every build-locked entry,
@@ -53,8 +64,9 @@ vtable, and data anchor before use. A timestamp-only or size-only match is not
 accepted. Unknown future builds continue to fail closed for features that
 depend on exact native layouts.
 
-The [2.7.1.0 update record](research/game-updates/elden-ring-2.7.1.0.md)
-documents what moved and how the new profile was derived.
+The [2.7.1.0 update record](research/game-updates/elden-ring-2.7.1.0.md) and
+[2.7.2.0 update record](research/game-updates/elden-ring-2.7.2.0.md) document
+what moved and how each exact profile was derived.
 
 ## Several ERNativeUI client mods
 
@@ -129,7 +141,7 @@ more independent overlap while installing ColorPicker. Solid Uncapper also
 detours the Scaleform visibility setter at game RVA `0x734190`, which
 ERNativeUI calls when preflighting and presenting the standalone color swatch.
 This is not a 2.7.1.0 relocation: the same RVA and pristine entry pattern are
-present in both supported game profiles.
+present in both Solid-Uncapper-tested profiles (2.7.0.0 and 2.7.1.0).
 
 ERNativeUI now captures that one pristine entry before Solid Uncapper's worker
 can modify it. After the existing stabilization wait, the entry must either
@@ -146,6 +158,9 @@ Solid Uncapper 2.3 loaded first and without it. The recognized shared menu,
 Input Bindings, and ColorPicker chains remained operational when Solid
 Uncapper was present, while the same entries followed their pristine paths
 when it was absent.
+
+Solid Uncapper has not yet been regression-tested with the 2.7.2.0 profile;
+no compatibility claim is made for that combination.
 
 The same integration also accounts for Solid Uncapper's already-materialized
 Game Options row when selecting the root pagination plan. ERNativeUI completes

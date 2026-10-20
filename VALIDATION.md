@@ -17,8 +17,8 @@ ctest --preset windows-release
 The suite covers:
 
 - exact Elden Ring PE identity matching, rejection of mixed timestamp/image-
-  size pairs, distinct 2.7.0.0/2.7.1.0 native profiles, and the known moved
-  core UI, ColorPicker, and Input Bindings RVAs;
+  size pairs, distinct 2.7.0.0/2.7.1.0/2.7.2.0 native profiles, and the known
+  moved core UI, ColorPicker, and Input Bindings RVAs;
 - C ABI layout, the frozen API 1.0 function-table prefix, and the additive
   API 1.1 TextInput, ColorPicker, BuiltinPage, InputBindings, and Storage
   blocks;
@@ -186,6 +186,29 @@ For the shipped showcase, verify:
    button as a second client. Temporarily enqueue two alerts from one callback
    and verify FIFO dismissal without page input leaking through either dialog;
    do not ship that duplicate-request test in a real mod.
+
+### Elden Ring 2.7.2.0 live validation
+
+The current development host exposing ERUI API 1.3 was live-validated on
+Elden Ring App 1.17.2 / executable product version 2.7.2.0. The tested
+executable had SHA-256
+`F9118FEA2CFD8FA3901E8060BFADB1552CB2471771DED8A5B662C4E298FFB328`, PE
+timestamp `0x6AABF7E7`, image size `0x5DFD600`, and file size 86,973,008 bytes.
+
+- [x] The host selected the exact 2.7.2.0 native profile and installed every
+  required backend without selecting either older build profile.
+- [x] Runtime GFX completion succeeded and the completed settings interfaces
+  were usable in game.
+- [x] The 50-custom-tab stress client registered 1,000 custom rows. Together
+  with the eight native tabs, the runtime exposed 58 logical tabs.
+- [x] L1/R1 navigation, wrapping, mouse selection, Back, closing, and
+  reopening System all completed successfully.
+- [x] The validation run ended with no `WARN`, `ERROR`, or `FATAL` entries in
+  `ERNativeUI.log`.
+
+This run did not include Solid Uncapper. Its separately documented 2.7.0.0
+and 2.7.1.0 compatibility results must not be extended to 2.7.2.0 without a
+dedicated regression.
 
 ### Elden Ring 2.7.1.0 and Solid Uncapper regression
 

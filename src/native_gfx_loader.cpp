@@ -36,17 +36,53 @@ using erui::gfx::TitleGfxRuntimeOutcome;
 using erui::gfx::TitleGfxRuntimePlanState;
 using erui::gfx::TitleGfxRuntimeResult;
 
-constexpr std::uintptr_t kFileOpener271Rva = 0xD6D280;
-constexpr std::uintptr_t kFileOpenerVtable271Rva = 0x2BBE498;
-constexpr std::uintptr_t kMemoryFileVtable271Rva = 0x2BA7D70;
-constexpr std::array<std::uint8_t, 24> kFileOpener271Entry{
+struct NativeGfxAddressProfile {
+    erui::native::EldenRingBuild build{};
+    std::uintptr_t file_opener_rva{};
+    std::uintptr_t file_opener_vtable_rva{};
+    std::uintptr_t memory_file_vtable_rva{};
+    std::array<std::uintptr_t, 12> memory_file_vslot_rvas{};
+};
+
+constexpr std::array<std::uint8_t, 24> kFileOpenerEntry{
     0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41,
     0x56, 0x41, 0x57, 0x48, 0x8D, 0x6C, 0x24, 0xD9,
     0x48, 0x81, 0xEC, 0xB0, 0x00, 0x00, 0x00, 0x48};
-constexpr std::array<std::uintptr_t, 12> kMemoryFile271VslotRvas{
-    0xCE9730, 0xCE9960, 0xCE9B30, 0xCE9B40,
-    0xCE9C50, 0xCE9B80, 0xCE9970, 0xCE9B50,
-    0xCE9950, 0xCE9C60, 0xCE9B90, 0xCE9C20};
+constexpr std::array<NativeGfxAddressProfile, 2>
+    kNativeGfxAddressProfiles{{
+        {
+            erui::native::EldenRingBuild::v2_7_1_0,
+            0xD6D280,
+            0x2BBE498,
+            0x2BA7D70,
+            {
+                0xCE9730, 0xCE9960, 0xCE9B30, 0xCE9B40,
+                0xCE9C50, 0xCE9B80, 0xCE9970, 0xCE9B50,
+                0xCE9950, 0xCE9C60, 0xCE9B90, 0xCE9C20,
+            },
+        },
+        {
+            erui::native::EldenRingBuild::v2_7_2_0,
+            0xD6E970,
+            0x2BC0748,
+            0x2BAA020,
+            {
+                0xCEAE20, 0xCEB050, 0xCEB220, 0xCEB230,
+                0xCEB340, 0xCEB270, 0xCEB060, 0xCEB240,
+                0xCEB040, 0xCEB350, 0xCEB280, 0xCEB310,
+            },
+        },
+    }};
+
+[[nodiscard]] constexpr const NativeGfxAddressProfile*
+find_native_gfx_address_profile(
+    erui::native::EldenRingBuild build) noexcept {
+    for (const NativeGfxAddressProfile& profile :
+         kNativeGfxAddressProfiles) {
+        if (profile.build == build) return &profile;
+    }
+    return nullptr;
+}
 
 constexpr std::size_t kMaximumPathLength = 511;
 constexpr std::size_t kTargetCount = 2;
@@ -765,19 +801,20 @@ void* __fastcall open_file_detour(
 }
 
 [[nodiscard]] bool validate_interface(
-    const erui::native::ModuleView& game) noexcept {
-    std::uint8_t* const entry = game.at_rva(kFileOpener271Rva);
-    if (!entry || !game.contains(entry, kFileOpener271Entry.size())) {
+    const erui::native::ModuleView& game,
+    const NativeGfxAddressProfile& profile) noexcept {
+    std::uint8_t* const entry = game.at_rva(profile.file_opener_rva);
+    if (!entry || !game.contains(entry, kFileOpenerEntry.size())) {
         return false;
     }
-    std::array<std::uint8_t, kFileOpener271Entry.size()> actual_entry{};
+    std::array<std::uint8_t, kFileOpenerEntry.size()> actual_entry{};
     if (!guarded_copy(actual_entry.data(), entry, actual_entry.size()) ||
-        actual_entry != kFileOpener271Entry) {
+        actual_entry != kFileOpenerEntry) {
         return false;
     }
 
     std::uint8_t* const opener_vtable =
-        game.at_rva(kFileOpenerVtable271Rva);
+        game.at_rva(profile.file_opener_vtable_rva);
     void* virtual_open_file{};
     if (!opener_vtable ||
         !game.contains(opener_vtable, 2U * sizeof(void*)) ||
@@ -790,18 +827,19 @@ void* __fastcall open_file_detour(
     }
 
     std::uint8_t* const memory_file_vtable =
-        game.at_rva(kMemoryFileVtable271Rva);
+        game.at_rva(profile.memory_file_vtable_rva);
     if (!memory_file_vtable ||
         !game.contains(memory_file_vtable,
-            kMemoryFile271VslotRvas.size() * sizeof(void*))) {
+            profile.memory_file_vslot_rvas.size() * sizeof(void*))) {
         return false;
     }
-    std::array<void*, kMemoryFile271VslotRvas.size()> slots{};
+    std::array<void*, 12> slots{};
     if (!guarded_copy(slots.data(), memory_file_vtable, sizeof(slots))) {
         return false;
     }
     for (std::size_t index = 0; index < slots.size(); ++index) {
-        if (slots[index] != game.at_rva(kMemoryFile271VslotRvas[index])) {
+        if (slots[index] !=
+            game.at_rva(profile.memory_file_vslot_rvas[index])) {
             return false;
         }
     }
@@ -821,11 +859,14 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
         if (g_installed.load(std::memory_order_acquire)) {
             return NativeGfxLoaderInstallStatus::already_installed;
         }
-        if (identify_elden_ring_build(game.timestamp(), game.image_size()) !=
-            EldenRingBuild::v2_7_1_0) {
+        const EldenRingBuild build = identify_elden_ring_build(
+            game.timestamp(), game.image_size());
+        const NativeGfxAddressProfile* const profile =
+            find_native_gfx_address_profile(build);
+        if (!profile) {
             return NativeGfxLoaderInstallStatus::unsupported_game;
         }
-        if (!validate_interface(game)) {
+        if (!validate_interface(game, *profile)) {
             return NativeGfxLoaderInstallStatus::interface_mismatch;
         }
 
@@ -840,7 +881,7 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
         }
 
         g_expected_memory_file_vtable =
-            game.at_rva(kMemoryFileVtable271Rva);
+            game.at_rva(profile->memory_file_vtable_rva);
         const std::uint32_t effective_title_wait_ms = (std::min)(
             title_catalogue_wait_ms,
             kNativeTitleCatalogueWaitMaximumMilliseconds);
@@ -860,7 +901,7 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
         g_title_runtime_cache.store(title_cache, std::memory_order_release);
 
         auto hook = SafetyHookInline::create(
-            game.at_rva(kFileOpener271Rva),
+            game.at_rva(profile->file_opener_rva),
             reinterpret_cast<void*>(&open_file_detour),
             SafetyHookInline::StartDisabled);
         if (!hook) {
@@ -889,8 +930,10 @@ NativeGfxLoaderInstallStatus install_native_gfx_loader(
         g_installed.store(true, std::memory_order_release);
         detail::logf(
             LogLevel::info,
-            "Runtime GFX completion hook installed: Elden Ring 2.7.1.0 CSScaleformFileOpener::OpenFile RVA=0x%llX minimumTabSlots=%u titleCatalogueWaitMs=%u",
-            static_cast<unsigned long long>(kFileOpener271Rva),
+            "Runtime GFX completion hook installed: Elden Ring %.*s CSScaleformFileOpener::OpenFile RVA=0x%llX minimumTabSlots=%u titleCatalogueWaitMs=%u",
+            static_cast<int>(elden_ring_build_name(build).size()),
+            elden_ring_build_name(build).data(),
+            static_cast<unsigned long long>(profile->file_opener_rva),
             static_cast<unsigned>(minimum_tab_slots),
             static_cast<unsigned>(effective_title_wait_ms));
         return NativeGfxLoaderInstallStatus::installed;

@@ -77,7 +77,7 @@ constexpr std::string_view kGetPlayerInputPattern =
     "48 83 EC 28 44 8B CA 4C 8B C1 4C 3B 49 70 72 07 "
     "33 C0 48 83 C4 28 C3 48 8D 41 48 48 89 5C 24 20 "
     "48 F7 D8 4E 8D 1C CD 00 00 00 00 83 E0 07 "
-    "48 8D 1D 62 0B B2 03";
+    "48 8D 1D ?? ?? ?? ??";
 constexpr std::string_view kQueryInputStatesPattern =
     "48 8B 49 10 E9 ?? ?? ?? ?? 90 ?? ?? ?? ?? ?? ?? "
     "40 53 48 81 EC 80 00 00 00 8B 84 24 B0 00 00 00 "

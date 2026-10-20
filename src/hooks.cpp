@@ -1,6 +1,7 @@
 #include "hooks.hpp"
 
 #include "dialog_input_gate.hpp"
+#include "game_build.hpp"
 #include "native_dialog.hpp"
 #include "native_menu.hpp"
 #include "native_popup_choice.hpp"
@@ -45,6 +46,31 @@ constexpr std::uint32_t kTitleFaultLogLimit = 4;
 GameAddresses g_addresses{};
 SafetyHookInline g_game_options_hook{};
 #if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+struct TabCarrierAllocatorTarget;
+struct TabCarrierBuildProfile {
+    EldenRingBuild build{};
+    std::uint32_t timestamp{};
+    std::size_t image_size{};
+    std::uintptr_t category8_pre_rva{};
+    std::uintptr_t category8_materializer_rva{};
+    std::uintptr_t category8_extra_callback_rva{};
+    std::uintptr_t composite_teardown_rva{};
+    std::uintptr_t option_setting_dialog_vtable_rva{};
+    std::uintptr_t scene_obj_proxy_vtable_rva{};
+    std::uintptr_t scene_obj_proxy_get_value_rva{};
+    std::uintptr_t carrier_manager_rva{};
+    std::uintptr_t carrier_deactivate_rva{};
+    std::uintptr_t composite_vtable_rva{};
+    std::uintptr_t top_vtable_rva{};
+    std::uintptr_t extra_callback_anchor_rva{};
+    std::uintptr_t row_callback_anchor_rva{};
+    std::uintptr_t builder_anchor_rva{};
+    std::uintptr_t route_anchor_rva{};
+    std::array<std::uint8_t, 16> manager_entry{};
+    const TabCarrierAllocatorTarget* allocator_targets{};
+    std::size_t allocator_target_count{};
+};
+
 SafetyHookMid g_tab_content_category8_pre_hook{};
 SafetyHookInline g_tab_content_composite_teardown_hook{};
 using TabCarrierCompositeTeardownFn = void(__fastcall*)(void*);
@@ -55,10 +81,7 @@ std::atomic_bool g_tab_content_callbacks_armed{};
 std::atomic_uint64_t g_tab_content_teardown_generation{};
 std::atomic_uint32_t g_tab_content_route_log_count{};
 std::atomic_uint32_t g_tab_content_route_fault_log_count{};
-constexpr std::uintptr_t kCategory8PreRva = 0x93CF89;
-constexpr std::uintptr_t kCategory8MaterializerRva = 0x95C050;
-constexpr std::uintptr_t kCategory8ExtraCallbackRva = 0x95A820;
-constexpr std::uintptr_t kCompositeTeardownRva = 0x93C1A0;
+const TabCarrierBuildProfile* g_tab_carrier_build_profile{};
 // The first-page capacity is discovered from each live Graphics carrier. Use
 // one row only when reserving pagination bindings: it is the conservative
 // worst case and is not a claim about the authored GFX capacity.
@@ -84,7 +107,7 @@ SafetyHookInline g_dialog_back_gate_hook{};
 std::atomic<PageFrameFn> g_original_page_frame{};
 std::atomic<NativeBackFn> g_original_dialog_back{};
 SafetyHookMid g_scaleform_path_resolver_hook{};
-constexpr std::array<std::uint8_t, 16> kScaleformPathResolverEntry271{
+constexpr std::array<std::uint8_t, 16> kScaleformPathResolverEntry{
     0x4C, 0x89, 0x44, 0x24, 0x18, 0x4C, 0x89, 0x4C,
     0x24, 0x20, 0x55, 0x53, 0x56, 0x57, 0x41, 0x56};
 std::mutex g_scaleform_path_bridge_mutex{};
@@ -118,6 +141,25 @@ TitleCaptureState g_title_capture{};
 constexpr std::size_t kPanelVisualCapacityOffset = 0xB14;
 constexpr std::size_t kPanelNativeCountOffset = 0x1AF0;
 constexpr std::uintptr_t kOptionSettingDialogVtableRva = 0x2B14888;
+
+[[nodiscard]] std::uintptr_t option_setting_dialog_vtable_rva() noexcept {
+    if (g_addresses.game_image_base &&
+        g_addresses.option_setting_dialog_vtable) {
+        const auto base = reinterpret_cast<std::uintptr_t>(
+            g_addresses.game_image_base);
+        const auto value = reinterpret_cast<std::uintptr_t>(
+            g_addresses.option_setting_dialog_vtable);
+        if (value >= base && value - base < g_addresses.game_image_size) {
+            return value - base;
+        }
+    }
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    if (g_tab_carrier_build_profile) {
+        return g_tab_carrier_build_profile->option_setting_dialog_vtable_rva;
+    }
+#endif
+    return kOptionSettingDialogVtableRva;
+}
 
 bool read_scaleform_path_entry(
     const void* target,
@@ -157,10 +199,12 @@ BuiltinPanelSnapshot inspect_builtin_panel(void* page) noexcept {
             bytes + kPanelNativeCountOffset);
         const std::uintptr_t image =
             reinterpret_cast<std::uintptr_t>(g_addresses.game_image_base);
+        const std::uintptr_t vtable_rva =
+            option_setting_dialog_vtable_rva();
         const void* expected_vtable = reinterpret_cast<const void*>(
-            image + kOptionSettingDialogVtableRva);
+            image + vtable_rva);
         result.valid = image &&
-            kOptionSettingDialogVtableRva < g_addresses.game_image_size &&
+            vtable_rva < g_addresses.game_image_size &&
             result.vtable == expected_vtable &&
             result.visual_capacity >= 1 &&
             result.visual_capacity <=
@@ -182,9 +226,6 @@ void __fastcall tab_content_category8_materializer(
 constexpr std::size_t kPanelSceneProxyOffset = 0x1200;
 constexpr std::size_t kSceneProxyWrapperFlagsOffset = 0x20;
 constexpr std::size_t kSceneProxyWrapperPayloadOffset = 0x28;
-constexpr std::uintptr_t kSceneObjProxyVtableRva = 0x2A97AF0;
-constexpr std::uintptr_t kSceneObjProxyGetValueRva = 0x74C930;
-
 struct TabCarrierIdentity {
     void* panel{};
     void* wrapper{};
@@ -207,9 +248,13 @@ TabCarrierIdentity inspect_tab_carrier(
     result.panel = page;
     result.category = category;
     result.logical_page_index = logical_page_index;
-    if (!page || !g_addresses.game_image_base ||
-        kSceneObjProxyGetValueRva >= g_addresses.game_image_size ||
-        kSceneObjProxyVtableRva >= g_addresses.game_image_size) {
+    const TabCarrierBuildProfile* const profile =
+        g_tab_carrier_build_profile;
+    if (!page || !profile || !g_addresses.game_image_base ||
+        profile->scene_obj_proxy_get_value_rva >=
+            g_addresses.game_image_size ||
+        profile->scene_obj_proxy_vtable_rva >=
+            g_addresses.game_image_size) {
         return result;
     }
 #if defined(_MSC_VER)
@@ -221,14 +266,14 @@ TabCarrierIdentity inspect_tab_carrier(
             kPanelSceneProxyOffset;
         void* const proxy_vtable = *reinterpret_cast<void**>(proxy);
         void* const expected_vtable = reinterpret_cast<void*>(
-            image + kSceneObjProxyVtableRva);
+            image + profile->scene_obj_proxy_vtable_rva);
         void* const getter = proxy_vtable
             ? *reinterpret_cast<void**>(
                   static_cast<std::byte*>(proxy_vtable) + sizeof(void*))
             : nullptr;
         if (proxy_vtable != expected_vtable ||
             getter != reinterpret_cast<void*>(
-                image + kSceneObjProxyGetValueRva)) {
+                image + profile->scene_obj_proxy_get_value_rva)) {
             return result;
         }
         using GetterFn = void*(__fastcall*)(void*);
@@ -285,10 +330,10 @@ struct TabCarrierAllocatorTarget {
     std::uint64_t entry;
 };
 
-// Exact DLAllocator descendants validated for Configuration panels in the
-// supported 2.7.1 executable. No unlisted vtable/queue pair is called.
+// Exact DLAllocator descendants validated for Configuration panels in each
+// admitted executable. No unlisted vtable/queue pair is called.
 constexpr std::array<TabCarrierAllocatorTarget, 26>
-    kTabCarrierAllocatorTargets{{
+    kTabCarrierAllocatorTargets271{{
         {0x29D54F0,0x2657530,0xFF864788E9CA8B48},
         {0x2B7D418,0xB97EC0,0x74894808245C8948},
         {0x2BDE708,0xE14B60,0x8B4820EC83485340},
@@ -317,6 +362,106 @@ constexpr std::array<TabCarrierAllocatorTarget, 26>
         {0x2BE0F30,0x1F1A8D0,0x48018B4808498B48},
     }};
 
+constexpr std::array<TabCarrierAllocatorTarget, 26>
+    kTabCarrierAllocatorTargets272{{
+        {0x29D74F0,0x2658C60,0xFF864748E9CA8B48},
+        {0x2B7F4A0,0xB981C0,0x83485308244C8948},
+        {0x2BE09B8,0xE16250,0x8B4820EC83485340},
+        {0x2BE0BA0,0xE16DA0,0xC74840EC83485740},
+        {0x2BE0F50,0xE17950,0x28C1834808498B48},
+        {0x2BE0CF8,0xE17290,0x28C1834808498B48},
+        {0x2BE1028,0xE17DC0,0xC74840EC83485740},
+        {0x2BE0AC8,0xE167B0,0xC74840EC83485740},
+        {0x2BE0DD0,0xE17620,0x28C1834808498B48},
+        {0x2BE1100,0xE18390,0xC74840EC83485740},
+        {0x2BE3B20,0xE20940,0x8B4820EC83485340},
+        {0x2BE3CD0,0xE20EA0,0x8B4820EC83485340},
+        {0x2F29248,0x1C5B320,0x00262088E9CA8B48},
+        {0x2F29670,0x1AF7800,0x2745C748CC0000C2},
+        {0x3037A78,0x1B45AF0,0x28C1834808498B48},
+        {0x30534E0,0x1C2B6D0,0xFF418D48CC0000C2},
+        {0x30B2558,0x1EBE580,0xE872CC0000065BE9},
+        {0x30C24E8,0x1F3A480,0xC74840EC83485740},
+        {0x30CCBC8,0x1F63640,0x48018B4808498B48},
+        {0x30CD130,0x1F65B40,0xC74830EC83485740},
+        {0x30D2140,0x1F83190,0x8B41CC02D5E587E9},
+        {0x30D2218,0x1F831A0,0x8B489003B215C8E9},
+        {0x327B160,0x263B000,0xC74830EC83485740},
+        {0x30C9760,0x1A4900,0x28C1834808498B48},
+        {0x2BC21E8,0x1538B0,0xC74840EC83485740},
+        {0x2BE31E0,0x1F1BFC0,0x48018B4808498B48},
+    }};
+
+constexpr std::array<TabCarrierBuildProfile, 2>
+    kTabCarrierBuildProfiles{{
+        {
+            EldenRingBuild::v2_7_1_0,
+            0x6A96B418,
+            0x5E0DA00,
+            0x93CF89,
+            0x95C050,
+            0x95A820,
+            0x93C1A0,
+            0x2B14888,
+            0x2A97AF0,
+            0x74C930,
+            0xE1C080,
+            0x953520,
+            0x2B0C950,
+            0x2B16B48,
+            0x93CF20,
+            0x93CF32,
+            0x93CF58,
+            0x93CF84,
+            {
+                0x4C,0x63,0x05,0x81,0xF3,0xF6,0x02,0x33,
+                0xD2,0x4D,0x85,0xC0,0x7E,0x1E,0x48,0x8D,
+            },
+            kTabCarrierAllocatorTargets271.data(),
+            kTabCarrierAllocatorTargets271.size(),
+        },
+        {
+            EldenRingBuild::v2_7_2_0,
+            0x6AABF7E7,
+            0x5DFD600,
+            0x93D439,
+            0x95C500,
+            0x95ACD0,
+            0x93C650,
+            0x2B16978,
+            0x2A99BE0,
+            0x74CDE0,
+            0xE1D770,
+            0x9539D0,
+            0x2B0EA40,
+            0x2B18C38,
+            0x93D3D0,
+            0x93D3E2,
+            0x93D408,
+            0x93D434,
+            {
+                0x4C,0x63,0x05,0xB1,0x0C,0xF7,0x02,0x33,
+                0xD2,0x4D,0x85,0xC0,0x7E,0x1E,0x48,0x8D,
+            },
+            kTabCarrierAllocatorTargets272.data(),
+            kTabCarrierAllocatorTargets272.size(),
+        },
+    }};
+
+[[nodiscard]] constexpr const TabCarrierBuildProfile*
+find_tab_carrier_build_profile(
+    std::uint32_t timestamp,
+    std::size_t image_size) noexcept {
+    for (const TabCarrierBuildProfile& profile :
+         kTabCarrierBuildProfiles) {
+        if (profile.timestamp == timestamp &&
+            profile.image_size == image_size) {
+            return &profile;
+        }
+    }
+    return nullptr;
+}
+
 bool reusable_fault(const char* reason) noexcept {
     g_reusable_failed.store(true, std::memory_order_release);
     erui::detail::logf(erui::LogLevel::error,
@@ -329,7 +474,15 @@ bool exact_allocator_target(
     std::uintptr_t image,
     void* manager_vtable,
     void* queue) noexcept {
-    for (const auto& target : kTabCarrierAllocatorTargets) {
+    const TabCarrierBuildProfile* const profile =
+        g_tab_carrier_build_profile;
+    if (!profile || !profile->allocator_targets ||
+        profile->allocator_target_count == 0) return false;
+    for (std::size_t index = 0;
+         index < profile->allocator_target_count;
+         ++index) {
+        const TabCarrierAllocatorTarget& target =
+            profile->allocator_targets[index];
         if (manager_vtable == reinterpret_cast<void*>(
                 image + target.vtable) &&
             queue == reinterpret_cast<void*>(image + target.method) &&
@@ -422,23 +575,27 @@ bool prepare_graphics_carrier_v2_impl(
     }
     const auto image = reinterpret_cast<std::uintptr_t>(
         g_addresses.game_image_base);
-    if (!image || g_addresses.game_image_size != 0x5E0DA00) {
+    const TabCarrierBuildProfile* const profile =
+        g_tab_carrier_build_profile;
+    if (!image || !profile ||
+        g_addresses.game_image_size != profile->image_size) {
         return reusable_fault(
-            "retirement requires exact Elden Ring 2.7.1 image");
+            "retirement requires an exact admitted Elden Ring image");
     }
 
 #if defined(_MSC_VER)
     __try {
 #endif
-        constexpr std::array<std::uint8_t, 16> manager_entry{
-            0x4C,0x63,0x05,0x81,0xF3,0xF6,0x02,0x33,
-            0xD2,0x4D,0x85,0xC0,0x7E,0x1E,0x48,0x8D};
         constexpr std::array<std::uint8_t, 16> deactivate_entry{
             0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,
             0xEC,0x20,0x8B,0xDA,0x48,0x8B,0xF9,0xE8};
-        if (std::memcmp(reinterpret_cast<const void*>(image + 0xE1C080),
-                manager_entry.data(), manager_entry.size()) != 0 ||
-            std::memcmp(reinterpret_cast<const void*>(image + 0x953520),
+        if (std::memcmp(
+                reinterpret_cast<const void*>(
+                    image + profile->carrier_manager_rva),
+                profile->manager_entry.data(),
+                profile->manager_entry.size()) != 0 ||
+            std::memcmp(reinterpret_cast<const void*>(
+                    image + profile->carrier_deactivate_rva),
                 deactivate_entry.data(), deactivate_entry.size()) != 0) {
             return reusable_fault(
                 "retirement manager/deactivate bytes differed");
@@ -446,9 +603,10 @@ bool prepare_graphics_carrier_v2_impl(
 
         auto* const bytes = static_cast<std::byte*>(composite);
         if (*reinterpret_cast<void**>(bytes) !=
-                reinterpret_cast<void*>(image + 0x2B0C950) ||
+                reinterpret_cast<void*>(
+                    image + profile->composite_vtable_rva) ||
             *reinterpret_cast<void**>(bytes - 0x1768) !=
-                reinterpret_cast<void*>(image + 0x2B16B48)) {
+                reinterpret_cast<void*>(image + profile->top_vtable_rva)) {
             return reusable_fault(
                 "composite/top vtable differed from validated objects");
         }
@@ -503,7 +661,8 @@ bool prepare_graphics_carrier_v2_impl(
             using ManagerFn = void*(__fastcall*)(void*);
             using DeactivateFn = void(__fastcall*)(void*, bool);
             void* const manager =
-                reinterpret_cast<ManagerFn>(image + 0xE1C080)(old_panel);
+                reinterpret_cast<ManagerFn>(
+                    image + profile->carrier_manager_rva)(old_panel);
             if (!manager) return reusable_fault("retirement manager was null");
             void* const deactivate = *reinterpret_cast<void**>(
                 static_cast<std::byte*>(panel.vtable) + 0x08);
@@ -512,7 +671,8 @@ bool prepare_graphics_carrier_v2_impl(
                 ? *reinterpret_cast<void**>(
                       static_cast<std::byte*>(manager_vtable) + 0x68)
                 : nullptr;
-            if (deactivate != reinterpret_cast<void*>(image + 0x953520) ||
+            if (deactivate != reinterpret_cast<void*>(
+                    image + profile->carrier_deactivate_rva) ||
                 !manager_vtable || !queue ||
                 !exact_allocator_target(image, manager_vtable, queue)) {
                 return reusable_fault(
@@ -734,7 +894,9 @@ void begin_tab_content_category8_route(
     }
     const std::uintptr_t image = reinterpret_cast<std::uintptr_t>(
         g_addresses.game_image_base);
-    if (!image || kCategory8MaterializerRva >=
+    const TabCarrierBuildProfile* const profile =
+        g_tab_carrier_build_profile;
+    if (!image || !profile || profile->category8_materializer_rva >=
             g_addresses.game_image_size) {
         log_tab_content_route_fault("invalid image bounds");
         return;
@@ -787,10 +949,10 @@ void begin_tab_content_category8_route(
             observed_secondary_slot == context.rsp + 0x50 &&
             observed_enabled == 1 && observed_reserved == 0 &&
             observed_primary_callback ==
-                image + kCategory8MaterializerRva &&
+                image + profile->category8_materializer_rva &&
             observed_primary_metadata == 0 &&
             observed_secondary_callback ==
-                image + kCategory8ExtraCallbackRva &&
+                image + profile->category8_extra_callback_rva &&
             observed_secondary_metadata == 0;
         if (exact) {
             *primary_callback = reinterpret_cast<std::uintptr_t>(
@@ -840,17 +1002,20 @@ void begin_tab_content_category8_route(
             g_reusable_route == native_graphics_route()
                 ? "native-graphics" : "custom",
             secondary_zeroed ? "zero/generic-post-init" :
-                "native-0x95A820");
+                "native-authored");
     }
 }
 
 void materialize_native_graphics(void* page) noexcept {
     const std::uintptr_t image = reinterpret_cast<std::uintptr_t>(
         g_addresses.game_image_base);
-    if (!page || !image || kCategory8MaterializerRva >=
+    const TabCarrierBuildProfile* const profile =
+        g_tab_carrier_build_profile;
+    if (!page || !image || !profile ||
+        profile->category8_materializer_rva >=
             g_addresses.game_image_size) return;
     reinterpret_cast<BuiltinPanelMaterializerFn>(
-        image + kCategory8MaterializerRva)(
+        image + profile->category8_materializer_rva)(
             page, static_cast<std::byte*>(page) + 0x1B38);
 }
 
@@ -2018,8 +2183,12 @@ bool tab_content_bytes_match(
 }
 
 bool tab_carrier_signatures_match(
-    const GameAddresses& addresses) noexcept {
-    // Category 8 (Graphics), Elden Ring 2.7.1.0. Native Graphics preserves
+    const GameAddresses& addresses,
+    const TabCarrierBuildProfile** matched_profile = nullptr) noexcept {
+    if (matched_profile) {
+        *matched_profile = nullptr;
+    }
+    // Category 8 (Graphics). Native Graphics preserves
     // both callbacks. Each 16-byte descriptor contains an eight-byte callback,
     // four-byte metadata field and four bytes of padding. A validated custom
     // route substitutes the callback at stack+0x60 and clears only the
@@ -2039,20 +2208,15 @@ bool tab_carrier_signatures_match(
     constexpr std::array<std::uint8_t, 16> teardown_entry{
         0x48, 0x89, 0x4C, 0x24, 0x08, 0x55, 0x56, 0x57,
         0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x30};
-    constexpr std::array<std::uint8_t, 16> manager_entry{
-        0x4C,0x63,0x05,0x81,0xF3,0xF6,0x02,0x33,
-        0xD2,0x4D,0x85,0xC0,0x7E,0x1E,0x48,0x8D};
     constexpr std::array<std::uint8_t, 16> deactivate_entry{
         0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,
         0xEC,0x20,0x8B,0xDA,0x48,0x8B,0xF9,0xE8};
-    if (!addresses.game_image_base ||
-        addresses.game_image_size != 0x5E0DA00 ||
-        reinterpret_cast<void*>(addresses.graphics_panel_materializer) !=
-            addresses.game_image_base + kCategory8MaterializerRva) {
+    if (!addresses.game_image_base) {
         return false;
     }
 
     bool exact_image{};
+    const TabCarrierBuildProfile* profile{};
 #if defined(_MSC_VER)
     __try {
 #endif
@@ -2063,34 +2227,52 @@ bool tab_carrier_signatures_match(
                     sizeof(IMAGE_NT_HEADERS64) <= addresses.game_image_size) {
             const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
                 addresses.game_image_base + dos->e_lfanew);
-            exact_image = nt->Signature == IMAGE_NT_SIGNATURE &&
+            const bool valid_pe = nt->Signature == IMAGE_NT_SIGNATURE &&
                 nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
-                nt->FileHeader.TimeDateStamp == 0x6A96B418u &&
                 nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
-                nt->OptionalHeader.SizeOfImage == 0x5E0DA00u;
+                nt->OptionalHeader.SizeOfImage == addresses.game_image_size;
+            if (valid_pe) {
+                profile = find_tab_carrier_build_profile(
+                    nt->FileHeader.TimeDateStamp,
+                    nt->OptionalHeader.SizeOfImage);
+                exact_image = profile != nullptr;
+            }
         }
 #if defined(_MSC_VER)
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         exact_image = false;
     }
 #endif
-    if (!exact_image ||
+    if (!exact_image || !profile ||
+        reinterpret_cast<void*>(addresses.graphics_panel_materializer) !=
+            addresses.game_image_base +
+                profile->category8_materializer_rva ||
         !tab_content_bytes_match(
-            addresses.game_image_base + 0x93CF20, extra_callback) ||
+            addresses.game_image_base +
+                profile->extra_callback_anchor_rva,
+            extra_callback) ||
         !tab_content_bytes_match(
-            addresses.game_image_base + 0x93CF32, row_callback) ||
+            addresses.game_image_base + profile->row_callback_anchor_rva,
+            row_callback) ||
         !tab_content_bytes_match(
-            addresses.game_image_base + 0x93CF58, builder) ||
+            addresses.game_image_base + profile->builder_anchor_rva,
+            builder) ||
         !tab_content_bytes_match(
-            addresses.game_image_base + 0x93CF84, route) ||
+            addresses.game_image_base + profile->route_anchor_rva,
+            route) ||
         !tab_content_bytes_match(
-            addresses.game_image_base + kCompositeTeardownRva,
+            addresses.game_image_base + profile->composite_teardown_rva,
             teardown_entry) ||
         !tab_content_bytes_match(
-            addresses.game_image_base + 0xE1C080, manager_entry) ||
+            addresses.game_image_base + profile->carrier_manager_rva,
+            profile->manager_entry) ||
         !tab_content_bytes_match(
-            addresses.game_image_base + 0x953520, deactivate_entry)) {
+            addresses.game_image_base + profile->carrier_deactivate_rva,
+            deactivate_entry)) {
         return false;
+    }
+    if (matched_profile) {
+        *matched_profile = profile;
     }
     return true;
 }
@@ -2102,21 +2284,23 @@ bool install_tab_content_carrier_hooks(
             "Native-tab Graphics-carrier hooks were already exposed; refusing a second installation attempt");
         return false;
     }
-    if (!tab_carrier_signatures_match(addresses)) {
+    const TabCarrierBuildProfile* profile{};
+    if (!tab_carrier_signatures_match(addresses, &profile)) {
         erui::detail::logf(erui::LogLevel::error,
             "Native-tab Graphics-carrier build/signatures differed; no carrier hooks installed");
         return false;
     }
+    if (!profile) return false;
 
     auto pre8 = SafetyHookMid::create(
-        addresses.game_image_base + kCategory8PreRva,
+        addresses.game_image_base + profile->category8_pre_rva,
         &begin_tab_content_category8_route,
         SafetyHookMid::StartDisabled);
     if (!pre8) return false;
     g_tab_content_category8_pre_hook = std::move(*pre8);
 
     auto teardown = SafetyHookInline::create(
-        addresses.game_image_base + kCompositeTeardownRva,
+        addresses.game_image_base + profile->composite_teardown_rva,
         reinterpret_cast<void*>(&tab_content_composite_teardown_detour),
         SafetyHookInline::StartDisabled);
     if (!teardown) {
@@ -2133,6 +2317,7 @@ bool install_tab_content_carrier_hooks(
     // point forward the hook objects and original trampoline are retained for
     // the process lifetime. Until both patches are known enabled, the inline
     // detour is exact pass-through and the mid hook is a no-op.
+    g_tab_carrier_build_profile = profile;
     g_tab_content_callbacks_armed.store(false, std::memory_order_release);
     g_tab_content_hooks_exposed.store(true, std::memory_order_release);
     if (!g_tab_content_composite_teardown_hook.enable()) {
@@ -2149,10 +2334,13 @@ bool install_tab_content_carrier_hooks(
 
     erui::detail::logf(erui::LogLevel::info,
         "Native-tab Graphics carrier installed category=8 selector=11 pre=+0x%llX nativeRows=+0x%llX extraCallback=+0x%llX policy={native:preserve custom:validated-zero} teardown=+0x%llX parking=stock-category5 synchronous=1",
-        static_cast<unsigned long long>(kCategory8PreRva),
-        static_cast<unsigned long long>(kCategory8MaterializerRva),
-        static_cast<unsigned long long>(kCategory8ExtraCallbackRva),
-        static_cast<unsigned long long>(kCompositeTeardownRva));
+        static_cast<unsigned long long>(profile->category8_pre_rva),
+        static_cast<unsigned long long>(
+            profile->category8_materializer_rva),
+        static_cast<unsigned long long>(
+            profile->category8_extra_callback_rva),
+        static_cast<unsigned long long>(
+            profile->composite_teardown_rva));
     return true;
 }
 
@@ -2485,6 +2673,7 @@ void reset_hooks() noexcept {
     g_tab_content_route_log_count.store(0, std::memory_order_release);
     g_tab_content_route_fault_log_count.store(0, std::memory_order_release);
     g_tab_content_callbacks_armed.store(false, std::memory_order_release);
+    g_tab_carrier_build_profile = nullptr;
 #endif
     reset_dialog_input_gates(false);
     remove_native_popup_choice_bridge();
@@ -2601,7 +2790,9 @@ ERUI_ResearchVerifyGraphicsCarrierV2(
 
 bool preflight_native_tab_carrier(const GameAddresses& addresses) noexcept {
 #if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
-    return tab_carrier_signatures_match(addresses);
+    const TabCarrierBuildProfile* matched_profile{};
+    return tab_carrier_signatures_match(addresses, &matched_profile) &&
+        matched_profile != nullptr;
 #else
     (void)addresses;
     return false;
@@ -2636,10 +2827,10 @@ bool native_scaleform_path_bridge_installed_at(
     const auto& original =
         g_scaleform_path_resolver_hook.original_bytes();
     if (original.empty() ||
-        original.size() > kScaleformPathResolverEntry271.size() ||
+        original.size() > kScaleformPathResolverEntry.size() ||
         !std::equal(
             original.begin(), original.end(),
-            kScaleformPathResolverEntry271.begin())) {
+            kScaleformPathResolverEntry.begin())) {
         return false;
     }
 
@@ -3125,7 +3316,7 @@ HookInstallStatus install_native_menu_hooks(
             const bool pristine_entry =
                 read_scaleform_path_entry(
                     path_hook_target, entry_before_hook) &&
-                entry_before_hook == kScaleformPathResolverEntry271;
+                entry_before_hook == kScaleformPathResolverEntry;
             if (exact_path_ownership_required && !pristine_entry) {
                 erui::detail::logf(
                     erui::LogLevel::error,

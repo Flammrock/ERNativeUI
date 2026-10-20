@@ -193,12 +193,20 @@ struct GameAddresses {
     NativeMenuStringDestructorFn native_menu_string_destructor{};
     TextInputEditorFactoryBuilderFn text_input_editor_factory_builder{};
     TextInputEditorFactoryFn text_input_editor_factory{};
+    const void* option_setting_dialog_vtable{};
+    const void* pad_setting_dialog_vtable{};
+    const void* edit_property_vtable{};
+    const void* text_input_controller_vtable{};
+    const void* software_keyboard_job_vtable{};
 
     [[nodiscard]] bool text_input_complete() const noexcept {
         return text_input_row_producer && native_menu_string_constructor &&
             native_menu_string_borrowed_constructor &&
             native_menu_string_destructor &&
-            text_input_editor_factory_builder && text_input_editor_factory;
+            text_input_editor_factory_builder && text_input_editor_factory &&
+            option_setting_dialog_vtable && pad_setting_dialog_vtable &&
+            edit_property_vtable && text_input_controller_vtable &&
+            software_keyboard_job_vtable;
     }
 
     [[nodiscard]] bool title_bridge_complete() const noexcept {

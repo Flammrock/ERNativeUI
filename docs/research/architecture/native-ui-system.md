@@ -240,7 +240,7 @@ Use the highest layer that already owns the behavior:
 | Existing title text | Scoped SceneObjProxy/TextField bridge | **Confirmed**, narrow current use |
 | Settings capacity and widget artwork | In-memory structural completion at the validated file-opening seam; source-only offline tooling for inspection | **Confirmed**, production runtime transformation with fail-closed fallback |
 | Alerts and selection dialogs | Exact native descriptor/job lifecycle | **Confirmed**, public since API 1.0 |
-| Custom top-level Configuration tabs | Logical catalogue, virtualized stock cells, immutable image resources, and a validated rows-only carrier | **Confirmed on 2.7.1.0**, implemented in the API 1.3 source; see the [case study](../case-studies/custom-tabs.md) |
+| Custom top-level Configuration tabs | Logical catalogue, virtualized stock cells, immutable image resources, and a validated rows-only carrier | **Confirmed on exact 2.7.1.0 and 2.7.2.0 profiles**, implemented in the API 1.3 source; see the [case study](../case-studies/custom-tabs.md) and [2.7.2.0 update note](../game-updates/elden-ring-2.7.2.0.md) |
 | Site of Grace entries | Independently recover that menu family | **Hypothesis**, future research |
 | Provider-loaded custom GFX | Full resource/movie/render/input owner | **Hypothesis**, future research |
 | Generic raw Scaleform API | Typed value, invocation, callback, and lifetime abstraction | **Hypothesis**, not a public feature |

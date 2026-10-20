@@ -1,9 +1,9 @@
 # Reverse-engineering Elden Ring's Configuration tab system
 
 Status: **production implementation reference for the complete custom-tab
-path admitted on the exact Elden Ring 2.7.1.0 Windows executable identified
-below.** Each result below carries its own evidence label; this status line is
-not a substitute for provenance.
+path admitted on the exact Elden Ring 2.7.1.0 and 2.7.2.0 Windows executables
+identified below.** Each result below carries its own evidence label; this
+status line is not a substitute for provenance.
 
 This document is an implementation and evidence reference. It is not a client
 API tutorial and it is not a development diary. Native class names come from
@@ -22,7 +22,7 @@ Client-mod authors should use the public
 > independent row pages without fabricating native panels or requiring a
 > modified GFX file?
 
-The answer is **yes** for the admitted build. The recovered boundary includes:
+The answer is **yes** for the admitted builds. The recovered boundary includes:
 
 - the Configuration top dialog, selector, category records, and composite
   panel cache;
@@ -74,21 +74,26 @@ GFX replacements as compatible.
 
 ### Executable identities
 
-| Property | Elden Ring 2.7.0.0 | Elden Ring 2.7.1.0 |
-|---|---:|---:|
-| File size | `87024720` bytes | `87042128` bytes |
-| SHA-256 | `D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134` | `1A3547101327F65D0C76DA2F9190AC0AA66871EA42BAE2AECC61E11A8B597891` |
-| PE timestamp | `0x69E9C9B9` | `0x6A96B418` |
-| PE image size | `0x5E09600` | `0x5E0DA00` |
-| Complete custom-image and reusable-page path admitted | No | Yes |
+| Property | Elden Ring 2.7.0.0 | Elden Ring 2.7.1.0 | Elden Ring 2.7.2.0 |
+|---|---:|---:|---:|
+| File size | `87024720` bytes | `87042128` bytes | `86973008` bytes |
+| SHA-256 | `D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134` | `1A3547101327F65D0C76DA2F9190AC0AA66871EA42BAE2AECC61E11A8B597891` | `F9118FEA2CFD8FA3901E8060BFADB1552CB2471771DED8A5B662C4E298FFB328` |
+| PE timestamp | `0x69E9C9B9` | `0x6A96B418` | `0x6AABF7E7` |
+| PE image size | `0x5E09600` | `0x5E0DA00` | `0x5DFD600` |
+| Complete custom-image and reusable-page path admitted | No | Yes | Yes |
 
 Every address below is an RVA relative to the image base. ASLR runtime
-addresses are intentionally omitted.
+addresses are intentionally omitted. The detailed historical address tables
+retain their 2.7.0.0/2.7.1.0 coordinates; they must not be reused as 2.7.2.0
+addresses. The exact 2.7.2.0 production profile is summarized in the update
+note linked below.
 
 The earlier 2.7.0.0 work established the tab host, most selector and
 presentation seams, and the RawImage layout. The complete native image
-resource, AS3 Shape, and reusable Graphics-page path is admitted only on
-2.7.1.0.
+resource, AS3 Shape, and reusable Graphics-page path is admitted through
+separate exact profiles for 2.7.1.0 and 2.7.2.0. The latter port and its
+revalidation evidence are recorded in the
+[2.7.2.0 update note](../game-updates/elden-ring-2.7.2.0.md).
 
 ### Evidence scope
 
@@ -666,7 +671,7 @@ follow.
 | authored Brightness-like carrier | Does replacing rows replace the whole template? | Replace rows while retaining the panel and movie. | The instruction and black calibration art remained. | **Rejected**. |
 | Graphics carrier | Can native Graphics and custom pages sequentially reuse category 8? | Same-frame Network parking, exact category-8 retirement, route publication, reconstruction, and verification. | Row-only custom pages, native Graphics restoration, Back/O, hold, wrap, dwell, and reopen passed. | **Confirmed live** on 2.7.1. |
 | movie epoch | Can reopen avoid stale records when addresses are reused? | Match complete native-owned stock identity and restore all records before initialization; verify the pure epoch model separately. | Populated Game Options, pristine records, and the correct ellipsis state after reopen. | **Confirmed live/tested**. |
-| final stress | Does the full path remain coherent under load? | 50 custom tabs, 20 rows each, distinct alpha icons, hold, dwell, wrap, pagination, and reopen. | The tester reported that the complete matrix passed. | **Reported live**. |
+| final stress | Does the full path remain coherent under load? | 50 custom tabs, 20 rows each, distinct alpha icons, hold, dwell, wrap, pagination, and reopen. | The tester reported that the complete matrix passed on 2.7.1.0. On 2.7.2.0, the 58-logical-tab path passed controller navigation, wrap, mouse selection, Back, and reopen with zero warnings, errors, or fatals in the enabled logs. | **Reported live** on 2.7.1.0 and 2.7.2.0. |
 
 ## Common live-probe rules
 
@@ -1487,6 +1492,13 @@ The tester reported a successful live run against this acceptance matrix:
 - Back/O, focus, sound, and row input; and
 - five close/reopen cycles followed by another complete traversal.
 
+The exact 2.7.2.0 production profile was then exercised with the same
+50-custom-tab fixture (58 logical tabs total). Controller navigation and wrap,
+mouse selection, Back, and close/reopen all succeeded. The enabled host and
+diagnostic logs contained zero warnings, errors, or fatals for that run. This
+is the bounded live evidence for admitting 2.7.2.0; it does not retroactively
+change the build provenance of the earlier individual experiments.
+
 This outcome is classified **Reported live** under the evidence scheme above.
 The acceptance matrix is the reproduction contract; no representative latency
 distribution is claimed.
@@ -1636,7 +1648,7 @@ of this document.
 | movie epoch | close/reopen identity run | `tab_record_epoch.hpp` | `tab_record_epoch_test.cpp` | future movie/address reuse |
 | catalogue/order | live multi-tab integration run | `native_tab_catalogue.cpp/.hpp`; `tab_configuration.cpp/.hpp` | catalogue/configuration tests | native materialization |
 | carrier | live category-8 reconstruction run | `hooks.cpp`; `native_tabs.cpp` | transition/pagination tests | native retirement without a live run |
-| final integration | reported 50-tab acceptance matrix | host plus `examples/custom_tabs_stress` | current ABI/contract tests | performance on arbitrary systems |
+| final integration | reported 50-tab acceptance matrix on 2.7.1.0; 58-logical-tab navigation, mouse, Back, and reopen run with clean logs on 2.7.2.0 | host plus `examples/custom_tabs_stress` | current ABI/contract tests | performance on arbitrary systems |
 
 ## Relation to API 1.3
 

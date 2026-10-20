@@ -57,55 +57,307 @@ using erui::detail::tab_overflow_indicators_changed;
 using erui::detail::tab_transition_input_action;
 using erui::detail::tab_transition_selector_anchor;
 
-// Exact-build research anchors for Elden Ring 2.7.0.0 and 2.7.1.0.
-constexpr std::uintptr_t kSelectionCallbackRva = 0x968510;
-constexpr std::uintptr_t kCompositeFrameRva = 0x93D5E0;
-constexpr std::uintptr_t kSelectorSelectRva = 0x739B90;
+// Every native tab coordinate is selected from an exact executable identity.
+// Do not derive a new build from an older one by a blanket RVA delta: the
+// 2.7.2.0 image has several independently shifted code, vtable, and data
+// regions. Keeping the complete audited coordinates together makes support
+// additive and leaves the proven 2.7.1.0 path byte-for-byte address stable.
+struct NativeTabsBuildProfile {
+    const char* version{};
+    std::uint32_t timestamp{};
+    std::size_t image_size{};
+
+    std::uintptr_t selection_callback{};
+    std::uintptr_t composite_frame{};
+    std::uintptr_t selector_select{};
+    std::uintptr_t input_dispatch_frame_begin{};
+    std::uintptr_t pointer_dispatch_result{};
+    std::uintptr_t horizontal_navigation_commit{};
+    std::uintptr_t selection_dispatch{};
+    std::uintptr_t grid_hit_test{};
+    std::uintptr_t get_pointer_position{};
+    std::uintptr_t native_pointer_select{};
+    std::uintptr_t pointer_cell_sample{};
+    std::uintptr_t switch_panel{};
+    std::uintptr_t switch_panel_state_copy_signature{};
+    std::uintptr_t switch_panel_state_copy{};
+    std::uintptr_t switch_panel_state_copy_resume{};
+    std::uintptr_t switch_panel_visibility_signature{};
+    std::uintptr_t switch_panel_visibility_decision{};
+    std::uintptr_t refresh_title{};
+    std::uintptr_t resolve_path{};
+    std::uintptr_t value_exists{};
+    std::uintptr_t present_tab{};
+    std::uintptr_t make_icon_descriptor{};
+    std::uintptr_t texture_lookup_call{};
+    std::uintptr_t image_bind_call{};
+    std::uintptr_t texture_lookup{};
+    std::uintptr_t image_bind{};
+
+    std::uintptr_t scaleform_constructor{};
+    std::uintptr_t scaleform_get_member{};
+    std::uintptr_t scaleform_set_position{};
+    std::uintptr_t scaleform_set_visible{};
+    std::uintptr_t scaleform_destructor{};
+    std::uintptr_t raw_image_create{};
+    std::uintptr_t raw_image_get_data{};
+    std::uintptr_t image_data_clear{};
+    std::uintptr_t raw_image_release{};
+    std::uintptr_t raw_image_vtable{};
+    std::uintptr_t raw_image_get_type{};
+    std::uintptr_t image_resource_constructor{};
+    std::uintptr_t image_resource_add_ref{};
+    std::uintptr_t image_resource_release{};
+    std::uintptr_t image_resource_deleting_destructor{};
+    std::uintptr_t image_resource_allocation_call{};
+    std::uintptr_t image_resource_vtable{};
+    std::uintptr_t image_delegate_vtable{};
+    std::uintptr_t scaleform_global_heap{};
+
+    std::uintptr_t top_vtable{};
+    std::uintptr_t category_record_vtable{};
+    std::uintptr_t selector_vtable{};
+    std::uintptr_t option_setting_panel_vtable{};
+    std::uintptr_t scene_obj_proxy_vtable{};
+    std::uintptr_t scene_obj_proxy_get_value{};
+
+    std::uintptr_t as3_value_interface_vtable{};
+    std::uintptr_t as3_value_get_member{};
+    std::uintptr_t as3_value_set_member{};
+    std::uintptr_t as3_value_invoke{};
+    std::uintptr_t as3_value_get_movie{};
+    std::uintptr_t as3_movie_vtable{};
+    std::uintptr_t as3_movie_create_object{};
+    std::uintptr_t static_shape_vtable{};
+    std::uintptr_t alternate_authored_icon_vtable{};
+    std::uintptr_t dynamic_shape_vtable{};
+
+    std::uintptr_t graphics_panel_materializer{};
+};
+
+constexpr std::array<NativeTabsBuildProfile, 2>
+    kNativeTabsBuildProfiles{{
+        {
+            "2.7.1.0", 0x6A96B418, 0x5E0DA00,
+            0x968510, 0x93D5E0, 0x739B90, 0x73A196, 0x73A1C7,
+            0x73A358, 0x73A394, 0x737AE0, 0x758940, 0x73CA60,
+            0x73B880, 0x93C900, 0x93C932, 0x93C93C, 0x93C963,
+            0x93C977, 0x93C989, 0x968C40, 0x74B140, 0x733FA0,
+            0x967DE0, 0x73E230, 0x74CCDF, 0x74CDC7, 0xD65C00,
+            0xD833F0,
+            0xD814A0, 0xD816F0, 0xD85BD0, 0xD86280, 0xD81600,
+            0x114A820, 0x114AA40, 0x1146AD0, 0x112D640, 0x2CC27E0,
+            0x114B9C0, 0xD61C90, 0x113D9E0, 0x113DA00, 0xD62340,
+            0xD65DA5, 0x2BBAAF8, 0x2BBA9E8, 0x45972D0,
+            0x2B16B48, 0x2AD6F20, 0x2A94438, 0x2B14888, 0x2A97AF0,
+            0x74C930,
+            0x2CBF988, 0x10DDD10, 0x10DE0D0, 0x10DE510, 0x10E26D0,
+            0x2CBE5C0, 0x10D4460, 0x2CBD4E0, 0x2CC6268, 0x2CBD158,
+            0x95C050,
+        },
+        {
+            "2.7.2.0", 0x6AABF7E7, 0x5DFD600,
+            0x9689C0, 0x93DA90, 0x73A040, 0x73A646, 0x73A677,
+            0x73A808, 0x73A844, 0x737F90, 0x758DF0, 0x73CF10,
+            0x73BD30, 0x93CDB0, 0x93CDE2, 0x93CDEC, 0x93CE13,
+            0x93CE27, 0x93CE39, 0x9690F0, 0x74B5F0, 0x734450,
+            0x968290, 0x73E6E0, 0x74D18F, 0x74D277, 0xD672F0,
+            0xD84AE0,
+            0xD82B90, 0xD82DE0, 0xD872C0, 0xD87970, 0xD82CF0,
+            0x114BF10, 0x114C130, 0x11481C0, 0x112ED30, 0x2CC4A90,
+            0x114D0B0, 0xD63380, 0x113F0D0, 0x113F0F0, 0xD63A30,
+            0xD67495, 0x2BBCDA8, 0x2BBCC98, 0x459A2F0,
+            0x2B18C38, 0x2AD9010, 0x2A96528, 0x2B16978, 0x2A99BE0,
+            0x74CDE0,
+            0x2CC1C38, 0x10DF400, 0x10DF7C0, 0x10DFC00, 0x10E3DC0,
+            0x2CC0870, 0x10D5B50, 0x2CBF790, 0x2CC8518, 0x2CBF408,
+            0x95C500,
+        },
+    }};
+static_assert(
+    kNativeTabsBuildProfiles[0].timestamp == 0x6A96B418 &&
+    kNativeTabsBuildProfiles[0].selection_callback == 0x968510 &&
+    kNativeTabsBuildProfiles[0].image_bind == 0xD833F0 &&
+    kNativeTabsBuildProfiles[0].raw_image_vtable == 0x2CC27E0 &&
+    kNativeTabsBuildProfiles[0].scaleform_global_heap == 0x45972D0 &&
+    kNativeTabsBuildProfiles[0].top_vtable == 0x2B16B48 &&
+    kNativeTabsBuildProfiles[0].as3_value_interface_vtable == 0x2CBF988 &&
+    kNativeTabsBuildProfiles[0].graphics_panel_materializer == 0x95C050);
+static_assert(
+    kNativeTabsBuildProfiles[1].timestamp == 0x6AABF7E7 &&
+    kNativeTabsBuildProfiles[1].selection_callback == 0x9689C0 &&
+    kNativeTabsBuildProfiles[1].image_bind == 0xD84AE0 &&
+    kNativeTabsBuildProfiles[1].raw_image_vtable == 0x2CC4A90 &&
+    kNativeTabsBuildProfiles[1].scaleform_global_heap == 0x459A2F0 &&
+    kNativeTabsBuildProfiles[1].top_vtable == 0x2B18C38 &&
+    kNativeTabsBuildProfiles[1].as3_value_interface_vtable == 0x2CC1C38 &&
+    kNativeTabsBuildProfiles[1].graphics_panel_materializer == 0x95C500);
+
+const NativeTabsBuildProfile* g_native_tabs_build_profile{};
+
+[[nodiscard]] const NativeTabsBuildProfile* find_native_tabs_build_profile(
+    std::uint32_t timestamp,
+    std::size_t image_size) noexcept {
+    for (const NativeTabsBuildProfile& profile : kNativeTabsBuildProfiles) {
+        if (profile.timestamp == timestamp &&
+            profile.image_size == image_size) {
+            return &profile;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] const NativeTabsBuildProfile& tabs_build() noexcept {
+    return *g_native_tabs_build_profile;
+}
+
+// A typed RVA handle keeps the call sites readable while making every value
+// come from the one active, exact-build profile above. It deliberately has no
+// fallback value: callers select a profile before any native validation or
+// callback can run.
+struct NativeTabsRva {
+    std::uintptr_t NativeTabsBuildProfile::*member{};
+
+    [[nodiscard]] operator std::uintptr_t() const noexcept {
+        return tabs_build().*member;
+    }
+};
+
+constexpr NativeTabsRva kSelectionCallbackRva{
+    &NativeTabsBuildProfile::selection_callback};
+constexpr NativeTabsRva kCompositeFrameRva{
+    &NativeTabsBuildProfile::composite_frame};
+constexpr NativeTabsRva kSelectorSelectRva{
+    &NativeTabsBuildProfile::selector_select};
+constexpr NativeTabsRva kInputDispatchFrameBeginRva{
+    &NativeTabsBuildProfile::input_dispatch_frame_begin};
+constexpr NativeTabsRva kPointerDispatchResultRva{
+    &NativeTabsBuildProfile::pointer_dispatch_result};
+constexpr NativeTabsRva kHorizontalNavigationCommitRva{
+    &NativeTabsBuildProfile::horizontal_navigation_commit};
+constexpr NativeTabsRva kSelectionDispatchRva{
+    &NativeTabsBuildProfile::selection_dispatch};
+constexpr NativeTabsRva kGridHitTestRva{
+    &NativeTabsBuildProfile::grid_hit_test};
+constexpr NativeTabsRva kGetPointerPositionRva{
+    &NativeTabsBuildProfile::get_pointer_position};
+constexpr NativeTabsRva kNativePointerSelectRva{
+    &NativeTabsBuildProfile::native_pointer_select};
+constexpr NativeTabsRva kPointerCellSampleRva{
+    &NativeTabsBuildProfile::pointer_cell_sample};
+constexpr NativeTabsRva kSwitchPanelRva{
+    &NativeTabsBuildProfile::switch_panel};
+constexpr NativeTabsRva kSwitchPanelStateCopyRva{
+    &NativeTabsBuildProfile::switch_panel_state_copy};
+constexpr NativeTabsRva kSwitchPanelStateCopyResumeRva{
+    &NativeTabsBuildProfile::switch_panel_state_copy_resume};
+constexpr NativeTabsRva kSwitchPanelVisibilityDecisionRva{
+    &NativeTabsBuildProfile::switch_panel_visibility_decision};
+constexpr NativeTabsRva kRefreshTitleRva{
+    &NativeTabsBuildProfile::refresh_title};
+constexpr NativeTabsRva kResolvePathRva{
+    &NativeTabsBuildProfile::resolve_path};
+constexpr NativeTabsRva kValueExistsRva{
+    &NativeTabsBuildProfile::value_exists};
+constexpr NativeTabsRva kPresentTabRva{
+    &NativeTabsBuildProfile::present_tab};
+constexpr NativeTabsRva kMakeIconDescriptorRva{
+    &NativeTabsBuildProfile::make_icon_descriptor};
+constexpr NativeTabsRva kTextureLookupCallRva{
+    &NativeTabsBuildProfile::texture_lookup_call};
+constexpr NativeTabsRva kImageBindCallRva{
+    &NativeTabsBuildProfile::image_bind_call};
+constexpr NativeTabsRva kTextureLookup271Rva{
+    &NativeTabsBuildProfile::texture_lookup};
+constexpr NativeTabsRva kImageBind271Rva{
+    &NativeTabsBuildProfile::image_bind};
+constexpr NativeTabsRva kScaleformConstructor271Rva{
+    &NativeTabsBuildProfile::scaleform_constructor};
+constexpr NativeTabsRva kScaleformGetMember271Rva{
+    &NativeTabsBuildProfile::scaleform_get_member};
+constexpr NativeTabsRva kScaleformSetPosition271Rva{
+    &NativeTabsBuildProfile::scaleform_set_position};
+constexpr NativeTabsRva kScaleformSetVisible271Rva{
+    &NativeTabsBuildProfile::scaleform_set_visible};
+constexpr NativeTabsRva kScaleformDestructor271Rva{
+    &NativeTabsBuildProfile::scaleform_destructor};
+constexpr NativeTabsRva kRawImageCreate271Rva{
+    &NativeTabsBuildProfile::raw_image_create};
+constexpr NativeTabsRva kRawImageGetData271Rva{
+    &NativeTabsBuildProfile::raw_image_get_data};
+constexpr NativeTabsRva kImageDataClear271Rva{
+    &NativeTabsBuildProfile::image_data_clear};
+constexpr NativeTabsRva kRawImageRelease271Rva{
+    &NativeTabsBuildProfile::raw_image_release};
+constexpr NativeTabsRva kRawImageVtableRva{
+    &NativeTabsBuildProfile::raw_image_vtable};
+constexpr NativeTabsRva kRawImageGetType271Rva{
+    &NativeTabsBuildProfile::raw_image_get_type};
+constexpr NativeTabsRva kScaleformImageResourceCtor271Rva{
+    &NativeTabsBuildProfile::image_resource_constructor};
+constexpr NativeTabsRva kScaleformImageResourceAddRef271Rva{
+    &NativeTabsBuildProfile::image_resource_add_ref};
+constexpr NativeTabsRva kScaleformImageResourceRelease271Rva{
+    &NativeTabsBuildProfile::image_resource_release};
+constexpr NativeTabsRva kScaleformImageResourceDeletingDestructor271Rva{
+    &NativeTabsBuildProfile::image_resource_deleting_destructor};
+constexpr NativeTabsRva kScaleformImageResourceAllocationCall271Rva{
+    &NativeTabsBuildProfile::image_resource_allocation_call};
+constexpr NativeTabsRva kScaleformImageResourceVtable271Rva{
+    &NativeTabsBuildProfile::image_resource_vtable};
+constexpr NativeTabsRva kScaleformImageDelegateVtable271Rva{
+    &NativeTabsBuildProfile::image_delegate_vtable};
+constexpr NativeTabsRva kScaleformGlobalHeap271Rva{
+    &NativeTabsBuildProfile::scaleform_global_heap};
+constexpr NativeTabsRva kTopVtableRva{
+    &NativeTabsBuildProfile::top_vtable};
+constexpr NativeTabsRva kCategoryRecordVtableRva{
+    &NativeTabsBuildProfile::category_record_vtable};
+constexpr NativeTabsRva kSelectorVtableRva{
+    &NativeTabsBuildProfile::selector_vtable};
+constexpr NativeTabsRva kOptionSettingPanelVtableRva{
+    &NativeTabsBuildProfile::option_setting_panel_vtable};
+constexpr NativeTabsRva kSceneObjProxyVtableRva{
+    &NativeTabsBuildProfile::scene_obj_proxy_vtable};
+constexpr NativeTabsRva kSceneObjProxyGetValueRva{
+    &NativeTabsBuildProfile::scene_obj_proxy_get_value};
+constexpr NativeTabsRva kAs3ValueInterfaceVtable271Rva{
+    &NativeTabsBuildProfile::as3_value_interface_vtable};
+constexpr NativeTabsRva kAs3ValueGetMember271Rva{
+    &NativeTabsBuildProfile::as3_value_get_member};
+constexpr NativeTabsRva kAs3ValueSetMember271Rva{
+    &NativeTabsBuildProfile::as3_value_set_member};
+constexpr NativeTabsRva kAs3ValueInvoke271Rva{
+    &NativeTabsBuildProfile::as3_value_invoke};
+constexpr NativeTabsRva kAs3ValueGetMovie271Rva{
+    &NativeTabsBuildProfile::as3_value_get_movie};
+constexpr NativeTabsRva kAs3MovieVtable271Rva{
+    &NativeTabsBuildProfile::as3_movie_vtable};
+constexpr NativeTabsRva kAs3MovieCreateObject271Rva{
+    &NativeTabsBuildProfile::as3_movie_create_object};
+constexpr NativeTabsRva kStaticShapeVtable271Rva{
+    &NativeTabsBuildProfile::static_shape_vtable};
+constexpr NativeTabsRva kAlternateAuthoredIconVtable271Rva{
+    &NativeTabsBuildProfile::alternate_authored_icon_vtable};
+constexpr NativeTabsRva kDynamicShapeVtable271Rva{
+    &NativeTabsBuildProfile::dynamic_shape_vtable};
+
 // The GridControl frame clears provenance before it enters input dispatch.
 // Pointer selection is published by the earlier input helper. Non-pointer
 // horizontal navigation converges at one validated commit seam carrying a
 // signed x delta. These seams carry exact provenance into the ordinary
 // selection callback without guessing from the resulting index or timing.
-constexpr std::uintptr_t kInputDispatchFrameBeginRva = 0x73A196;
-constexpr std::uintptr_t kPointerDispatchResultRva = 0x73A1C7;
-constexpr std::uintptr_t kHorizontalNavigationCommitRva = 0x73A358;
 // Every native input path has finished choosing a physical tab when execution
 // reaches this comparison. R12D is the physical selection from frame entry,
 // RDI is the selector, and [RDI+0xD4] is the final selection. A timed pointer
 // dwell uses the same native cell setter as the ordinary pointer path just
 // before this comparison; Elden Ring then owns its normal change dispatch.
-constexpr std::uintptr_t kSelectionDispatchRva = 0x73A394;
-constexpr std::uintptr_t kGridHitTestRva = 0x737AE0;
-constexpr std::uintptr_t kGetPointerPositionRva = 0x758940;
-constexpr std::uintptr_t kNativePointerSelectRva = 0x73CA60;
 // The GridControl pointer path has already converted the native cursor
 // coordinates and completed its per-cell hit test at this seam. RSI is the
 // selector, signed EAX is the hovered physical cell (or -1), and the two
 // floats at RSP+0x20/RSP+0x24 are the exact coordinates used by that hit test.
 // During an armed dwell, rewriting EAX to -1 takes the native no-hit branch
 // and suppresses only repaint-induced reselection under a stationary cursor.
-constexpr std::uintptr_t kPointerCellSampleRva = 0x73B880;
-constexpr std::uintptr_t kSwitchPanelRva = 0x93C900;
-constexpr std::uintptr_t kSwitchPanelStateCopyRva = 0x93C93C;
-constexpr std::uintptr_t kSwitchPanelStateCopyResumeRva = 0x93C963;
-constexpr std::uintptr_t kSwitchPanelVisibilityDecisionRva = 0x93C989;
-constexpr std::uintptr_t kRefreshTitleRva = 0x968C40;
-constexpr std::uintptr_t kResolvePathRva = 0x74B140;
-constexpr std::uintptr_t kValueExistsRva = 0x733FA0;
-constexpr std::uintptr_t kPresentTabRva = 0x967DE0;
-constexpr std::uintptr_t kMakeIconDescriptorRva = 0x73E230;
-constexpr std::uintptr_t kTextureLookupCallRva = 0x74CCDF;
-constexpr std::uintptr_t kImageBindCallRva = 0x74CDC7;
-constexpr std::uintptr_t kTextureLookup270Rva = 0xD65B90;
-constexpr std::uintptr_t kTextureLookup271Rva = 0xD65C00;
-constexpr std::uintptr_t kImageBind270Rva = 0xD83380;
-constexpr std::uintptr_t kImageBind271Rva = 0xD833F0;
-constexpr std::uintptr_t kScaleformConstructor271Rva = 0xD814A0;
-constexpr std::uintptr_t kScaleformGetMember271Rva = 0xD816F0;
-constexpr std::uintptr_t kScaleformSetPosition271Rva = 0xD85BD0;
-constexpr std::uintptr_t kScaleformSetVisible271Rva = 0xD86280;
-constexpr std::uintptr_t kScaleformDestructor270Rva = 0xD81590;
-constexpr std::uintptr_t kScaleformDestructor271Rva = 0xD81600;
 // Scaleform::Render::RawImage is a system-memory image and does not require
 // the DrawableImage provider that this Configuration movie lacks. The first
 // RawImage gate first creates, inspects, fills, and verifies an immutable
@@ -115,33 +367,7 @@ constexpr std::uintptr_t kScaleformDestructor271Rva = 0xD81600;
 // through the validated texture-lookup contract. Elden Ring's unchanged image
 // binder then paints a runtime-created flash.display.Shape owned by the same
 // tab-icon parent; the authored static Shape is retained only as a fallback.
-constexpr std::uintptr_t kRawImageCreate270Rva = 0x114A7B0;
-constexpr std::uintptr_t kRawImageCreate271Rva = 0x114A820;
-constexpr std::uintptr_t kRawImageGetData270Rva = 0x114A9D0;
-constexpr std::uintptr_t kRawImageGetData271Rva = 0x114AA40;
-constexpr std::uintptr_t kImageDataClear270Rva = 0x1146A60;
-constexpr std::uintptr_t kImageDataClear271Rva = 0x1146AD0;
-constexpr std::uintptr_t kRawImageRelease270Rva = 0x112D5D0;
-constexpr std::uintptr_t kRawImageRelease271Rva = 0x112D640;
-constexpr std::uintptr_t kRawImageVtableRva = 0x2CC27E0;
-// This first ImageResource lifecycle gate is intentionally restricted to the
-// exact 2.7.1.0 image. The corresponding 2.7.0.0 constructor is known, but the
-// heap and complete vtable contract have not yet passed the same exact audit.
-constexpr std::uintptr_t kRawImageGetType271Rva = 0x114B9C0;
-constexpr std::uintptr_t kScaleformImageResourceCtor271Rva = 0xD61C90;
-constexpr std::uintptr_t kScaleformImageResourceAddRef271Rva = 0x113D9E0;
-constexpr std::uintptr_t kScaleformImageResourceRelease271Rva = 0x113DA00;
-constexpr std::uintptr_t
-    kScaleformImageResourceDeletingDestructor271Rva = 0xD62340;
-constexpr std::uintptr_t kScaleformImageResourceAllocationCall271Rva =
-    0xD65DA5;
-constexpr std::uintptr_t kScaleformImageResourceVtable271Rva = 0x2BBAAF8;
-constexpr std::uintptr_t kScaleformImageDelegateVtable271Rva = 0x2BBA9E8;
-constexpr std::uintptr_t kScaleformGlobalHeap271Rva = 0x45972D0;
 constexpr std::size_t kScaleformImageResourceSize = 0x98;
-constexpr std::uintptr_t kTopVtableRva = 0x2B16B48;
-constexpr std::uintptr_t kCategoryRecordVtableRva = 0x2AD6F20;
-constexpr std::uintptr_t kSelectorVtableRva = 0x2A94438;
 
 constexpr std::size_t kMovieContextOffset = 0x120;
 constexpr std::size_t kSelectorOffset = 0x0A38;
@@ -163,9 +389,6 @@ constexpr std::size_t kSceneObjProxySize = 0x60;
 constexpr std::size_t kSceneObjProxyValueOffset = 0x28;
 constexpr std::size_t kPanelVisualCapacityOffset = 0xB14;
 constexpr std::size_t kPanelNativeRowCountOffset = 0x1AF0;
-constexpr std::uintptr_t kOptionSettingPanelVtableRva = 0x2B14888;
-constexpr std::uintptr_t kSceneObjProxyVtableRva = 0x2A97AF0;
-constexpr std::uintptr_t kSceneObjProxyGetValueRva = 0x74C930;
 
 // Elden Ring contributes eight stock logical routes. This is deliberately
 // distinct from the live number of selectable physical cells exposed by the
@@ -280,32 +503,18 @@ constexpr bool kEnableBitmapDataOwnershipProbe = false;
 constexpr bool kEnableRawImageLifecycleProbe = true;
 constexpr bool kEnableNativeImageResourceLifecycleProbe = true;
 
-constexpr std::uint32_t kEldenRing270Timestamp = 0x69E9C9B9;
-constexpr std::size_t kEldenRing270ImageSize = 0x5E09600;
-constexpr std::uint32_t kEldenRing271Timestamp = 0x6A96B418;
-constexpr std::size_t kEldenRing271ImageSize = 0x5E0DA00;
 constexpr std::uint32_t kTabContentResearchMarker = 0x54414231;
 constexpr char kTabContentResearchMarkerExport[] =
     "ERUI_TabContentResearchProbeMarker";
 
-// Exact 2.7.1.0 AS3 direct-access bridge coordinates. The live probe checks
-// every pointer against these values before making its one harmless Invoke.
-constexpr std::uintptr_t kAs3ValueInterfaceVtable271Rva = 0x2CBF988;
-constexpr std::uintptr_t kAs3ValueGetMember271Rva = 0x10DDD10;
-constexpr std::uintptr_t kAs3ValueSetMember271Rva = 0x10DE0D0;
-constexpr std::uintptr_t kAs3ValueInvoke271Rva = 0x10DE510;
-constexpr std::uintptr_t kAs3ValueGetMovie271Rva = 0x10E26D0;
-constexpr std::uintptr_t kAs3MovieVtable271Rva = 0x2CBE5C0;
-constexpr std::uintptr_t kAs3MovieCreateObject271Rva = 0x10D4460;
-constexpr std::uintptr_t kStaticShapeVtable271Rva = 0x2CBD4E0;
+// The live probe checks every AS3 pointer against the active exact-build
+// profile before making its one harmless Invoke.
 // Network and Keyboard/Mouse can retain this second exact authored-icon
 // display-object type when a synthetic presentation is painted directly into
 // their physical cells. Static comparison shows that it shares 33 of its
 // first 40 virtual entries with the already-proven StaticShape target. The
 // probe never calls either native vtable; it operates through the separately
 // validated AS3 bridge and uses this RVA only as a narrow target allowlist.
-constexpr std::uintptr_t kAlternateAuthoredIconVtable271Rva = 0x2CC6268;
-constexpr std::uintptr_t kDynamicShapeVtable271Rva = 0x2CBD158;
 
 constexpr std::int32_t kCrossIconId = 90001;
 constexpr std::int32_t kOverflowIconId = 90002;
@@ -2560,7 +2769,7 @@ bool exact_as3_display_bridge(const DisplayValueView& view) noexcept {
 }
 
 bool validated_authored_icon_target_vtable(void* vtable) noexcept {
-    return g_game.timestamp == kEldenRing271Timestamp && g_game.base &&
+    return g_native_tabs_build_profile && g_game.base &&
         (vtable == g_game.base + kStaticShapeVtable271Rva ||
             vtable ==
                 g_game.base + kAlternateAuthoredIconVtable271Rva);
@@ -3294,7 +3503,7 @@ void** __fastcall texture_lookup_detour(
         // it unconditionally on every path. The presenter intentionally does
         // not initialize its stack slot, so prior_output is diagnostic only.
         const bool exact_resource = fields_read &&
-            g_game.timestamp == kEldenRing271Timestamp &&
+            g_native_tabs_build_profile &&
             resource_vtable ==
                 g_game.base + kScaleformImageResourceVtable271Rva &&
             exposed_image == retained_image &&
@@ -5451,7 +5660,8 @@ bool destroy_and_free_heap_scaleform_value(
 }
 
 // Read-only snapshot of the VM services associated with an already validated
-// 2.7.1.0 AS3 MovieRoot. The offsets come from the static boundary analysis.
+// Exact-build AS3 MovieRoot. The offsets come from the static boundary
+// analysis shared by both audited profiles.
 // No pointer is dereferenced outside guarded_read, and callers retain only the
 // resulting scalar addresses for comparison on a later frame.
 BitmapDataVmContextSnapshot read_bitmapdata_vm_context_snapshot(
@@ -5942,11 +6152,11 @@ bool __fastcall image_bind_detour(
 
     // Validate the recovered ObjectInterface::Invoke ABI with an inherited,
     // side-effect-free method before any later probe creates a display object.
-    // This is deliberately limited to the exact 2.7.1.0 bridge observed above.
+    // This is deliberately limited to the exact bridge selected above.
     if (!g_value_invoke_probe_attempted.exchange(
             true, std::memory_order_relaxed)) {
         const bool exact_get_movie =
-            g_game.timestamp == kEldenRing271Timestamp &&
+            g_native_tabs_build_profile &&
             target_object_interface_vtable ==
                 g_game.base + kAs3ValueInterfaceVtable271Rva &&
             target_get_movie_slot ==
@@ -5987,7 +6197,7 @@ bool __fastcall image_bind_detour(
             get_movie_seh);
 
         const bool exact_interface =
-            g_game.timestamp == kEldenRing271Timestamp &&
+            g_native_tabs_build_profile &&
             target_object_interface_vtable ==
                 g_game.base + kAs3ValueInterfaceVtable271Rva &&
             target_invoke_slot == g_game.base + kAs3ValueInvoke271Rva &&
@@ -6032,7 +6242,7 @@ bool __fastcall image_bind_detour(
     }
 
     const bool exact_attachment_bridge =
-        g_game.timestamp == kEldenRing271Timestamp &&
+        g_native_tabs_build_profile &&
         g_repaint_context.active &&
         g_repaint_context.top == g_runtime.top &&
         g_repaint_context.layer != TabLayer::none &&
@@ -6682,10 +6892,8 @@ bool inspect_game_image(GameImage& image) noexcept {
 }
 
 bool supported_game_image(const GameImage& image) noexcept {
-    return (image.timestamp == kEldenRing270Timestamp &&
-               image.size == kEldenRing270ImageSize) ||
-        (image.timestamp == kEldenRing271Timestamp &&
-            image.size == kEldenRing271ImageSize);
+    return find_native_tabs_build_profile(image.timestamp, image.size) !=
+        nullptr;
 }
 
 bool image_contains(std::uintptr_t rva, std::size_t size) noexcept {
@@ -6700,6 +6908,37 @@ bool entry_matches(
     std::array<std::uint8_t, Size> actual{};
     return guarded_copy(actual.data(), g_game.base + rva, Size) &&
         actual == expected;
+}
+
+bool resolve_rip_relative_data_target(
+    std::uintptr_t instruction_rva,
+    std::uintptr_t& target_rva) noexcept {
+    target_rva = 0;
+    constexpr std::size_t kInstructionSize = 7;
+    if (!image_contains(instruction_rva, kInstructionSize)) return false;
+
+    std::array<std::uint8_t, 3> opcode{};
+    std::int32_t displacement{};
+    if (!guarded_copy(
+            opcode.data(),
+            g_game.base + instruction_rva,
+            opcode.size()) ||
+        opcode != std::array<std::uint8_t, 3>{0x48, 0x8B, 0x0D} ||
+        !guarded_read(
+            g_game.base + instruction_rva + opcode.size(),
+            displacement)) {
+        return false;
+    }
+
+    const std::int64_t target =
+        static_cast<std::int64_t>(instruction_rva) +
+        static_cast<std::int64_t>(kInstructionSize) + displacement;
+    if (target < 0 ||
+        static_cast<std::uint64_t>(target) >= g_game.size) {
+        return false;
+    }
+    target_rva = static_cast<std::uintptr_t>(target);
+    return true;
 }
 
 bool guarded_create_raw_image(
@@ -6903,19 +7142,11 @@ void run_raw_image_lifecycle_probe_one(
         0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B,
         0xD9, 0x83, 0xCA, 0xFF, 0x48, 0x83, 0xC1, 0x08};
 
-    const bool current = g_game.timestamp == kEldenRing271Timestamp;
-    const std::uintptr_t create_rva = current
-        ? kRawImageCreate271Rva
-        : kRawImageCreate270Rva;
-    const std::uintptr_t get_data_rva = current
-        ? kRawImageGetData271Rva
-        : kRawImageGetData270Rva;
-    const std::uintptr_t clear_rva = current
-        ? kImageDataClear271Rva
-        : kImageDataClear270Rva;
-    const std::uintptr_t expected_release_rva = current
-        ? kRawImageRelease271Rva
-        : kRawImageRelease270Rva;
+    if (!g_native_tabs_build_profile) return;
+    const std::uintptr_t create_rva = kRawImageCreate271Rva;
+    const std::uintptr_t get_data_rva = kRawImageGetData271Rva;
+    const std::uintptr_t clear_rva = kImageDataClear271Rva;
+    const std::uintptr_t expected_release_rva = kRawImageRelease271Rva;
     const bool exact_interfaces =
         entry_matches(create_rva, kRawImageCreateEntry) &&
         entry_matches(get_data_rva, kRawImageGetDataEntry) &&
@@ -6928,7 +7159,7 @@ void run_raw_image_lifecycle_probe_one(
         icon_index,
         kRgba8IconIds[icon_index],
         static_cast<unsigned long>(GetCurrentThreadId()),
-        current ? "2.7.1.0" : "2.7.0.0",
+        tabs_build().version,
         exact_interfaces ? 1U : 0U);
     if (!exact_interfaces) {
         log_failure(
@@ -7128,7 +7359,7 @@ void run_raw_image_lifecycle_probe_one(
     bool resource_probe_completed{};
     bool visual_resource_retained{};
     bool uncertain_objects_retained{};
-    if (kEnableNativeImageResourceLifecycleProbe && current &&
+    if (kEnableNativeImageResourceLifecycleProbe &&
         exact_data && pixels_written && pixels_verified && view_cleared) {
         resource_probe_attempted = true;
 
@@ -7155,9 +7386,11 @@ void run_raw_image_lifecycle_probe_one(
                 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48,
                 0x89, 0x5C, 0x24, 0x40, 0x8B, 0xFA, 0x48, 0x8B,
                 0xD9};
-        constexpr std::array<std::uint8_t, 21>
-            kScaleformImageResourceAllocationCallEntry{
-                0x48, 0x8B, 0x0D, 0x24, 0x15, 0x83, 0x03,
+        // The RIP displacement necessarily changes when the global-heap data
+        // slot moves. Validate the instruction semantically against the
+        // profile-selected slot, then validate its unchanged allocation tail.
+        constexpr std::array<std::uint8_t, 14>
+            kScaleformImageResourceAllocationTail{
                 0x48, 0x8B, 0x01, 0x45, 0x33, 0xC0, 0xBA,
                 0x98, 0x00, 0x00, 0x00, 0xFF, 0x50, 0x50};
 
@@ -7170,6 +7403,17 @@ void run_raw_image_lifecycle_probe_one(
             guarded_read(
                 g_game.base + kScaleformImageResourceVtable271Rva,
                 resource_deleting_destructor);
+        std::uintptr_t allocation_heap_rva{};
+        const bool exact_allocation_call =
+            resolve_rip_relative_data_target(
+                kScaleformImageResourceAllocationCall271Rva,
+                allocation_heap_rva) &&
+            allocation_heap_rva ==
+                static_cast<std::uintptr_t>(kScaleformGlobalHeap271Rva) &&
+            entry_matches(
+                static_cast<std::uintptr_t>(
+                    kScaleformImageResourceAllocationCall271Rva) + 7U,
+                kScaleformImageResourceAllocationTail);
         const bool exact_resource_interfaces = static_fields_read &&
             raw_type_slot == g_game.base + kRawImageGetType271Rva &&
             resource_deleting_destructor ==
@@ -7190,15 +7434,14 @@ void run_raw_image_lifecycle_probe_one(
             entry_matches(
                 kScaleformImageResourceDeletingDestructor271Rva,
                 kScaleformImageResourceDeletingDestructorEntry) &&
-            entry_matches(
-                kScaleformImageResourceAllocationCall271Rva,
-                kScaleformImageResourceAllocationCallEntry) &&
+            exact_allocation_call &&
             image_contains(kScaleformImageResourceVtable271Rva, 0x08) &&
             image_contains(kScaleformImageDelegateVtable271Rva, 0x08) &&
             image_contains(kScaleformGlobalHeap271Rva, sizeof(void*));
         log_line(
-            "nativeImageResourceLifecycle begin thread=%lu profile=2.7.1.0 interfacesExact=%u raw=%p rawType=%p/0x%llX deletingDestructor=%p/0x%llX exposed=0 bound=0",
+            "nativeImageResourceLifecycle begin thread=%lu profile=%s interfacesExact=%u raw=%p rawType=%p/0x%llX deletingDestructor=%p/0x%llX exposed=0 bound=0",
             static_cast<unsigned long>(GetCurrentThreadId()),
+            tabs_build().version,
             exact_resource_interfaces ? 1U : 0U,
             image,
             raw_type_slot,
@@ -10069,7 +10312,7 @@ bool repaint_tab_cell(
             refs_exact ? 1U : 0U);
     }
     g_repaint_context = previous_context;
-    // 0x967DE0 consumes the embedded Scaleform value. On an exception the
+    // PresentTab consumes the embedded Scaleform value. On an exception the
     // value's ownership is uncertain; deliberately leak this research-only
     // reference rather than risk a double release.
     proxy.constructed = false;
@@ -12793,7 +13036,8 @@ void observe_pointer_cell_sample(
                 log_pointer_dwell("motion", "natural sample restarted delay");
             }
             if (update.suppress_natural_selection) {
-                // At 0x73B880, EAX == -1 takes the native no-hit branch and
+                // At the pointer-cell seam, EAX == -1 takes the native
+                // no-hit branch and
                 // returns false from pointer processing. That both prevents a
                 // repaint-triggered selection and leaves L1/R1 free to run
                 // later in this same input frame.
@@ -14283,8 +14527,6 @@ bool install_hooks_and_interfaces(
     constexpr std::array<std::uint8_t, 16> kSwitchPanelEntry{
         0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74,
         0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48};
-    constexpr std::uintptr_t kSwitchPanelStateCopySignatureRva =
-        0x93C932;
     constexpr std::array<std::uint8_t, 49>
         kSwitchPanelStateCopyBytes{
             0x48, 0x85, 0xC0, 0x74, 0x3A,
@@ -14299,8 +14541,6 @@ bool install_hooks_and_interfaces(
         kSwitchPanelStateCopyResumeBytes{
             0x48, 0x8B, 0x8E, 0xB8, 0x00, 0x00, 0x00, 0x33,
             0xD2, 0xE8, 0x5F, 0xA3, 0x03, 0x00, 0x33, 0xFF};
-    constexpr std::uintptr_t kSwitchPanelVisibilitySignatureRva =
-        0x93C977;
     constexpr std::array<std::uint8_t, 41>
         kSwitchPanelVisibilityBytes{
             0x48, 0x8B, 0x0B,
@@ -14327,25 +14567,19 @@ bool install_hooks_and_interfaces(
     constexpr std::array<std::uint8_t, 16> kSetVisible271Entry{
         0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x7C,
         0x24, 0x18, 0x55, 0x48, 0x8D, 0x6C, 0x24, 0xF0};
-    constexpr std::array<std::uint8_t, 16> kDestructor270Entry{
-        0x48, 0x89, 0x4C, 0x24, 0x08, 0x53, 0x48, 0x83,
-        0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE};
     constexpr std::array<std::uint8_t, 16> kDestructor271Entry{
         0x48, 0x89, 0x4C, 0x24, 0x08, 0x53, 0x48, 0x83,
         0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE};
 
-    const std::uintptr_t destructor_rva =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? kScaleformDestructor271Rva
-        : kScaleformDestructor270Rva;
+    if (!g_native_tabs_build_profile) {
+        log_line(
+            "ERROR: no exact native-tab build profile was selected; no hooks installed");
+        return false;
+    }
+    const std::uintptr_t destructor_rva = kScaleformDestructor271Rva;
     const std::uintptr_t expected_texture_lookup_rva =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? kTextureLookup271Rva
-        : kTextureLookup270Rva;
-    const std::uintptr_t expected_image_bind_rva =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? kImageBind271Rva
-        : kImageBind270Rva;
+        kTextureLookup271Rva;
+    const std::uintptr_t expected_image_bind_rva = kImageBind271Rva;
     std::uintptr_t texture_lookup_rva{};
     if (!resolve_relative_call_target(
             kTextureLookupCallRva,
@@ -14370,21 +14604,16 @@ bool install_hooks_and_interfaces(
         return false;
     }
     const bool destructor_entry_matches =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? entry_matches(destructor_rva, kDestructor271Entry)
-        : entry_matches(destructor_rva, kDestructor270Entry);
+        entry_matches(destructor_rva, kDestructor271Entry);
     const bool constructor_entry_matches =
-        g_game.timestamp != kEldenRing271Timestamp ||
         entry_matches(kScaleformConstructor271Rva, kConstructor271Entry);
     const bool shape_helper_entries_match =
-        g_game.timestamp != kEldenRing271Timestamp ||
-        (entry_matches(kScaleformGetMember271Rva, kGetMember271Entry) &&
+        entry_matches(kScaleformGetMember271Rva, kGetMember271Entry) &&
             entry_matches(
                 kScaleformSetPosition271Rva, kSetPosition271Entry) &&
             entry_matches(
-                kScaleformSetVisible271Rva, kSetVisible271Entry));
+                kScaleformSetVisible271Rva, kSetVisible271Entry);
     const bool native_pointer_poll_helpers_match =
-        g_game.timestamp == kEldenRing271Timestamp &&
         entry_matches(
             kGetPointerPositionRva,
             kGetPointerPosition271Entry) &&
@@ -14431,10 +14660,10 @@ bool install_hooks_and_interfaces(
         pristine_selector_select_entry_matches ||
         approved_selector_select_entry_matches;
 
-    if (g_game.timestamp == kEldenRing271Timestamp &&
-        !native_pointer_poll_helpers_match) {
+    if (!native_pointer_poll_helpers_match) {
         log_line(
-            "ERROR: native pointer polling helpers differ from the validated Elden Ring 2.7.1.0 executable; no hooks installed");
+            "ERROR: native pointer polling helpers differ from the validated Elden Ring %s executable; no hooks installed",
+            tabs_build().version);
         return false;
     }
 
@@ -14458,13 +14687,13 @@ bool install_hooks_and_interfaces(
             kPointerCellSampleBytes) ||
         !entry_matches(kSwitchPanelRva, kSwitchPanelEntry) ||
         !entry_matches(
-            kSwitchPanelStateCopySignatureRva,
+            tabs_build().switch_panel_state_copy_signature,
             kSwitchPanelStateCopyBytes) ||
         !entry_matches(
             kSwitchPanelStateCopyResumeRva,
             kSwitchPanelStateCopyResumeBytes) ||
         !entry_matches(
-            kSwitchPanelVisibilitySignatureRva,
+            tabs_build().switch_panel_visibility_signature,
             kSwitchPanelVisibilityBytes) ||
         !resolve_path_interface_matches ||
         !entry_matches(kValueExistsRva, kValueExistsEntry) ||
@@ -14523,26 +14752,14 @@ bool install_hooks_and_interfaces(
         g_game.base + kPresentTabRva);
     g_make_icon_descriptor = reinterpret_cast<MakeIconDescriptorFn>(
         g_game.base + kMakeIconDescriptorRva);
-    g_construct_scaleform_value =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? reinterpret_cast<ScaleformConstructorFn>(
-              g_game.base + kScaleformConstructor271Rva)
-        : nullptr;
-    g_get_scaleform_member =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? reinterpret_cast<ScaleformGetMemberFn>(
-              g_game.base + kScaleformGetMember271Rva)
-        : nullptr;
-    g_set_scaleform_position =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? reinterpret_cast<ScaleformSetPositionFn>(
-              g_game.base + kScaleformSetPosition271Rva)
-        : nullptr;
-    g_set_scaleform_visible =
-        g_game.timestamp == kEldenRing271Timestamp
-        ? reinterpret_cast<ScaleformSetVisibleFn>(
-              g_game.base + kScaleformSetVisible271Rva)
-        : nullptr;
+    g_construct_scaleform_value = reinterpret_cast<ScaleformConstructorFn>(
+        g_game.base + kScaleformConstructor271Rva);
+    g_get_scaleform_member = reinterpret_cast<ScaleformGetMemberFn>(
+        g_game.base + kScaleformGetMember271Rva);
+    g_set_scaleform_position = reinterpret_cast<ScaleformSetPositionFn>(
+        g_game.base + kScaleformSetPosition271Rva);
+    g_set_scaleform_visible = reinterpret_cast<ScaleformSetVisibleFn>(
+        g_game.base + kScaleformSetVisible271Rva);
     g_destroy_scaleform_value = reinterpret_cast<ScaleformDestructorFn>(
         g_game.base + destructor_rva);
 
@@ -14801,10 +15018,11 @@ DWORD WINAPI run_probe(void*) noexcept {
         static_cast<void*>(g_game.base),
         static_cast<unsigned>(g_game.timestamp),
         g_game.size);
-    if (!supported_game_image(g_game) || g_game.timestamp != kEldenRing271Timestamp ||
-        g_game.size != kEldenRing271ImageSize) {
+    g_native_tabs_build_profile = find_native_tabs_build_profile(
+        g_game.timestamp, g_game.size);
+    if (!g_native_tabs_build_profile) {
         log_line(
-            "ERROR: unsupported Elden Ring executable identity; expected 2.7.0.0 or 2.7.1.0");
+            "ERROR: unsupported Elden Ring executable identity; expected an exact 2.7.1.0 or 2.7.2.0 image");
         return 1;
     }
     if (!validate_official_host()) return 1;
@@ -14824,22 +15042,25 @@ DWORD WINAPI run_probe(void*) noexcept {
 namespace erui::native {
 
 NativeTabsPreflightStatus preflight_native_tabs() noexcept {
+    g_native_tabs_build_profile = nullptr;
     GameImage image{};
     if (!inspect_game_image(image)) {
         return NativeTabsPreflightStatus::interface_mismatch;
     }
-    if (image.timestamp != kEldenRing271Timestamp ||
-        image.size != kEldenRing271ImageSize) {
+    const NativeTabsBuildProfile* const profile =
+        find_native_tabs_build_profile(image.timestamp, image.size);
+    if (!profile) {
         return NativeTabsPreflightStatus::unsupported_game;
     }
 
+    g_native_tabs_build_profile = profile;
     g_game = image;
     GameAddresses carrier_addresses{};
     carrier_addresses.game_image_base = image.base;
     carrier_addresses.game_image_size = image.size;
     carrier_addresses.graphics_panel_materializer =
         reinterpret_cast<BuiltinPanelMaterializerFn>(
-            image.base + 0x95C050);
+            image.base + profile->graphics_panel_materializer);
     if (!preflight_native_tab_carrier(carrier_addresses) ||
         !validate_official_host() ||
         !install_hooks_and_interfaces(false)) {

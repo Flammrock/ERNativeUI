@@ -8,7 +8,9 @@ CSV or the earlier research notebooks.
 The names below are ERNativeUI's analytical source names, not symbols supplied
 by FromSoftware. The 2.7.0.0 baseline remains the
 [reference executable](../README.md#reference-build); explicit 2.7.1.0 deltas
-are shown where a production profile differs. Generic resolver fallback
+are shown in the historical tables below, while the exact 2.7.2.0 profiles are
+summarized in the [2.7.2.0 update note](../game-updates/elden-ring-2.7.2.0.md).
+Generic resolver fallback
 constants are not presented as current addresses: they are accepted only when
 their local validation still succeeds, while the unique AOB result is
 authoritative.
@@ -27,7 +29,7 @@ The current source uses five resolution classes:
 | Validated fallback | If an AOB is missing or ambiguous, accept the source fallback RVA only when it is in executable memory and matches the required local bytes or structure. It is never an unchecked fallback. |
 | Build-gated AOB | First select one recognized PE timestamp/image-size profile, then resolve each entry with a unique AOB or validated fallback. TextInput uses this class because it retains layout-coupled native state. |
 | Exact-RVA feature backend | Select one recognized PE timestamp/image-size profile, fetch every feature-local RVA from it, and validate the expected entry bytes plus required data anchors. ColorPicker and Input Bindings use this class. |
-| Exact-build subsystem | Admit one complete executable identity, then validate every coupled hook, object, resource, and transition seam before publishing the group. API 1.3 custom tabs currently use this class and admit only `2.7.1.0`. |
+| Exact-build subsystem | Admit one complete executable identity, then validate every coupled hook, object, resource, and transition seam before publishing the group. API 1.3 custom tabs currently use this class and admit exact profiles for `2.7.1.0` and `2.7.2.0`. |
 
 The complete executable SHA-256 is recorded for research and release testing,
 but the injected runtime does not calculate the hash. Its recognized profiles
@@ -37,10 +39,12 @@ are:
 |---|---:|---:|
 | `2.7.0.0` | `0x69E9C9B9` | `0x5E09600` |
 | `2.7.1.0` | `0x6A96B418` | `0x5E0DA00` |
+| `2.7.2.0` | `0x6AABF7E7` | `0x5DFD600` |
 
 Both fields must match one profile. Local byte, vtable, executable-memory, and
-data validation then remains mandatory. The complete comparison is recorded
-in the [2.7.1.0 update note](../game-updates/elden-ring-2.7.1.0.md).
+data validation then remains mandatory. The update comparisons are recorded
+in the [2.7.1.0 update note](../game-updates/elden-ring-2.7.1.0.md) and
+[2.7.2.0 update note](../game-updates/elden-ring-2.7.2.0.md).
 
 Hooks are installed with SafetyHook unless the table says otherwise. All
 SafetyHook inline hooks are prepared disabled, their original trampolines are
@@ -70,7 +74,7 @@ the current online [`host_dllmain.cpp`](https://github.com/Flammrock/ERNativeUI/
 | ColorPicker | Native alert transport, exact ColorPicker backend, and preview-producer hook are required. | If a ColorPicker row was declared, installation fails rather than silently omitting it. |
 | Input Bindings | Exact backend preparation and all nine binding hooks are required. | Installation fails and unpublished state is cleared. |
 | Page titles or standalone ColorPicker widget | The shared Scaleform path mid-hook is attempted. | Rows remain active. Titles are disabled; ColorPicker preserves ordinary button presentation when its standalone widget cannot be routed. |
-| Custom Configuration tabs | The exact 2.7.1.0 viewport, input-provenance, immutable-image, and Graphics-carrier interfaces are required after ordinary menu hooks are ready. | `ERUI_CAP_CUSTOM_TABS` remains unavailable on an unvalidated build. An install mismatch rejects the tab backend before publication; a later identity fault freezes further custom transitions while preserving native input and Back. |
+| Custom Configuration tabs | The exact 2.7.1.0 or 2.7.2.0 viewport, input-provenance, immutable-image, and Graphics-carrier interfaces are required after ordinary menu hooks are ready. | `ERUI_CAP_CUSTOM_TABS` remains unavailable on an unvalidated build. An install mismatch rejects the tab backend before publication; a later identity fault freezes further custom transitions while preserving native input and Back. |
 
 The base resolver completes before core hooks are installed. A missing required
 address therefore produces the explicit "no hooks installed" path. Later
@@ -170,7 +174,7 @@ Custom tabs are not extra permanent native categories or panels. The host
 freezes an immutable logical catalogue, maps a contiguous window onto the
 eight validated stock tab cells, and materializes only the selected custom
 page through the rows-only Graphics carrier. This complete backend is enabled
-only for the exact Elden Ring `2.7.1.0` PE identity.
+only for the exact Elden Ring `2.7.1.0` and `2.7.2.0` PE identities.
 
 The production boundary is split across two hook groups:
 
