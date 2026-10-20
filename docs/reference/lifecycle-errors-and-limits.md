@@ -428,10 +428,11 @@ the effective unchanged movie.
 ### Pinned Windows x64 layouts
 
 The ABI uses natural Windows x64 alignment and no packing pragma. Its released
-prefixes are tested under MSVC and MinGW-w64. These sizes are useful when
-reviewing a foreign-function binding or diagnosing an unexpected compiler
+prefixes have strict MSVC and MinGW-w64 layout coverage. These sizes are useful
+when reviewing a foreign-function binding or diagnosing an unexpected compiler
 layout; application code should still write `sizeof(Type)` rather than a
-numeric literal.
+numeric literal. Layout and isolated cross-toolchain fixtures do not replace
+the separate in-game runtime qualification recorded in `VALIDATION.md`.
 
 | Type | Bytes |
 |---|---:|
@@ -506,8 +507,9 @@ and API 1.3 appends `add_tab` and `add_title_screen_text` after the frozen API
 1.2 prefix; no earlier field is reordered.
 The host writes only the selected supported prefix within the caller-declared
 table size. Fixed-width integers, size-prefixed POD structures, `ERUI_CALL`
-(`__cdecl`), and opaque handles keep MSVC, clang-cl, MinGW-w64, C, and C++
-clients on the same public boundary.
+(`__cdecl`), and opaque handles define one compiler-neutral C boundary. API
+1.3 passes isolated MinGW-client/MSVC-host tests, while full in-game MinGW-w64
+runtime qualification remains a separate release-validation gate.
 
 This is runtime API compatibility, not release-package selection. CMake's
 `find_package(ERNativeUI <release>)` checks an ERNativeUI project release at

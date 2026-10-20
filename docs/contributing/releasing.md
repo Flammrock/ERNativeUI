@@ -4,14 +4,12 @@ ERNativeUI uses Release Please, Semantic Versioning, Conventional Commits, and
 GitHub Actions. The normal release path does not require manually editing the
 project version, `CHANGELOG.md`, a tag, or a GitHub Release.
 
-ERNativeUI **1.1.0** first shipped the finished ERUI **API 1.1** contract, and
-**1.1.1** retained it while restoring Elden Ring 2.7.1 compatibility. Current
-development targets project release **1.2.0**, which first packages the
-finished ERUI **API 1.2** contract. Project and API versions track different
-things and can diverge:
+ERNativeUI **1.3.0** is the first project release that packages the finished
+ERUI **API 1.3** contract. Project and API versions track different things and
+can diverge:
 
-- `1.2.0` is a project, package, tag, and changelog version.
-- `1.2` is a runtime C function-table contract requested through
+- `1.3.0` is a project, package, tag, and changelog version.
+- `1.3` is a runtime C function-table contract requested through
   `ERUI_GetApi` and by `erui::connect()`.
 
 Release Please advances the project version only. It does not choose, freeze,
@@ -75,11 +73,11 @@ The relevant release rules are:
 When a pull request is squash-merged, its title becomes the commit subject.
 Keep that title in Conventional Commit form.
 
-After the 1.1.1 release, the release manifest records `1.1.1`. A `feat:`
-subject therefore makes Release Please propose project release `1.2.0`.
-Confirm the calculated version in the release PR instead of editing the
-manifest yourself. It is expected that the feature branch still shows
-`1.1.1` in `CMakeLists.txt`; the generated release PR advances it.
+After the 1.2.1 release, the release manifest records `1.2.1`. The API 1.3
+feature commits therefore make Release Please propose project release
+`1.3.0`. Confirm the calculated version in the release PR instead of editing
+the manifest yourself. It is expected that the feature branch still shows
+`1.2.1` in `CMakeLists.txt`; the generated release PR advances it.
 If an intentional version override is ever necessary, use a dedicated
 Conventional Commit with a `Release-As: X.Y.Z` footer; do not use that override
 to make the project version mirror an API version.
@@ -143,15 +141,17 @@ Its configuration is stored in
 `.release-please-manifest.json` records the most recently released project
 version.
 
-Release Please creates or refreshes one release PR. For the 1.2.0 release,
+Release Please creates or refreshes one release PR. For the 1.3.0 release,
 verify that it:
 
-- changes `project(ERNativeUI VERSION ...)` in `CMakeLists.txt` to `1.2.0`;
-- changes the manifest from `1.1.1` to `1.2.0`;
+- changes `project(ERNativeUI VERSION ...)` in `CMakeLists.txt` to `1.3.0`;
+- changes the manifest from `1.2.1` to `1.3.0`;
 - updates `CHANGELOG.md` with the intended changes;
-- presents Numeric Slider and Custom Slider as API 1.2 features without
-  claiming unrelated research targets as released;
-- retains the frozen API 1.0 and API 1.1 contracts.
+- presents custom tabs, title-screen text, runtime GFX completion, and
+  configurable System tab slots as API 1.3 features without claiming unrelated
+  research targets as released;
+- records Elden Ring 1.17.2 / executable 2.7.2.0 support accurately;
+- retains the frozen API 1.0, API 1.1, and API 1.2 contracts.
 
 Do not merge the release PR until the `Windows x64` CI job passes and the
 generated changelog accurately describes the release.
@@ -179,15 +179,15 @@ job uses its scoped `GITHUB_TOKEN` to upload to the GitHub Release.
 
 ## 5. Merge and verify the GitHub Release
 
-Merging the 1.2.0 release PR causes a later Release Please run to create the
-`ERNativeUI-v1.2.0` tag and GitHub Release. The component-prefixed form matches
+Merging the 1.3.0 release PR causes a later Release Please run to create the
+`ERNativeUI-v1.3.0` tag and GitHub Release. The component-prefixed form matches
 the existing `ERNativeUI-v1.0.0` release and the current manifest
 configuration. The workflow's Windows package job then:
 
 1. checks out the exact released tag;
 2. configures, builds, and tests with `windows-release`;
 3. runs `tools/package_release.ps1` without `-IncludeNexus`;
-4. uploads `ERNativeUI-1.2.0-windows-x64.zip` as a workflow artifact;
+4. uploads `ERNativeUI-1.3.0-windows-x64.zip` as a workflow artifact;
 5. attaches that same single ZIP to the GitHub Release.
 
 Verify the tag and release point to the release-PR merge commit, the release
@@ -208,14 +208,14 @@ runtime/SDK archive with:
 ```powershell
 .\tools\package_release.ps1 `
   -BuildDirectory build/preset-release `
-  -Version 1.2.0
+  -Version 1.3.0
 ```
 
 The script installs the built tree and creates:
 
 ```text
 dist/release/
-|-- ERNativeUI-1.2.0-windows-x64.zip
+|-- ERNativeUI-1.3.0-windows-x64.zip
 `-- SHA256SUMS.txt
 ```
 
@@ -243,7 +243,7 @@ ctest --preset windows-release
 
 .\tools\package_release.ps1 `
   -BuildDirectory build/preset-release `
-  -Version 1.2.0 `
+  -Version 1.3.0 `
   -IncludeNexus
 ```
 
@@ -251,8 +251,8 @@ This creates:
 
 ```text
 dist/release/
-|-- ERNativeUI-1.2.0-windows-x64.zip
-|-- ERNativeUI-1.2.0-nexus.zip
+|-- ERNativeUI-1.3.0-windows-x64.zip
+|-- ERNativeUI-1.3.0-nexus.zip
 `-- SHA256SUMS.txt
 ```
 
@@ -279,16 +279,16 @@ its layout, hashes, DLL file versions, player README links, game-build
 compatibility statement, description, screenshots, credits, permissions, and
 AI disclosure fields. Confirm that repository README/SDK links were not
 accidentally copied into this intentionally small package.
-Upload `ERNativeUI-1.2.0-nexus.zip` manually; do not attach it to the GitHub
+Upload `ERNativeUI-1.3.0-nexus.zip` manually; do not attach it to the GitHub
 Release.
 
 ## 8. After publication
 
 - Test a fresh Mod Engine 2 installation using the published Nexus ZIP.
 - Test an SDK consumer using the published Windows ZIP.
-- Confirm clients built against APIs 1.0 and 1.1 still register with the 1.2.0
-  host and a current client negotiates API 1.2. Include previously built
-  binaries and clients intentionally built from both frozen SDKs.
+- Confirm clients built against APIs 1.0, 1.1, and 1.2 still register with the
+  1.3.0 host and a current client negotiates API 1.3. Include previously built
+  binaries and clients intentionally built from every frozen SDK.
 - Record any newly verified game or mod compatibility in the compatibility
   guide through a normal follow-up change.
 - Keep `.release-please-manifest.json` at the version written by Release
@@ -297,7 +297,7 @@ Release.
 For the next release, continue landing Conventional Commits. Release Please
 will update the same release PR until it is merged, then calculate subsequent
 project releases from the commits after the new tag. A project patch release
-can retain ERUI API 1.2 unchanged; a new API contract requires its own design,
+can retain ERUI API 1.3 unchanged; a new API contract requires its own design,
 compatibility fixtures, migration guide, and explicit version decision.
 
 ## 9. Freeze a newly published API contract
@@ -308,21 +308,21 @@ contract immediately after its release tag exists and before development can
 change the public headers again. A later package release that keeps the same
 API does not need another snapshot.
 
-For API 1.2, use `tests/abi/releases/v1_1` as the structural example:
+For API 1.3, use `tests/abi/releases/v1_2` as the structural example:
 
-1. After the release exists, create `tests/abi/releases/v1_2` and copy the two
-   public headers from the clean `ERNativeUI-v1.2.0` tag, byte-for-byte—not
+1. After the release exists, create `tests/abi/releases/v1_3` and copy the two
+   public headers from the clean `ERNativeUI-v1.3.0` tag, byte-for-byte—not
    from a later `main`.
 2. Add `ORIGIN.md` recording the release tag, commit, both header Git blob IDs,
    and both SHA-256 values.
-3. Add `release.cmake` recording token `v1_2`, the encoded API version, frozen
+3. Add `release.cmake` recording token `v1_3`, the encoded API version, frozen
    table-prefix size, C/C++ standards, and the same lowercase header hashes.
 4. Add the release-owned layout, strict-C, C++ wrapper, contract-host,
    frozen-client-to-current-host, and any version-specific lifecycle tests.
    Cover both compatibility directions and host-to-client callbacks.
-5. Append `erui_add_abi_release(v1_2)` to
+5. Append `erui_add_abi_release(v1_3)` to
    `tests/abi/releases/CMakeLists.txt` without removing or changing the
-   `v1_0` or `v1_1` entries.
+   `v1_0`, `v1_1`, or `v1_2` entries.
 6. Run the complete root test suite and the cross-toolchain runtime gate, then
    commit the snapshot and provenance.
 

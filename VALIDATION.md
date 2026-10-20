@@ -51,8 +51,9 @@ The suite covers:
 
 The host must use an MSVC-compatible C++ ABI because Elden Ring directly
 consumes an MSVC `std::function` object in its native action-row constructor.
-That restriction does not cross the public C boundary: MSVC, clang-cl, and
-MinGW-w64 client mods are supported.
+That restriction is not intended to cross the public C boundary: the API is
+designed for MSVC, clang-cl, and MinGW-w64 client mods. A release must not
+claim MinGW-w64 runtime compatibility until the complete gate below passes.
 
 Strict MinGW header smoke checks can be reproduced with:
 
@@ -66,6 +67,25 @@ g++ -std=c++17 -pedantic-errors -Wall -Wextra -Werror -Iinclude ^
 Those commands are compile-only smoke checks. They do not exercise dynamic
 API negotiation or prove that an MSVC-built host can safely invoke a callback
 compiled by MinGW-w64.
+
+The API 1.3 release candidate has additional isolated cross-toolchain evidence.
+On 2026-10-20 at commit `c2f7f17fd78949e7aaf573614b81332b6f2e1ab4`,
+MSVC 19.51.36243 fixtures and MinGW-w64 GCC/G++ 15.2.0 produced these results:
+
+- [x] Strict current-header C11 and C++17 compilation passed.
+- [x] Current C/C++ and frozen API 1.1/1.2 C/C++ clients negotiated,
+  registered, committed, and exercised representative accessors against the
+  production-sourced MSVC host fixture.
+- [x] A current C++ client and frozen API 1.0 C/C++ clients received and
+  verified callbacks from MSVC-built fixtures, including no-value, value, and
+  alert callbacks.
+- [x] Every audit client was PE x86-64, resolved `ERUI_GetApi` dynamically,
+  and had no `ERNativeUI.dll` import. The production-sourced current fixture
+  exported only `ERUI_GetApi`.
+
+This is strong isolated ABI evidence, but it is not the offline-game callback
+test below. The 1.3.0 compatibility matrix therefore does not claim complete
+in-game MinGW-w64 runtime qualification.
 
 The complete cross-toolchain runtime gate is manual today and is not part of
 the GitHub CI job. Before a release advertises MinGW-w64 compatibility:
@@ -101,9 +121,9 @@ production host in the offline game. Do not ship those diagnostic clients.
 After `cmake --install`, configure `examples/` and each standalone example
 directory independently with `CMAKE_PREFIX_PATH` set to the install prefix:
 `template`, `localized_greeting`, `tarnished_ui_showcase`, and
-`showcase_screenshot_helper`. Inspect each client DLL's imports: no client
-should import `ERNativeUI.dll`. Inspect the host exports: only `ERUI_GetApi` is
-public.
+`showcase_screenshot_helper`, `custom_tabs_stress`, and `title_screen_text`.
+Inspect each client DLL's imports: no client should import `ERNativeUI.dll`.
+Inspect the host exports: only `ERUI_GetApi` is public.
 
 ## Packaging validation
 
@@ -192,6 +212,14 @@ For the shipped showcase, verify:
 Complete this A/B matrix before release. Each change requires a full process
 restart; do not treat an INI edit made while the game is running as a test.
 
+The API 1.3 release candidate was live-smoke-tested with explicit enabled and
+disabled values, and the enabled shipped default was restored. That result
+proves configuration selection, but it does not by itself prove every detailed
+fallback and capability condition below; unchecked items remain release work.
+
+- [x] Restart with explicit `EnableRuntimePatching = 1`, then with `0`, and
+  restore the repository's shipped enabled default.
+
 - [ ] Start with `[GFX] EnableRuntimePatching = 1`. Confirm the runtime loader
   hook installs, supported settings movies reach their documented capacities,
   TextInput and ColorPicker use their completed presentations, and an API 1.3
@@ -225,13 +253,13 @@ Use the custom-tabs stress example for all three runs. Fully exit and restart
 the game after each INI change; do not compare configurations within one
 process.
 
-- [ ] Set `[Tabs] MinimumTabSlots = 8`. Confirm the ordinary eight-slot strip,
+- [x] Set `[Tabs] MinimumTabSlots = 8`. Confirm the ordinary eight-slot strip,
   custom-tab overflow markers, single and held L1/R1 movement, wrapping,
   pointer selection, Back, close, and reopen.
-- [ ] Set `MinimumTabSlots = 9`. Confirm nine physical slots are visible and
+- [x] Set `MinimumTabSlots = 9`. Confirm nine physical slots are visible and
   selectable, the custom-tab viewport uses the added slot, and all navigation
   checks above remain stable.
-- [ ] Set `MinimumTabSlots = 10`. Confirm ten physical slots are visible and
+- [x] Set `MinimumTabSlots = 10`. Confirm ten physical slots are visible and
   selectable without overlapping the shoulder prompts or leaving the screen,
   and repeat the complete navigation and reopen checks.
 - [ ] For each run, confirm the ordinary log reports the requested minimum and
@@ -239,8 +267,12 @@ process.
   `ERROR`, or `FATAL` entry. The visible selectable slots and successful
   navigation provide the live native-record/selector check without enabling
   high-volume diagnostics.
-- [ ] Restore the shipped `MinimumTabSlots = 8` default after testing. Values
-  outside `8..10` must fail closed to the default; there is no
+- [x] After closing System, reopen it immediately and confirm the custom icons
+  are already painted on the first visible frame rather than briefly showing
+  fallback icons. Repeat after waiting before reopening.
+- [x] Restore the repository's shipped `MinimumTabSlots = 8` default after
+  testing.
+- [ ] Confirm values outside `8..10` fail closed to the default. There is no
   `MaximumTabSlots` setting.
 
 These are physical strip capacities, not custom-tab registration limits. The
@@ -249,8 +281,8 @@ viewport must keep all of them reachable.
 
 ### Elden Ring 2.7.2.0 live validation
 
-The current development host exposing ERUI API 1.3 was live-validated on
-Elden Ring App 1.17.2 / executable product version 2.7.2.0. The tested
+The 1.3.0 release candidate exposing ERUI API 1.3 was live-validated on Elden
+Ring App 1.17.2 / executable product version 2.7.2.0. The tested
 executable had SHA-256
 `F9118FEA2CFD8FA3901E8060BFADB1552CB2471771DED8A5B662C4E298FFB328`, PE
 timestamp `0x6AABF7E7`, image size `0x5DFD600`, and file size 86,973,008 bytes.
@@ -272,13 +304,16 @@ dedicated regression.
 
 ### Elden Ring 2.7.1.0 and Solid Uncapper regression
 
-The 1.1.1 compatibility work was live-validated on both Elden Ring 2.7.0.0
-and 2.7.1.0, with Solid Uncapper 2.3 loaded first and without Solid Uncapper.
-Root pagination was also historically confirmed with both the original
-six-row Game Options GFX and a separately transformed 13-row GFX. Current
-releases complete compatible settings movies in memory, so keep both the
-game-supplied and already-modified input checks below for future regressions;
-static pattern matches alone do not prove the runtime hook chain.
+The original 1.1.1 compatibility work was live-validated on both Elden Ring
+2.7.0.0 and 2.7.1.0, with Solid Uncapper 2.3 loaded first and without Solid
+Uncapper. The 1.3.0 release candidate was subsequently live-regression-tested
+on 2.7.1.0 with Solid Uncapper loaded first: both title-screen text producers,
+the ERNativeUI showcase, and the custom-tab stress example remained visible
+and operational. Root pagination was also historically confirmed with both
+the original six-row Game Options GFX and a separately transformed 13-row GFX.
+Current releases complete compatible settings movies in memory, so keep both
+the game-supplied and already-modified input checks below for future
+regressions; static pattern matches alone do not prove the runtime hook chain.
 
 - [x] On 2.7.1.0 without Solid Uncapper, confirm the exact profile is selected,
   the host reaches `ERNativeUI host ready`, and ERNativeUI rows and Input

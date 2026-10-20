@@ -228,7 +228,10 @@ link an ERNativeUI import library.
 3. Continue from the [commented template](examples/template/README.md) or
    browse the [buildable examples](examples/README.md).
 
-MSVC, clang-cl, and MinGW-w64 client mods can use the same stable host ABI.
+The public ABI is designed for compiler-neutral Windows x64 clients. API 1.3
+passes strict MinGW-w64 C11/C++17 compilation and isolated
+MinGW-client/MSVC-host fixtures; full in-game MinGW-w64 runtime validation is
+not part of the 1.3.0 tested compatibility matrix.
 
 ## Compatibility at a glance
 

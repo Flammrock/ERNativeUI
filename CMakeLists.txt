@@ -217,8 +217,8 @@ if(ERNATIVEUI_BUILD_HOST AND NOT _ernativeui_msvc_abi)
     message(FATAL_ERROR
         "ERNativeUI.dll requires an MSVC-compatible C++ ABI (MSVC or clang-cl) "
         "because Elden Ring consumes an MSVC std::function object. MinGW client "
-        "mods remain supported; configure them against ERNativeUI::SDK, or set "
-        "ERNATIVEUI_BUILD_HOST=OFF.")
+        "source can compile against ERNativeUI::SDK; consult the selected "
+        "release's tested runtime matrix, or set ERNATIVEUI_BUILD_HOST=OFF.")
 endif()
 
 set(_ernativeui_need_native_core OFF)

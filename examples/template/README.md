@@ -111,7 +111,9 @@ cmake --build build --config Release
 
 `find_package(ERNativeUI CONFIG REQUIRED)` supplies `ERNativeUI::SDK`, which
 contains headers and a C++17 compile requirement only. A MinGW-w64 client may
-use the same installed package; the host itself remains an MSVC-ABI binary.
+compile against the same installed package; the host itself remains an
+MSVC-ABI binary. Check the selected ERNativeUI release's compatibility matrix
+before claiming in-game cross-toolchain validation.
 
 ## Deploy
 

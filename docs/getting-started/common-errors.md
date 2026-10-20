@@ -15,10 +15,9 @@ ERNativeUI exposes four public API generations:
   bindings, and provider storage.
 - **Released API 1.2:** introduced with ERNativeUI 1.2.0. It appends Numeric
   Slider and Custom Slider while preserving both earlier contracts.
-- **Current API 1.3:** appends client-owned top-level Configuration tabs and
-  title-screen status text while preserving all three earlier contracts.
-  Package-release versions and ERUI API versions are independent; use an SDK
-  and host that explicitly expose 1.3.
+- **Released API 1.3:** introduced with ERNativeUI 1.3.0. It appends
+  client-owned top-level Configuration tabs and title-screen status text while
+  preserving all three earlier contracts.
 
 See [Feature status](../features.md) for the exact boundary and
 [How ERNativeUI works](../how-it-works.md) for the lifecycle and ownership
@@ -134,14 +133,14 @@ does not negotiate the runtime ERUI API.
   required; update ERNativeUI.dll.”
 - A raw-C function pointer is null or an operation returns
   `ERUI_NOT_SUPPORTED`.
-- A current API 1.3 client works with the current host but not a host exposing
+- An API 1.3 client works with an ERNativeUI 1.3.0 host but not a host exposing
   only API 1.0, 1.1, or 1.2.
 
 **Likely cause**
 
 Version negotiation selects a complete, exact function-table contract. API
 1.0 is frozen at 128 bytes, API 1.1 at 320 bytes, API 1.2 at 368 bytes, and
-the current API 1.3 table is 384 bytes. An API 1.3 client cannot use a host
+the API 1.3 table is 384 bytes. An API 1.3 client cannot use a host
 exposing only an earlier table, and the current C++ wrapper intentionally does
 not downgrade. Conversely, any client built with an earlier SDK is supported
 by later compatible 1.x hosts through its unchanged function-table contract.

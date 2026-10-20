@@ -213,4 +213,3 @@ If the optional getter entry is already claimed, the log contains a warning
 and the constructor snapshots remain valid. If the mandatory builder entry is
 claimed or the executable identity differs, the probe fails closed and installs
 no hooks.
-

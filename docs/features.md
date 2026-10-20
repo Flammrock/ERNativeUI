@@ -13,7 +13,7 @@ contracts.
 
 | Label | Meaning |
 |---|---|
-| **Current API 1.3** | The current client contract. It adds custom top-level Configuration tabs and title-screen status text. |
+| **Current API 1.3** | First shipped by ERNativeUI 1.3.0. It adds custom top-level Configuration tabs and title-screen status text. |
 | **Supported APIs 1.0, 1.1, and 1.2** | Frozen earlier contracts. Already-compiled clients remain supported by compatible 1.x hosts. |
 | **Future research** | Not implemented in the public API. Do not design a client around it yet. |
 
@@ -125,9 +125,11 @@ coexistence, and validation requirements may move to a later API.
 - Native signatures are Elden Ring-version-sensitive and are validated before
   use. A game update can require a host update even when the public ABI is
   unchanged.
-- The host requires an MSVC-compatible ABI internally. Client DLLs can use
-  MSVC, clang-cl, or MinGW through the strict C boundary; no import library is
-  required.
+- The host requires an MSVC-compatible ABI internally. The strict C boundary
+  is designed for compiler-neutral clients and requires no import library.
+  API 1.3 passes strict MinGW-w64 compilation and isolated
+  MinGW-client/MSVC-host fixtures, but in-game MinGW-w64 runtime compatibility
+  is not part of the 1.3.0 tested matrix.
 - The host and committed providers cannot be hot-unloaded. Callback code and
   long-lived callback state must remain valid until their documented lifetime
   ends.

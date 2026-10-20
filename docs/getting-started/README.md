@@ -10,8 +10,9 @@ ERNativeUI has two parts:
   the host to create native UI.
 
 Your client never links an ERNativeUI `.lib`. The public interface is a stable
-C ABI with a header-only C++17 wrapper, so MSVC, clang-cl, and MinGW-w64
-clients can use the same host.
+C ABI with a header-only C++17 wrapper. API 1.3 passes strict MinGW-w64
+compilation and isolated MinGW-client/MSVC-host fixtures, but the 1.3.0 tested
+compatibility matrix does not claim full in-game MinGW-w64 runtime validation.
 
 ## Choose your path
 

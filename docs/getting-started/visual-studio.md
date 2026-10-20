@@ -6,7 +6,7 @@ or ERNativeUI `.lib`.
 
 Complete [Install the SDK](setup.md) first. You need Visual Studio 2022 with
 the **Desktop development with C++** workload and an extracted Windows x64 SDK
-that explicitly exposes ERUI API 1.3.
+from ERNativeUI 1.3.0 or a later compatible 1.x release retaining API 1.3.
 
 ## 1. Create a DLL project
 

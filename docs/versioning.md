@@ -8,9 +8,9 @@ questions and must not be compared as though they were one value.
 | ERNativeUI release/package version | **Selected package** | The SDK, host, documentation, and release notes shipped together. It follows Semantic Versioning. | At configure time by CMake and when selecting a release/download. |
 | ERUI public API version | **1.3** | The current binary function-table contract understood by a client and `ERNativeUI.dll`. | At runtime through `ERUI_GetApi`, or by the C++ wrapper during `erui::connect()`. |
 
-This documentation describes the finished ERUI API 1.3 contract. Use an
-ERNativeUI package that explicitly states it contains API 1.3; the API number
-does not imply a matching package version.
+This documentation describes the finished ERUI API 1.3 contract, first
+packaged by ERNativeUI 1.3.0. The release and API numbers remain independent;
+a later compatible project release may retain the same API unchanged.
 
 ## Release and package version
 
@@ -156,7 +156,7 @@ For the current line, this means:
 | ERNativeUI 1.0.0 SDK / API 1.0 | ERNativeUI 1.0.0 and every later 1.x host |
 | ERNativeUI 1.1.0 SDK / API 1.1 | ERNativeUI 1.1.0 and every later 1.x host |
 | ERNativeUI 1.2.0 SDK / API 1.2 | ERNativeUI 1.2.0 and every later 1.x host |
-| An SDK release that explicitly packages API 1.3 / API 1.3 | That release and every later compatible 1.x host |
+| ERNativeUI 1.3.0 SDK / API 1.3 | ERNativeUI 1.3.0 and every later compatible 1.x host |
 
 The shared major number defines this compatibility policy; it does not couple
 the release minor to the API minor.

@@ -28,9 +28,9 @@ requiring any knowledge of Elden Ring's UI objects or ERNativeUI's hooks.
 | Diagnose a problem | [Troubleshooting](#troubleshooting) |
 | Study how the native implementation was recovered | [Reverse-engineering case study](../research/case-studies/custom-tabs.md) |
 
-Use an SDK and host that explicitly expose ERUI API 1.3. ERNativeUI package
-versions and ERUI API versions are independent, so do not infer a package
-number from `1.3`; see [Versioning](../versioning.md).
+Custom tabs require ERUI API 1.3, first shipped by ERNativeUI 1.3.0. Package
+versions and ERUI API versions are independent; a later compatible 1.x release
+may retain API 1.3 unchanged. See [Versioning](../versioning.md).
 
 ## Create a custom tab
 

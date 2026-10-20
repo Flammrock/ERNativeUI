@@ -168,4 +168,3 @@ void __fastcall research_switch_panel_detour(
         route == kNativeGraphicsRoute ? "native-graphics" : "custom",
         static_cast<unsigned long long>(transaction_frame));
 }
-

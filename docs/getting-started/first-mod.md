@@ -4,8 +4,9 @@ This walkthrough starts with an empty directory and produces a Windows x64
 client DLL. When its row is activated in Elden Ring, it opens a native dialog
 saying **Hello, Tarnished!**
 
-Complete [Install the SDK](setup.md) first. The commands below assume an SDK
-that explicitly exposes API 1.3 was extracted and its directory renamed to:
+Complete [Install the SDK](setup.md) first. The commands below assume the
+ERNativeUI 1.3.0 Windows SDK, the first release exposing API 1.3, was extracted
+and its directory renamed to:
 
 ```text
 C:\SDK\ERNativeUI-current

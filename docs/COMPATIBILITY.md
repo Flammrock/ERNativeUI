@@ -38,7 +38,7 @@ A game compatibility patch can therefore keep the public API unchanged.
 | `1.1.1` | APIs 1.0 and 1.1 | Live-validated | Live-validated | No declared support; use the current host |
 | `1.2.0` | APIs 1.0, 1.1, and 1.2 | Live-validated | Live-validated | No declared support; use the current host |
 | `1.2.1` | APIs 1.0, 1.1, and 1.2 | Live-validated | Live-validated | No declared support; use the current host |
-| Current unreleased `api-1.3` development branch | APIs 1.0 through 1.3 | Existing API 1.0–1.2 paths retained; the build profile is retained, but build-locked API 1.3 capabilities such as custom tabs are unavailable | Exact profile retained; current regression pending | Live-validated |
+| `1.3.0` | APIs 1.0 through 1.3 | Existing API 1.0–1.2 paths retained; the build profile is retained, but build-locked API 1.3 capabilities such as custom tabs are unavailable | Live-validated, including Solid Uncapper 2.3 | Live-validated without Solid Uncapper |
 
 Existing client DLLs compiled for an earlier ERUI API do not need to be
 rebuilt for a host that retains that API; players update the single host DLL.
@@ -52,7 +52,7 @@ The three exact runtime identities are:
 | `2.7.2.0` | `F9118FEA2CFD8FA3901E8060BFADB1552CB2471771DED8A5B662C4E298FFB328` | `0x6AABF7E7` | `0x5DFD600` |
 
 The live-tested 2.7.2.0 / App 1.17.2 executable had a file size of 86,973,008
-bytes. The current development host exposing ERUI API 1.3 selected its exact
+bytes. The 1.3.0 release candidate exposing ERUI API 1.3 selected its exact
 profile, installed all required backends, completed the settings GFX at
 runtime, and successfully exercised 50 custom tabs with 1,000 rows (58
 logical tabs in total), controller and mouse navigation, Back, and menu
@@ -159,8 +159,9 @@ Input Bindings, and ColorPicker chains remained operational when Solid
 Uncapper was present, while the same entries followed their pristine paths
 when it was absent.
 
-Solid Uncapper has not yet been regression-tested with the 2.7.2.0 profile;
-no compatibility claim is made for that combination.
+Solid Uncapper has not yet been regression-tested with the 2.7.2.0 profile.
+Its 2.7.2.0-compatible update was not available during API 1.3 release
+preparation, so no compatibility claim is made for that combination.
 
 The same integration also accounts for Solid Uncapper's already-materialized
 Game Options row when selecting the root pagination plan. With default runtime

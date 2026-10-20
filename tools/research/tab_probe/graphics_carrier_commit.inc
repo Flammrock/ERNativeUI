@@ -202,4 +202,3 @@ PendingTransitionCommitResult commit_pending_transition(
             : "content-only carrier route committed");
     return PendingTransitionCommitResult::committed;
 }
-

@@ -29,8 +29,8 @@ client is the
 | How does this coexist with DLC text, modified GFX, and other DLLs? | [Layout and compatibility](#layout-and-compatibility) |
 | Where is the complete client? | [Buildable example](#buildable-example) |
 
-Use an SDK and host that explicitly expose ERUI API 1.3. Package-release
-versions and ERUI API versions are independent; see
+Title-screen text requires ERUI API 1.3, first shipped by ERNativeUI 1.3.0.
+Package-release versions and ERUI API versions are independent; see
 [Versioning](../versioning.md).
 
 ## Register a line

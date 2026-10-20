@@ -48,6 +48,8 @@ host requirement. For example:
 - the ERNativeUI 1.1.0 SDK builds an API 1.1 client, which requires host 1.1.0
   or a later compatible 1.x release; and
 - the ERNativeUI 1.2.0 SDK builds an API 1.2 client, which requires host 1.2.0
+  or a later compatible 1.x release; and
+- the ERNativeUI 1.3.0 SDK builds an API 1.3 client, which requires host 1.3.0
   or a later compatible 1.x release.
 
 Within one release major, newer hosts retain every earlier API from the same
@@ -63,10 +65,10 @@ package and does not contain the complete SDK.
 
 The headers selected at build time determine the exact ERUI API requested by
 the client. Features documented as API 1.3, including custom tabs and
-title-screen text, require an SDK that explicitly contains the API 1.3
-declarations. When intentionally targeting an older API, use the headers and
-documentation from that SDK's release tag and put its release version in your
-build configuration.
+title-screen text, require the ERNativeUI 1.3.0 SDK or a later compatible 1.x
+SDK retaining API 1.3. When intentionally targeting an older API, use the
+headers and documentation from that SDK's release tag and put its release
+version in your build configuration.
 
 ## 2. Extract the SDK
 
@@ -150,13 +152,16 @@ and C++17 requirement to your target. `target_link_libraries` is standard
 CMake spelling for consuming a target; here that target is header-only. No
 `.lib` is linked and no copy of the host is built into your DLL.
 
-The current walkthrough does not name a minimum package-release version,
-because that number is independent from ERUI API 1.3. Point CMake at an SDK
-that explicitly documents API 1.3 support. When publishing a mod, it is
-reasonable to add the first known compatible package release as the minimum,
-for example `find_package(ERNativeUI X.Y.Z CONFIG REQUIRED)`. That version is
-a package constraint, not a runtime API selector; avoid `EXACT` unless a
-reproducible build deliberately requires one precise SDK package.
+This walkthrough uses API 1.3, first packaged by ERNativeUI 1.3.0. A published
+mod can therefore state its minimum SDK explicitly:
+
+```cmake
+find_package(ERNativeUI 1.3.0 CONFIG REQUIRED)
+```
+
+That version is a package constraint, not a runtime API selector; avoid
+`EXACT` unless a reproducible build deliberately requires one precise SDK
+package.
 
 A lower `find_package` minimum does not ask a newer SDK to expose its older
 header. If a mod intentionally targets API 1.0, make CMake resolve the actual
