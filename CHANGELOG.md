@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.2.1...ERNativeUI-v1.3.0) (2026-10-20)
+
+
+### Features
+
+* publish ERUI API 1.3 ([#14](https://github.com/Flammrock/ERNativeUI/issues/14)) ([b6930ca](https://github.com/Flammrock/ERNativeUI/commit/b6930ca2af5d4b4a9fbcc83b962cb479832f5136))
+
 ## [1.2.1](https://github.com/Flammrock/ERNativeUI/compare/ERNativeUI-v1.2.0...ERNativeUI-v1.2.1) (2026-10-14)
 
 
