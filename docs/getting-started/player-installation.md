@@ -24,7 +24,8 @@ Choose one source:
   compact player package.
 - [GitHub Releases](https://github.com/Flammrock/ERNativeUI/releases/latest)
   provides `ERNativeUI-X.Y.Z-windows-x64.zip`, which also contains the SDK,
-  examples, tools, and a version-pinned link to the online documentation.
+  built and source examples, licenses, and a version-pinned link to the online
+  documentation.
 
 When using the GitHub package, the runtime files are inside its `bin`
 directory. Mod authors should keep the complete extracted SDK in a stable
@@ -73,7 +74,8 @@ Preserve every DLL already required by the player's setup. Do not install a
 private ERNativeUI host for each client mod: one canonical `ERNativeUI.dll`
 serves all compatible clients in the process.
 
-To try the complete demonstration, add this optional entry after the host:
+To try the broad settings and controls demonstration, add this optional entry
+after the host:
 
 ```toml
 "mod\\ERNativeUI\\examples\\TarnishedUIShowcase.dll"

@@ -9,101 +9,180 @@ One shared menu host. Multiple client mods. No overlay.
 
 [quote][b]ERNativeUI is primarily an SDK for mod authors.[/b]
 
-It lets a client mod add native menus, settings, dialogs, text input, color pickers and configurable input bindings without owning another competing set of Elden Ring UI hooks.
+It lets a client mod add custom System tabs, native settings, dialogs, title-screen text, text input, color pickers and configurable input bindings without owning another competing set of Elden Ring UI hooks.
 
 [b]Players install one canonical ERNativeUI.dll host.[/b] If a mod lists ERNativeUI as a requirement, download the host from this page's Files tab, install it once, and let every compatible client mod connect to that same copy.[/quote]
 
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img]
+[size=5][b]ERNATIVEUI 1.3.0 / ERUI API 1.3[/b] [sup][color=#d1242f][b][NEW][/b][/color][/sup][/size]
+
+API 1.3 adds native custom System tabs and title-screen status text for client mods.
+Existing clients built for APIs 1.0 through 1.2 remain compatible with the 1.3.0 host.[/center]
+
+[table][tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/custom-tabs.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1792527324-304737545.png[/img][/url]
+[size=4][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/custom-tabs.md][b]CUSTOM SYSTEM TABS[/b][/url] [sup][color=#d1242f][b][NEW][/b][/color][/sup][/size]
+[i]Multiple client mods can add tabs with independent titles, optional icons, content, ordering and overflow navigation.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/title-screen-text.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1792527330-85663634.png[/img][/url]
+[size=4][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/title-screen-text.md][b]TITLE-SCREEN TEXT[/b][/url] [sup][color=#d1242f][b][NEW][/b][/color][/sup][/size]
+[i]Mods can add short status or version lines to any title-screen corner using the native color or an explicit RGB color.[/i][/center]
+[/td]
+[/tr]
+[/table]
+
+[center][url=https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1792527314-1225596902.gif][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1792527314-1225596902.gif[/img][/url]
+[i]Custom-tab overflow navigation in motion.[/i][/center]
+
+[center][url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/whats-new/1.3.0.md][b]EXPLORE WHAT'S NEW IN 1.3.0[/b][/url] | [url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/migrations/1.2-to-1.3.md]MIGRATE FROM API 1.2[/url][/center]
 [center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711693-1080782593.png[/img][/center]
 [center][size=5][b]ONE NATIVE HOST, MULTIPLE CLIENT MODS[/b][/size][/center]
 
 ERNativeUI owns the process-wide native hooks and safely merges UI registered by independent client DLLs. Players get one consistent native experience; mod authors get a reusable public API instead of rediscovering and maintaining the same game internals in every project.
 
 [list]
-[*][b]Looks native[/b] - uses Elden Ring's own GFX controls, focus, help text, transitions, dialogs and Back navigation.
-[*][b]Works together[/b] - several client mods can contribute menus through one shared host DLL.
-[*][b]Built for mod authors[/b] - stable C11 binary ABI plus a friendly header-only C++17 wrapper.
-[*][b]Compiler friendly[/b] - no client import library and no STL, exception or allocator ownership shared across DLL boundaries.
-[*][b]Versioned for compatibility[/b] - compatible 1.x hosts retain the earlier published 1.x API contracts used by existing clients.
-[*][b]Game-update conscious[/b] - signatures and object boundaries are validated before native hooks are installed.
-[*][b]Open and reproducible[/b] - source, tests, examples, GFX tooling and reverse-engineering notes are public.
+[*][b]Looks native[/b] - uses Elden Ring's own GFX controls, focus, help text, transitions, dialogs and Back navigation.[/*]
+[*][b]Works together[/b] - several client mods can contribute menus through one shared host DLL.[/*]
+[*][b]Built for mod authors[/b] - stable C11 binary ABI plus a friendly header-only C++17 wrapper.[/*]
+[*][b]Compiler friendly[/b] - no client import library and no STL, exception or allocator ownership shared across DLL boundaries.[/*]
+[*][b]Versioned for compatibility[/b] - compatible 1.x hosts retain the earlier published 1.x API contracts used by existing clients.[/*]
+[*][b]Game-update conscious[/b] - signatures and object boundaries are validated before native hooks are installed.[/*]
+[*][b]Open and reproducible[/b] - source, tests, examples, GFX tooling and reverse-engineering notes are public.[/*]
 [/list]
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]SHOWCASE[/b][/size][/center]
+[table][tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/README.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711381-1678734545.png[/img][/url]
+[i]Settings from multiple client mods, merged into Game Options.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/native-dialogs.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788124882-1725649064.png[/img][/url]
+[i]A localizable client message using Elden Ring's native dialog.[/i][/center]
+[/td]
+[/tr]
+[tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/text-input.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711464-1865244305.png[/img][/url]
+[i]Native text entry with placeholders, confirmed-value callbacks and persisted values.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/color-picker.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711504-820309910.png[/img][/url]
+[i]Preset palettes and Elden Ring's custom RGB color editor.[/i][/center]
+[/td]
+[/tr]
+[tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/menus-and-pages.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788124872-81427331.png[/img][/url]
+[i]Automatic pagination, native navigation and per-page titles.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/popup-choice.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788124870-152191361.png[/img][/url]
+[i]Native selection lists for settings with several named choices.[/i][/center]
+[/td]
+[/tr]
+[tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/input-bindings.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711613-1854610592.png[/img][/url]
+[i]Client-defined controller actions in Button Settings.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/input-bindings.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711651-997659594.png[/img][/url]
+[i]Native keyboard and mouse assignment and remapping.[/i][/center]
+[/td]
+[/tr]
+[/table]
 
-[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711381-1678734545.png[/img]
-[i]Settings from multiple client mods, merged into Elden Ring's native Game Options page.[/i][/center]
+[center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/native-dialogs.md][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711562-900853344.png[/img][/url]
+[i]Modal messages with configurable buttons and placement.[/i][/center]
 
 [center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
-[center][size=5][b]FEATURES[/b][/size][/center]
+[center][size=5][b]SUPPORTED CONTROLS[/b][/size]
 
-[b]Native controls[/b]
-[list]
-[*]Button and nested Submenu
-[*]Toggle and bounded byte Slider
-[*]Numeric Slider with negative or decimal values, configurable steps, prefixes and suffixes
-[*]Custom Slider with arbitrary per-position labels
-[*]Inline Choice and native Popup Choice list
-[*]TextInput with placeholder, confirmed-value callbacks and configurable length
-[*]ColorPicker with native palette and custom RGB editor
-[/list]
+Every control below has a focused guide with a minimal example, complete options, screenshots and links to its native implementation research.[/center]
+[table][tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/button.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/button/button_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/button.md][b]BUTTON[/b][/url]
+[i]Trigger a client-mod action.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/submenu.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/submenu/submenu_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/submenu.md][b]SUBMENU[/b][/url]
+[i]Organize settings in native child pages.[/i][/center]
+[/td]
+[/tr]
+[tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/toggle.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/toggle/toggle_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/toggle.md][b]TOGGLE[/b][/url]
+[i]Expose a native on/off setting.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/slider.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/slider/slider_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/slider.md][b]SLIDER[/b][/url]
+[i]Adjust a bounded unsigned-byte value.[/i][/center]
+[/td]
+[/tr]
+[tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/numeric-slider.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/numeric-slider/numeric-slider_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/numeric-slider.md][b]NUMERIC SLIDER[/b][/url]
+[i]Adjust signed or decimal values with units.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/custom-slider.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/custom-slider/custom-slider_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/custom-slider.md][b]CUSTOM SLIDER[/b][/url]
+[i]Slide through arbitrary client-defined labels.[/i][/center]
+[/td]
+[/tr]
+[tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/inline-choice.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/inline-choice/inline-choice_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/inline-choice.md][b]INLINE CHOICE[/b][/url]
+[i]Cycle through named options in place.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/popup-choice.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/popup-choice/popup-choice_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/popup-choice.md][b]POPUP CHOICE[/b][/url]
+[i]Select an option from a native list.[/i][/center]
+[/td]
+[/tr]
+[tr][td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/text-input.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/text-input/text-input_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/text-input.md][b]TEXTINPUT[/b][/url]
+[i]Edit text with a placeholder and configurable limit.[/i][/center]
+[/td]
+[td][center][url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/color-picker.md][img]https://raw.githubusercontent.com/Flammrock/ERNativeUI/ERNativeUI-v1.3.0/docs/assets/images/controls/color-picker/color-picker_control.png[/img][/url]
+[url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/docs/guides/controls/color-picker.md][b]COLORPICKER[/b][/url]
+[i]Choose a color with native palette and RGB editors.[/i][/center]
+[/td]
+[/tr]
+[/table]
+
+[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
+[center][size=5][b]MORE THAN CONTROLS[/b][/size][/center]
 
 [b]Menus and pages[/b]
 [list]
-[*]Add rows to supported built-in Configuration pages: Game Options, Camera Options, Display, Sound, Network, Keyboard/Mouse and Graphics
-[*]Create client-owned submenus
-[*]Automatic capacity detection and pagination
-[*]Native Next, Previous and Back behavior
-[*]Automatic page numbering and customizable provider-submenu titles
+[*]Add rows to supported built-in Configuration pages: Game Options, Camera Options, Display, Sound, Network, Keyboard/Mouse and Graphics[/*]
+[*]Give client mods their own top-level System tabs with independent titles, optional custom icons and ordinary paginated content[/*]
+[*]Merge tabs registered by multiple mods, apply optional player ordering and keep overflow reachable through native controller and mouse navigation[/*]
+[*]Create client-owned submenus[/*]
+[*]Automatic capacity detection and pagination[/*]
+[*]Native Next, Previous and Back behavior[/*]
+[*]Automatic page numbering and customizable provider-submenu titles[/*]
+[/list]
+
+[b]Title-screen text[/b]
+[list]
+[*]Add short version, status or compatibility lines to any of the four title-screen corners[/*]
+[*]Use Elden Ring's native text color or an explicit opaque RGB color[/*]
+[*]Adapt placement to the validated live title layout and preserve compatible text already added by other mods[/*]
+[*]Requires the default-on runtime GFX completion; disabling runtime patching also disables this capability[/*]
 [/list]
 
 [b]Dialogs, localization and configuration[/b]
 [list]
-[*]Native modal alerts with dismiss-only, one-button or two-button layouts
-[*]Bottom or centered dialog placement
-[*]Runtime detection of Elden Ring's selected Steam language, with an optional host-wide locale override
-[*]Localized ERNativeUI navigation labels with an English fallback
-[*]Provider-owned INI storage and a public input-assignment codec
+[*]Native modal alerts with dismiss-only, one-button or two-button layouts[/*]
+[*]Bottom or centered dialog placement[/*]
+[*]Runtime detection of Elden Ring's selected Steam language, with an optional host-wide locale override[/*]
+[*]Localized ERNativeUI navigation labels with an English fallback[/*]
+[*]Provider-owned INI storage and a public input-assignment codec[/*]
 [/list]
 
 [b]Player-configurable input bindings[/b]
 [list]
-[*]Register controller, keyboard and mouse actions
-[*]Show those actions in Elden Ring's native Button Settings and Key Bindings screens
-[*]Receive callbacks when the player activates an action
-[*]Observe assignment and Clear changes so client mods can persist them
+[*]Register controller, keyboard and mouse actions[/*]
+[*]Show those actions in Elden Ring's native Button Settings and Key Bindings screens[/*]
+[*]Receive callbacks when the player activates an action[/*]
+[*]Observe assignment and Clear changes so client mods can persist them[/*]
 [/list]
-
-[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
-[center][size=5][b]NATIVE CONTROLS IN ACTION[/b][/size]
-
-[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711464-1865244305.png[/img]
-[i]Native text entry, including placeholders and confirmed client-owned values.[/i]
-
-[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711504-820309910.png[/img]
-[i]Elden Ring's native color palette opened from a client-mod setting.[/i]
-
-[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711562-900853344.png[/img]
-[i]A native modal dialog with configurable buttons and placement.[/i][/center]
-
-[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
-[center][size=5][b]NATIVE INPUT BINDINGS[/b][/size][/center]
-
-Client mods can define named actions instead of hard-coding keys. ERNativeUI listens through Elden Ring's input flow, displays assignments in the correct native settings screen, and reports remapping changes back to the client.
-
-[center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711613-1854610592.png[/img]
-[i]Client-defined actions integrated into Button Settings.[/i]
-
-[img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711651-997659594.png[/img]
-[i]The same system supports native keyboard and mouse assignment.[/i][/center]
 
 [center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711693-1080782593.png[/img][/center]
 [center][size=5][b]FOR PLAYERS: INSTALL THE SHARED HOST ONCE[/b][/size][/center]
 
 [b]Requirements[/b]
 [list]
-[*]Elden Ring for Windows x64
-[*]The Steam release of Elden Ring
-[*]Mod Engine 2 or another compatible DLL loader
-[*]Offline play with Easy Anti-Cheat disabled
-[*]An ERNativeUI release that explicitly supports the installed Elden Ring executable
+[*]Elden Ring for Windows x64[/*]
+[*]The Steam release of Elden Ring[/*]
+[*]Mod Engine 2 or another compatible DLL loader[/*]
+[*]Offline play with Easy Anti-Cheat disabled[/*]
+[*]An ERNativeUI release that explicitly supports the installed Elden Ring executable[/*]
 [/list]
 
 [b]1. Download the current file from this page's Files tab.[/b]
@@ -114,8 +193,8 @@ Client mods can define named actions instead of hard-coding keys. ERNativeUI lis
 [b]3. Add the host before ordinary ERNativeUI client mods in your existing external_dlls list:[/b]
 [code][modengine]
 external_dlls = [
-    "mod\\ERNativeUI\\ERNativeUI.dll",
-    "mod\\SomeClientMod\\SomeClientMod.dll"
+    "mod\\ERNativeUI\\ERNativeUI.dll",
+    "mod\\SomeClientMod\\SomeClientMod.dll"
 ][/code]
 
 [b]4. Start Elden Ring through Mod Engine 2.[/b]
@@ -124,21 +203,23 @@ Only one copy of ERNativeUI.dll should be loaded. The example DLLs included with
 
 By default, ERNativeUI completes supported settings GFX in memory while Elden Ring loads it, expanding ordinary settings pages and supplying matching TextInput/ColorPicker presentation without loose ERNativeUI GFX files. Structurally compatible GFX supplied by other mods remains supported; unrecognized layouts are kept unchanged rather than modified speculatively. Players can set [font=Courier New]EnableRuntimePatching = 0[/font] in ERNativeUI.ini's GFX section and restart to leave every effective GFX file untouched; custom tabs and functional widget fallbacks remain available, ERNativeUI adds no rows or presentation, and API 1.3 title-screen text is disabled. Compatible structures already authored into the effective movie remain available.
 
-[font=Courier New]MinimumTabSlots = 8[/font] keeps the vanilla System strip. With runtime GFX patching enabled, players may request 8, 9 or 10 physical slots; ten is Elden Ring's hard native ceiling and there is no MaximumTabSlots override. This is separate from logical custom tabs: additional registered tabs remain reachable through ERNativeUI's shifting [font=Courier New]...[/font] viewport. Restart after changing the value.
+[font=Courier New]MinimumTabSlots = 8[/font] requests the vanilla minimum and never reduces a compatible movie that already contains more slots. With runtime GFX patching enabled, players may request 8, 9 or 10 physical slots; ten is Elden Ring's hard native ceiling and there is no MaximumTabSlots override. This is separate from logical custom tabs: additional registered tabs remain reachable through ERNativeUI's shifting [font=Courier New]...[/font] viewport. Restart after changing the value.
 
 [url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/player-installation.md][b]READ THE COMPLETE PLAYER INSTALLATION GUIDE[/b][/url]
 
 [center][img]https://staticdelivery.nexusmods.com/mods/4333/images/10767/10767-1788711733-1600560216.png[/img][/center]
 [center][size=5][b]FOR MOD AUTHORS: BUILD NATIVE UI, NOT ANOTHER OVERLAY[/b][/size][/center]
 
-The complete GitHub Windows package contains the host, public headers, CMake package, buildable examples, tools and documentation.
+The complete GitHub Windows package contains the host, public headers, CMake package, built and source examples, licenses and a version-pinned documentation link.
 
 [list]
-[*][b]C projects:[/b] include erui.h for the strict C11-compatible ABI.
-[*][b]C++ projects:[/b] include ERNativeUI.hpp for the header-only C++17 wrapper. Keep erui.h beside it when copying the headers because the wrapper includes it internally.
-[*][b]No import library:[/b] client mods negotiate the versioned API table from the host at runtime.
-[*][b]One dependency for players:[/b] declare ERNativeUI as a requirement instead of bundling a private or renamed host copy.
+[*][b]C projects:[/b] include erui.h for the strict C11-compatible ABI.[/*]
+[*][b]C++ projects:[/b] include ERNativeUI.hpp for the header-only C++17 wrapper. Keep erui.h beside it when copying the headers because the wrapper includes it internally.[/*]
+[*][b]No import library:[/b] client mods negotiate the versioned API table from the host at runtime.[/*]
+[*][b]One dependency for players:[/b] declare ERNativeUI as a requirement instead of bundling a private or renamed host copy.[/*]
 [/list]
+
+[b]New focused API 1.3 examples:[/b] [url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/examples/title_screen_text/README.md]Title-Screen Text[/url] demonstrates all four corners and colors. [url=https://github.com/Flammrock/ERNativeUI/blob/ERNativeUI-v1.3.0/examples/custom_tabs_stress/README.md]Custom Tabs Stress[/url] is an intentionally heavy 50-tab integration and performance test, not a template for an ordinary mod.
 
 [center][url=https://github.com/Flammrock/ERNativeUI][size=4][b]OPEN ERNATIVEUI ON GITHUB[/b][/size][/url]
 [url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/getting-started/first-mod.md]BUILD "HELLO, TARNISHED!"[/url] | [url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/README.md]READ THE DOCUMENTATION[/url] | [url=https://github.com/Flammrock/ERNativeUI/tree/main/examples]BROWSE EXAMPLES[/url][/center]
@@ -147,12 +228,13 @@ The complete GitHub Windows package contains the host, public headers, CMake pac
 [center][size=5][b]COMPATIBILITY AND SUPPORT[/b][/size][/center]
 
 [list]
-[*]Use a release that names support for your installed Elden Ring executable after every game update.
-[*]Mod Engine 2 is the primary supported loader.
-[*]Solid Uncapper 2.3 coexistence is verified on Elden Ring 2.7.0.0 and 2.7.1.0 for the exact matrix and scope documented on GitHub; load Solid Uncapper first and re-test after either mod or the game updates.
-[*]Seamless Co-op 2.0.1 was live-tested with the Elden Ring 2.7.0.0 reference executable; no incompatibility was observed for that exact combination.
-[*]Shadow of the Erdtree title-screen layout and adaptive spacing were live-tested on Elden Ring 2.7.1.0 with the DLC both absent and present; see the GitHub compatibility matrix for the exact scope.
-[*]Logging is disabled by default and can be enabled in ERNativeUI.ini while troubleshooting.
+[*]Use a release that names support for your installed Elden Ring executable after every game update.[/*]
+[*]Mod Engine 2 is the primary supported loader.[/*]
+[*]ERNativeUI 1.3.0's API 1.3 paths were live-validated on Elden Ring executables 2.7.1.0 and 2.7.2.0. The retained 2.7.0.0 profile supports API 1.0 through 1.2 paths, but build-locked API 1.3 capabilities such as custom tabs are unavailable there.[/*]
+[*]Solid Uncapper 2.3 coexistence is verified on Elden Ring 2.7.0.0 and 2.7.1.0 for the exact matrix and scope documented on GitHub; load Solid Uncapper first. It has not been regression-tested with ERNativeUI on 2.7.2.0.[/*]
+[*]Seamless Co-op 2.0.1 was live-tested with the Elden Ring 2.7.0.0 reference executable; no incompatibility was observed for that exact combination.[/*]
+[*]Shadow of the Erdtree title-screen layout and adaptive spacing were live-tested on Elden Ring 2.7.1.0 with the DLC both absent and present; see the GitHub compatibility matrix for the exact scope.[/*]
+[*]Logging is disabled by default and can be enabled in ERNativeUI.ini while troubleshooting.[/*]
 [/list]
 
 [url=https://github.com/Flammrock/ERNativeUI/blob/main/docs/COMPATIBILITY.md]CHECK THE CURRENT COMPATIBILITY MATRIX[/url]

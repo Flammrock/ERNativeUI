@@ -4,6 +4,31 @@ This is the documentation home for players, mod authors, contributors, and
 researchers. If you are new to ERNativeUI, start with the path that matches
 what you want to do.
 
+## <img src="assets/images/badges/new.svg" alt="[NEW]" height="22"> What's new in ERNativeUI 1.3.0
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="guides/custom-tabs.md"><img src="assets/images/menus/custom-tabs-navigation.gif" alt="A custom System tab strip shifting through many client-provided tabs"></a><br>
+      <strong><a href="guides/custom-tabs.md">Custom System tabs</a></strong><br>
+      <sub>Multiple client mods can register native tabs with custom icons and independent content.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="guides/title-screen-text.md"><img src="assets/images/title-screen/title-screen-corners.png" alt="ERNativeUI text displayed in all four title-screen corners"></a><br>
+      <strong><a href="guides/title-screen-text.md">Title-screen text</a></strong><br>
+      <sub>Place short colored lines in any title-screen corner while respecting the live layout.</sub>
+    </td>
+  </tr>
+</table>
+
+The release also adds runtime GFX completion, including a configurable System
+tab strip with eight to ten physical slots, support for Elden Ring executable
+2.7.2.0, and focused new examples for both headline features.
+
+[Open the visual 1.3.0 showcase](whats-new/1.3.0.md) ·
+[Migrate from API 1.2](migrations/1.2-to-1.3.md) ·
+[Browse the What's New archive](whats-new/README.md)
+
 ## I want to install ERNativeUI
 
 Follow the [player installation guide](getting-started/player-installation.md)

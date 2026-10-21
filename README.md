@@ -10,6 +10,7 @@
   <a href="https://github.com/Flammrock/ERNativeUI/releases/latest">Download</a>
   · <a href="https://www.nexusmods.com/eldenring/mods/10767">Nexus Mods</a>
   · <a href="docs/README.md">Documentation</a>
+  · <a href="docs/whats-new/1.3.0.md">What's new in 1.3</a>
   · <a href="docs/getting-started/first-mod.md">Build your first mod</a>
   · <a href="examples/README.md">Examples</a>
 </p>
@@ -44,6 +45,33 @@ mouse input, and Back stack.
   validated instead of assuming that an old address is still correct.
 - **Open and reproducible:** the implementation, API, tests, GFX tooling, and
   reverse-engineering research are available to the community.
+
+## <img src="docs/assets/images/badges/new.svg" alt="[NEW]" height="22"> What's new in ERNativeUI 1.3.0
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/guides/custom-tabs.md"><img src="docs/assets/images/menus/custom-tabs-navigation.gif" alt="A custom System tab strip shifting through many client-provided tabs"></a><br>
+      <strong><a href="docs/guides/custom-tabs.md">Custom System tabs</a></strong><br>
+      <sub>Multiple client mods can add native tabs with their own titles, icons, content, ordering, and overflow navigation.</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/guides/title-screen-text.md"><img src="docs/assets/images/title-screen/title-screen-corners.png" alt="ERNativeUI text displayed in all four title-screen corners"></a><br>
+      <strong><a href="docs/guides/title-screen-text.md">Title-screen text</a></strong><br>
+      <sub>Add short version, status, or compatibility lines to any corner with the native color or an explicit RGB color.</sub>
+    </td>
+  </tr>
+</table>
+
+ERNativeUI 1.3.0 also introduces runtime completion for supported settings GFX,
+including a configurable System tab strip with eight to ten physical slots,
+and support for Elden Ring 1.17.2 / executable 2.7.2.0. New focused examples cover
+[custom-tab stress testing](examples/custom_tabs_stress/README.md) and
+[title-screen text](examples/title_screen_text/README.md).
+
+[Explore everything new in ERNativeUI 1.3.0](docs/whats-new/1.3.0.md) ·
+[Migrate from API 1.2](docs/migrations/1.2-to-1.3.md) ·
+[Browse the What's New archive](docs/whats-new/README.md)
 
 ## Showcase
 
@@ -171,11 +199,12 @@ options, screenshots, and links to its native implementation research.
 ## More than controls
 
 - Give a mod its own top-level Configuration tab with a localized title and
-  custom RGBA8 icon. The physical strip defaults to eight slots and can be
-  configured up to Elden Ring's hard ceiling of ten, while overflow keeps up
-  to 1,024 logical custom tabs reachable.
+  custom RGBA8 icon. The physical strip defaults to eight slots and, with
+  runtime GFX patching enabled, can be configured up to Elden Ring's hard
+  ceiling of ten, while overflow keeps up to 1,024 logical custom tabs
+  reachable.
   [Learn about custom tabs](docs/guides/custom-tabs.md).
-- Add copied version or status lines to any title-screen corner, using Elden
+- Add short version or status lines to any title-screen corner, using Elden
   Ring's native text color or an explicit RGB color.
   [Learn about title-screen text](docs/guides/title-screen-text.md), then see
   the [buildable example](examples/title_screen_text/README.md).
@@ -219,7 +248,8 @@ Install one canonical host and load it before ordinary ERNativeUI client mods.
 ### Mod authors
 
 The GitHub Windows package contains the host, public headers, CMake package,
-examples, tools, and a link to the documentation for that exact release tag.
+built and source examples, licenses, and a link to the documentation for that
+exact release tag.
 Client mods need only `erui.h`, or `erui.h` plus `ERNativeUI.hpp`; they do not
 link an ERNativeUI import library.
 
@@ -240,6 +270,9 @@ not part of the 1.3.0 tested compatibility matrix.
 - Load exactly one `ERNativeUI.dll` for all client mods.
 - Use a release that names the installed Elden Ring executable after every
   game update.
+- ERNativeUI 1.3.0's API 1.3 paths were live-validated on Elden Ring
+  executables 2.7.1.0 and 2.7.2.0. Its retained 2.7.0.0 profile has the reduced
+  API 1.0 through 1.2 scope documented in the compatibility matrix.
 - Solid Uncapper coexistence has a documented load order and tested matrix.
 - Seamless Co-op 2.0.1 was live-tested with the Elden Ring 2.7.0.0 reference
   executable, with no incompatibility observed for that exact combination.
@@ -261,6 +294,7 @@ reports.
 | I want to... | Start here |
 |---|---|
 | Install ERNativeUI as a player | [Player installation](docs/getting-started/player-installation.md) |
+| Discover the latest features | [What's new in 1.3.0](docs/whats-new/1.3.0.md) · [Archive](docs/whats-new/README.md) · [API 1.3 migration](docs/migrations/1.2-to-1.3.md) |
 | Create my first client mod | [Getting started](docs/getting-started/README.md) |
 | Add menus, controls, dialogs, bindings, or localization | [Mod-author guides](docs/guides/README.md) |
 | Check supported features and exact API contracts | [Feature matrix](docs/features.md) · [API reference](docs/reference/README.md) |

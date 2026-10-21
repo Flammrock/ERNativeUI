@@ -156,6 +156,6 @@ client/new-host contract are in
 |---|---|
 | Build a reusable client-mod skeleton | [Client-mod template](../examples/template/README.md) |
 | Learn connection, language fallback, and one alert | [Localized Greeting](../examples/localized_greeting/README.md) |
-| Exercise the complete current feature set in game | [Tarnished UI Showcase](../examples/tarnished_ui_showcase/README.md) |
+| Exercise the broad API 1.0–1.2 feature set in game | [Tarnished UI Showcase](../examples/tarnished_ui_showcase/README.md) |
 
 Return to the [documentation home](README.md).
