@@ -2,6 +2,31 @@ cmake_minimum_required(VERSION 3.28)
 
 project(ERNativeUI VERSION 1.3.0 LANGUAGES C CXX) # x-release-please-version
 
+# A development-release workflow may provide a one-configure identity (for
+# example, api-1.4-alpha.2+g0123456789ab) without changing the stable package
+# version or teaching the public ABI about prerelease naming. Consume and clear
+# the cache input so a later ordinary configure of the same build tree returns
+# to PROJECT_VERSION instead of silently retaining an alpha identity.
+set(_ernativeui_effective_build_identity "${PROJECT_VERSION}")
+if(DEFINED ERNATIVEUI_BUILD_IDENTITY AND
+        NOT ERNATIVEUI_BUILD_IDENTITY STREQUAL "")
+    set(_ernativeui_effective_build_identity "${ERNATIVEUI_BUILD_IDENTITY}")
+endif()
+unset(ERNATIVEUI_BUILD_IDENTITY CACHE)
+set(ERNATIVEUI_EFFECTIVE_BUILD_IDENTITY
+    "${_ernativeui_effective_build_identity}" CACHE INTERNAL
+    "Effective runtime build identity for packaging checks" FORCE)
+string(LENGTH "${_ernativeui_effective_build_identity}"
+    _ernativeui_build_identity_length)
+if(_ernativeui_build_identity_length GREATER 96 OR
+        NOT _ernativeui_effective_build_identity MATCHES
+        "^[0-9A-Za-z][0-9A-Za-z._+-]*$")
+    message(FATAL_ERROR
+        "ERNATIVEUI_BUILD_IDENTITY must be 1-96 portable identity characters "
+        "([0-9A-Za-z._+-]); got "
+        "'${_ernativeui_effective_build_identity}'.")
+endif()
+
 set(_ernativeui_msvc_abi OFF)
 if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
     set(_ernativeui_msvc_abi ON)
@@ -203,7 +228,7 @@ if(ERNATIVEUI_BUILD_GFX_PATCHER)
     target_link_libraries(ERNativeUIGfxPatcher PRIVATE ERNativeUI::GfxPatch)
     target_compile_features(ERNativeUIGfxPatcher PRIVATE cxx_std_20)
     target_compile_definitions(ERNativeUIGfxPatcher PRIVATE
-        ER_NATIVE_UI_GFX_PATCHER_VERSION="${PROJECT_VERSION}"
+        ER_NATIVE_UI_GFX_PATCHER_VERSION="${_ernativeui_effective_build_identity}"
         WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
     set_target_properties(ERNativeUIGfxPatcher PROPERTIES PREFIX "")
     if(_ernativeui_msvc_abi)
@@ -460,7 +485,7 @@ if(_ernativeui_need_native_core)
         minhook)
     target_compile_features(ERNativeUICore PUBLIC cxx_std_20)
     target_compile_definitions(ERNativeUICore PRIVATE
-        ER_NATIVE_UI_BUILD_VERSION="${PROJECT_VERSION}"
+        ER_NATIVE_UI_BUILD_VERSION="${_ernativeui_effective_build_identity}"
         ER_NATIVE_UI_CUSTOM_TABS_BACKEND=1
         ER_NATIVE_UI_PRODUCTION_TABS=1
         WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
@@ -489,7 +514,7 @@ if(_ernativeui_need_native_core)
         target_compile_features(ERNativeUIHost PRIVATE cxx_std_20)
         target_compile_definitions(ERNativeUIHost PRIVATE
             ERUI_HOST_EXPORTS
-            ER_NATIVE_UI_BUILD_VERSION="${PROJECT_VERSION}"
+            ER_NATIVE_UI_BUILD_VERSION="${_ernativeui_effective_build_identity}"
             WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
         if(ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE)
             target_compile_definitions(ERNativeUIHost PRIVATE

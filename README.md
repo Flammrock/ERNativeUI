@@ -11,6 +11,7 @@
   · <a href="https://www.nexusmods.com/eldenring/mods/10767">Nexus Mods</a>
   · <a href="docs/README.md">Documentation</a>
   · <a href="docs/whats-new/1.3.0.md">What's new in 1.3</a>
+  · <a href="docs/roadmap/README.md">Development roadmap</a>
   · <a href="docs/getting-started/first-mod.md">Build your first mod</a>
   · <a href="examples/README.md">Examples</a>
 </p>
@@ -295,6 +296,7 @@ reports.
 |---|---|
 | Install ERNativeUI as a player | [Player installation](docs/getting-started/player-installation.md) |
 | Discover the latest features | [What's new in 1.3.0](docs/whats-new/1.3.0.md) · [Archive](docs/whats-new/README.md) · [API 1.3 migration](docs/migrations/1.2-to-1.3.md) |
+| Follow unreleased API development | [Development roadmap](docs/roadmap/README.md) · [API 1.4 plan](docs/roadmap/api-1.4.md) · [Alpha policy](docs/contributing/alpha-builds.md) |
 | Create my first client mod | [Getting started](docs/getting-started/README.md) |
 | Add menus, controls, dialogs, bindings, or localization | [Mod-author guides](docs/guides/README.md) |
 | Check supported features and exact API contracts | [Feature matrix](docs/features.md) · [API reference](docs/reference/README.md) |

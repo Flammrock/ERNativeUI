@@ -21,6 +21,52 @@ Within a host release-major line, compatibility is cumulative: release
 line. Removing one requires a host major-version change. A new host major may
 drop earlier-major APIs unless its release notes explicitly retain them.
 
+## Stable releases and API alphas
+
+This guide describes stable releases from `main`. Unreleased API development
+uses a separate integration branch and may publish clearly marked GitHub
+prereleases for opt-in testing. GitHub marks those releases **Pre-release** and
+keeps the current stable release marked **Latest**. The permanent
+`/releases/latest` link therefore continues to serve stable users.
+
+An alpha must not update the stable manifest, changelog, project version,
+stable release tags, or Nexus file. It is produced by the manual **Publish API
+alpha** workflow, not by Release Please. The workflow is selected explicitly
+from an `api-1.x` branch, calculates its own next alpha ordinal, rebuilds and
+tests that exact branch HEAD, and publishes a runtime-only package with exact
+commit provenance.
+
+Read the [alpha build policy](alpha-builds.md) for branch, provenance,
+automatic numbering, generated notes, deletion, testing, security, and
+promotion rules. The active public work is listed in the
+[development roadmap](../roadmap/README.md).
+
+### Alpha pipeline at a glance
+
+```text
+Reviewed Conventional Commits land on api-1.x
+                |
+                v
+Windows x64 CI passes and the milestone is live-tested
+                |
+                v
+Actions -> Publish API alpha -> Run workflow
+Select api-1.x and confirm publication
+                |
+                v
+Workflow derives the next alpha.N from existing prereleases
+Build -> test -> package -> checksums -> generated notes
+                |
+                v
+GitHub prerelease ERNativeUI-api-1.x-alpha.N
+Stable ERNativeUI-vX.Y.Z remains Latest
+```
+
+Publication is never triggered merely by pushing or merging to `api-1.x`.
+Deleting the newest test prerelease makes that ordinal reusable; the next run
+also removes the exact orphan tag if GitHub retained it. Deleting an older
+prerelease while a higher ordinal remains does not renumber published history.
+
 ## Release pipeline at a glance
 
 ```text
@@ -201,11 +247,18 @@ Under **Settings -> Actions -> General**, give workflows read and write
 permission and allow GitHub Actions to create and approve pull requests.
 Protect `main` with the `Windows x64` CI job as a required check.
 
-The workflow uses the Actions secret `RELEASE_PLEASE_TOKEN` when present and
-falls back to the repository `GITHUB_TOKEN`. A fine-grained personal access
-token or GitHub App token is recommended for `RELEASE_PLEASE_TOKEN`; give it
-access to this repository's Contents, Issues, and Pull requests with read/write
-permission.
+Protect API integration branches with a matching `api-*` ruleset that requires
+pull-request review and the same `Windows x64` check. The manual alpha workflow
+has narrowly scoped `contents: write` permission because it creates a tag and
+GitHub prerelease. GitHub executes the workflow definition from the branch
+chosen in the **Run workflow** dialog, so never dispatch it from an untrusted
+branch and review changes to alpha release infrastructure before merging them.
+
+The Release Please workflow uses the Actions secret `RELEASE_PLEASE_TOKEN`
+when present and falls back to the repository `GITHUB_TOKEN`. A fine-grained
+personal access token or GitHub App token is recommended for
+`RELEASE_PLEASE_TOKEN`; give it access to this repository's Contents, Issues,
+and Pull requests with read/write permission.
 
 GitHub generally does not start new workflows for events created by the
 default `GITHUB_TOKEN`. Without the separate token, Release Please can still
@@ -279,8 +332,9 @@ duplicate the repository's screenshot-heavy documentation tree.
 
 The script removes and recreates the complete `dist/release` directory on each
 run. Move any files you need to preserve before invoking it. Its `-Version`
-argument names the output; it does not rewrite or verify the CMake project
-version, so use the exact released version.
+argument does not rewrite the CMake project. It must match the configured
+stable build identity, and the installed DLL must contain that identity and no
+alpha identity; the script rejects a mismatched or stale build.
 
 ## 7. Create the Nexus package locally
 

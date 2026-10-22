@@ -15,6 +15,26 @@ $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $resolvedBuild = (Resolve-Path (Join-Path $projectRoot $BuildDirectory)).Path
 $releaseRoot = Join-Path $projectRoot 'dist\release'
 $installRoot = Join-Path $releaseRoot "ERNativeUI-$Version-windows-x64"
+$cachePath = Join-Path $resolvedBuild 'CMakeCache.txt'
+
+if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+    throw "The build directory has no CMakeCache.txt: $resolvedBuild"
+}
+$identityPrefix = 'ERNATIVEUI_EFFECTIVE_BUILD_IDENTITY:'
+$identityEntries = @(Get-Content -LiteralPath $cachePath | Where-Object {
+    $_.StartsWith($identityPrefix, [StringComparison]::Ordinal)
+})
+if ($identityEntries.Count -ne 1) {
+    throw "Expected one effective build identity in $cachePath. Reconfigure before packaging."
+}
+$identitySeparator = $identityEntries[0].IndexOf('=')
+if ($identitySeparator -lt 0) {
+    throw "Malformed effective build identity in $cachePath."
+}
+$configuredIdentity = $identityEntries[0].Substring($identitySeparator + 1)
+if ($configuredIdentity -cne $Version) {
+    throw "Stable package version '$Version' does not match configured build identity '$configuredIdentity'. Reconfigure without an alpha identity and rebuild."
+}
 
 if (Test-Path -LiteralPath $releaseRoot) {
     Remove-Item -LiteralPath $releaseRoot -Recurse -Force
@@ -24,6 +44,21 @@ New-Item -ItemType Directory -Path $releaseRoot | Out-Null
 cmake --install $resolvedBuild --config Release --prefix $installRoot
 if ($LASTEXITCODE -ne 0) {
     throw 'CMake installation failed.'
+}
+
+$installedDll = Join-Path $installRoot 'bin\ERNativeUI.dll'
+if (-not (Test-Path -LiteralPath $installedDll -PathType Leaf)) {
+    throw "The installed host DLL is missing: $installedDll"
+}
+$dllText = [Text.Encoding]::ASCII.GetString(
+    [IO.File]::ReadAllBytes($installedDll))
+if ($dllText.IndexOf($Version, [StringComparison]::Ordinal) -lt 0) {
+    throw "ERNativeUI.dll does not contain stable build identity '$Version'. Rebuild after configuring the stable identity."
+}
+if ([regex]::IsMatch(
+        $dllText,
+        'api-\d+\.\d+-alpha\.\d+\+g[0-9a-fA-F]{12}')) {
+    throw 'ERNativeUI.dll still contains an alpha build identity. Reconfigure and rebuild before stable packaging.'
 }
 
 # These were part of pre-runtime-transformation packages. Keep an explicit

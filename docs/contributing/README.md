@@ -21,6 +21,13 @@ Release operators should follow the verified [release procedure](releasing.md).
 That guide covers Release Please, the Windows GitHub package, and the separate
 local Nexus package.
 
+Unreleased API work is tracked in the [development roadmap](../roadmap/README.md).
+Contributors and opt-in testers working on the public `api-1.4` branch should
+also read the [alpha build policy](alpha-builds.md). Selected milestones are
+published manually as GitHub prereleases; they do not use the stable Release
+Please or Nexus publication path, and they never replace the stable **Latest**
+release.
+
 For native research contributions, begin with the
 [research methodology](../research/methodology.md). Public API behavior and
 compatibility claims should be backed by automated tests where possible and by

@@ -80,6 +80,19 @@ The public SDK has two header-only client surfaces: a friendly C++17 wrapper
 and a strict C ABI. Client mods discover the already-loaded host at runtime;
 they do not link an ERNativeUI import library.
 
+## I want to follow API development
+
+The [development roadmap](roadmap/README.md) records proposed work separately
+from shipped API contracts. The active [API 1.4 roadmap](roadmap/api-1.4.md)
+tracks reactive controls, nested Collapse controls, conditional content,
+dynamic pagination, and custom-tab visibility with explicit proof gates and
+progress states.
+
+Manually selected development milestones will follow the
+[alpha build policy](contributing/alpha-builds.md). Until a roadmap item is
+marked Released and appears in the feature matrix and public headers, client
+mods must not treat it as an available API.
+
 ## I want to understand or contribute to ERNativeUI
 
 Begin with [how ERNativeUI works](how-it-works.md), then consult the build,

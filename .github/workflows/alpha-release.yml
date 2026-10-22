@@ -1,0 +1,618 @@
+name: Publish API alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the selected api-* branch as its next alpha prerelease
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-api-alpha-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, validate, and publish alpha
+    if: ${{ inputs.publish == true }}
+    runs-on: windows-latest
+    steps:
+      - name: Resolve alpha identity
+        id: alpha
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            if (!context.ref.startsWith('refs/heads/')) {
+              core.setFailed(`Select an api-* branch, not ${context.ref}.`);
+              return;
+            }
+
+            const sourceBranch = context.ref.substring('refs/heads/'.length);
+            const branchMatch = /^api-(\d+\.\d+)$/.exec(sourceBranch);
+            if (!branchMatch) {
+              core.setFailed(
+                `Alpha publication is restricted to api-X.Y branches; selected ${sourceBranch}.`
+              );
+              return;
+            }
+
+            const apiTarget = branchMatch[1];
+            const escapedTarget = apiTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const alphaPattern = new RegExp(
+              `^ERNativeUI-api-${escapedTarget}-alpha\\.(\\d+)$`
+            );
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner, repo, per_page: 100 }
+            );
+            const publishedAlphas = releases
+              .filter((release) => release.prerelease && !release.draft)
+              .map((release) => {
+                const match = alphaPattern.exec(release.tag_name);
+                return match
+                  ? { release, ordinal: Number.parseInt(match[1], 10) }
+                  : null;
+              })
+              .filter(Boolean)
+              .sort((left, right) => left.ordinal - right.ordinal);
+
+            async function resolveTagCommit(tagName) {
+              let object;
+              try {
+                const response = await github.rest.git.getRef({
+                  owner,
+                  repo,
+                  ref: `tags/${tagName}`
+                });
+                object = response.data.object;
+              } catch (error) {
+                if (error.status === 404) {
+                  return null;
+                }
+                throw error;
+              }
+
+              for (let depth = 0; object.type === 'tag' && depth < 8; ++depth) {
+                const response = await github.rest.git.getTag({
+                  owner,
+                  repo,
+                  tag_sha: object.sha
+                });
+                object = response.data.object;
+              }
+              if (object.type !== 'commit') {
+                throw new Error(`${tagName} does not resolve to a commit.`);
+              }
+              return object.sha;
+            }
+
+            for (const alpha of publishedAlphas) {
+              const taggedCommit = await resolveTagCommit(alpha.release.tag_name);
+              if (!taggedCommit) {
+                throw new Error(
+                  `Published alpha ${alpha.release.tag_name} has no Git tag.`
+                );
+              }
+              if (taggedCommit.toLowerCase() === context.sha.toLowerCase()) {
+                core.setFailed(
+                  `${context.sha} is already published as ${alpha.release.tag_name}.`
+                );
+                return;
+              }
+            }
+
+            const previousAlpha = publishedAlphas.length > 0
+              ? publishedAlphas[publishedAlphas.length - 1]
+              : null;
+            const alphaOrdinal = previousAlpha ? previousAlpha.ordinal + 1 : 1;
+            const tagName = `ERNativeUI-api-${apiTarget}-alpha.${alphaOrdinal}`;
+
+            const collidingRelease = releases.find(
+              (release) => release.tag_name === tagName
+            );
+            if (collidingRelease) {
+              core.setFailed(
+                `${tagName} already has a GitHub release and will not be overwritten.`
+              );
+              return;
+            }
+
+            const latestStable = await github.rest.repos.getLatestRelease({ owner, repo });
+            if (latestStable.data.prerelease || latestStable.data.draft) {
+              throw new Error('GitHub returned a non-stable release from the latest endpoint.');
+            }
+
+            const baseTag = previousAlpha
+              ? previousAlpha.release.tag_name
+              : latestStable.data.tag_name;
+            const shortSha = context.sha.substring(0, 12);
+
+            core.setOutput('api_target', apiTarget);
+            core.setOutput('alpha_ordinal', String(alphaOrdinal));
+            core.setOutput('base_tag', baseTag);
+            core.setOutput('stable_tag', latestStable.data.tag_name);
+            core.setOutput('source_branch', sourceBranch);
+            core.setOutput('commit_sha', context.sha);
+            core.setOutput('short_sha', shortSha);
+            core.setOutput('tag_name', tagName);
+            core.setOutput(
+              'release_title',
+              `ERUI API ${apiTarget} Alpha ${alphaOrdinal} — incomplete`
+            );
+            core.setOutput(
+              'build_identity',
+              `api-${apiTarget}-alpha.${alphaOrdinal}+g${shortSha}`
+            );
+
+      - name: Check out exact selected commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ steps.alpha.outputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Verify checked-out commit
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          $expected = '${{ steps.alpha.outputs.commit_sha }}'
+          if ($actual -ne $expected) {
+              throw "Expected $expected, checked out $actual."
+          }
+
+      - name: Configure alpha build
+        shell: pwsh
+        run: >-
+          cmake --preset windows-release
+          '-DERNATIVEUI_BUILD_IDENTITY=${{ steps.alpha.outputs.build_identity }}'
+
+      - name: Build
+        run: cmake --build --preset windows-release
+
+      - name: Run full test suite
+        run: ctest --preset windows-release --no-tests=error
+
+      - name: Audit installation
+        run: >-
+          cmake --install build/preset-release --config Release
+          --prefix build/install-audit
+
+      - name: Configure installed-package C consumer
+        run: >-
+          cmake -S tests/package_c_consumer -B build/package-c-consumer -A x64
+          -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/install-audit
+
+      - name: Build installed-package C consumer
+        run: cmake --build build/package-c-consumer --config Release
+
+      - name: Run installed-package C consumer
+        run: ./build/package-c-consumer/Release/ERNativeUICPackageConsumer.exe
+
+      - name: Test alpha release-note generator
+        shell: pwsh
+        run: ./tools/tests/generate_alpha_release_notes_test.ps1
+
+      - name: Generate release notes and package provenance
+        shell: pwsh
+        env:
+          ALPHA_API_TARGET: ${{ steps.alpha.outputs.api_target }}
+          ALPHA_ORDINAL: ${{ steps.alpha.outputs.alpha_ordinal }}
+          ALPHA_COMMIT_SHA: ${{ steps.alpha.outputs.commit_sha }}
+          ALPHA_SOURCE_BRANCH: ${{ steps.alpha.outputs.source_branch }}
+          ALPHA_TAG: ${{ steps.alpha.outputs.tag_name }}
+          ALPHA_BASE_REF: ${{ steps.alpha.outputs.base_tag }}
+          ALPHA_REPOSITORY: ${{ github.repository }}
+          ALPHA_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          ./tools/generate_alpha_release_notes.ps1 `
+            -ApiTarget $env:ALPHA_API_TARGET `
+            -AlphaOrdinal $env:ALPHA_ORDINAL `
+            -CommitSha $env:ALPHA_COMMIT_SHA `
+            -SourceBranch $env:ALPHA_SOURCE_BRANCH `
+            -TagName $env:ALPHA_TAG `
+            -BaseRef $env:ALPHA_BASE_REF `
+            -Repository $env:ALPHA_REPOSITORY `
+            -WorkflowRunUrl $env:ALPHA_WORKFLOW_URL `
+            -BuildTimestampUtc $timestamp `
+            -OutputPath 'build/alpha/ALPHA.md'
+
+      - name: Create alpha package
+        shell: pwsh
+        env:
+          ALPHA_API_TARGET: ${{ steps.alpha.outputs.api_target }}
+          ALPHA_ORDINAL: ${{ steps.alpha.outputs.alpha_ordinal }}
+          ALPHA_COMMIT_SHA: ${{ steps.alpha.outputs.commit_sha }}
+          ALPHA_SOURCE_BRANCH: ${{ steps.alpha.outputs.source_branch }}
+          ALPHA_TAG: ${{ steps.alpha.outputs.tag_name }}
+          ALPHA_WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ./tools/package_alpha.ps1 `
+            -BuildDirectory 'build/preset-release' `
+            -ApiTarget $env:ALPHA_API_TARGET `
+            -AlphaOrdinal $env:ALPHA_ORDINAL `
+            -CommitSha $env:ALPHA_COMMIT_SHA `
+            -SourceBranch $env:ALPHA_SOURCE_BRANCH `
+            -TagName $env:ALPHA_TAG `
+            -WorkflowRunUrl $env:ALPHA_WORKFLOW_URL `
+            -ReleaseNotesPath 'build/alpha/ALPHA.md'
+
+      - name: Verify packaged archives and checksums
+        shell: pwsh
+        run: |
+          $alphaRoot = 'dist/alpha'
+          $archives = @(Get-ChildItem -LiteralPath $alphaRoot -Filter '*.zip' -File)
+          if ($archives.Count -eq 0) {
+              throw 'The alpha packager produced no ZIP archives.'
+          }
+
+          $checksumPath = Join-Path $alphaRoot 'SHA256SUMS.txt'
+          if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
+              throw 'The alpha packager did not produce SHA256SUMS.txt.'
+          }
+
+          $declared = @{}
+          foreach ($line in Get-Content -LiteralPath $checksumPath) {
+              if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
+                  throw "Malformed checksum line: $line"
+              }
+              if ($declared.ContainsKey($Matches[2])) {
+                  throw "Duplicate checksum entry: $($Matches[2])"
+              }
+              $declared[$Matches[2]] = $Matches[1].ToLowerInvariant()
+          }
+
+          foreach ($archive in $archives) {
+              if (-not $declared.ContainsKey($archive.Name)) {
+                  throw "Missing checksum for $($archive.Name)."
+              }
+              $actual = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($actual -ne $declared[$archive.Name]) {
+                  throw "Checksum mismatch for $($archive.Name)."
+              }
+          }
+          if ($declared.Count -ne $archives.Count) {
+              throw 'SHA256SUMS.txt contains an entry without a matching ZIP archive.'
+          }
+
+      - name: Upload reproducible workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.alpha.outputs.tag_name }}-g${{ steps.alpha.outputs.short_sha }}
+          path: |
+            dist/alpha/*.zip
+            dist/alpha/SHA256SUMS.txt
+            build/alpha/ALPHA.md
+          if-no-files-found: error
+
+      - name: Revalidate ordinal and reserve the exact release tag
+        id: reserve
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          API_TARGET: ${{ steps.alpha.outputs.api_target }}
+          ALPHA_ORDINAL: ${{ steps.alpha.outputs.alpha_ordinal }}
+          COMMIT_SHA: ${{ steps.alpha.outputs.commit_sha }}
+          TAG_NAME: ${{ steps.alpha.outputs.tag_name }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const apiTarget = process.env.API_TARGET;
+            const expectedOrdinal = Number.parseInt(process.env.ALPHA_ORDINAL, 10);
+            const commitSha = process.env.COMMIT_SHA.toLowerCase();
+            const tagName = process.env.TAG_NAME;
+            const escapedTarget = apiTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const alphaPattern = new RegExp(
+              `^ERNativeUI-api-${escapedTarget}-alpha\\.(\\d+)$`
+            );
+
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner, repo, per_page: 100 }
+            );
+            const publishedAlphas = releases
+              .filter((release) => release.prerelease && !release.draft)
+              .map((release) => {
+                const match = alphaPattern.exec(release.tag_name);
+                return match
+                  ? { release, ordinal: Number.parseInt(match[1], 10) }
+                  : null;
+              })
+              .filter(Boolean);
+            const currentMaximum = publishedAlphas.reduce(
+              (maximum, alpha) => Math.max(maximum, alpha.ordinal),
+              0
+            );
+            if (currentMaximum + 1 !== expectedOrdinal) {
+              core.setFailed(
+                `Alpha sequence changed during the build: expected next ordinal ` +
+                `${expectedOrdinal}, now ${currentMaximum + 1}. Run the workflow again.`
+              );
+              return;
+            }
+
+            async function resolveTagCommit(candidateTag) {
+              let object;
+              try {
+                const response = await github.rest.git.getRef({
+                  owner,
+                  repo,
+                  ref: `tags/${candidateTag}`
+                });
+                object = response.data.object;
+              } catch (error) {
+                if (error.status === 404) {
+                  return null;
+                }
+                throw error;
+              }
+              for (let depth = 0; object.type === 'tag' && depth < 8; ++depth) {
+                const response = await github.rest.git.getTag({
+                  owner,
+                  repo,
+                  tag_sha: object.sha
+                });
+                object = response.data.object;
+              }
+              if (object.type === 'tag') {
+                throw new Error(`${candidateTag} exceeds the annotated-tag depth limit.`);
+              }
+              if (object.type !== 'commit') {
+                throw new Error(
+                  `${candidateTag} resolves to unsupported object type ${object.type}.`
+                );
+              }
+              return object.sha.toLowerCase();
+            }
+
+            for (const alpha of publishedAlphas) {
+              const taggedCommit = await resolveTagCommit(alpha.release.tag_name);
+              if (!taggedCommit) {
+                throw new Error(
+                  `Published alpha ${alpha.release.tag_name} has no commit tag.`
+                );
+              }
+              if (taggedCommit === commitSha) {
+                core.setFailed(
+                  `${process.env.COMMIT_SHA} was published while this build was running.`
+                );
+                return;
+              }
+            }
+
+            const collidingRelease = releases.find(
+              (release) => release.tag_name === tagName
+            );
+            if (collidingRelease) {
+              core.setFailed(`${tagName} now has a release and will not be overwritten.`);
+              return;
+            }
+
+            const orphanCommit = await resolveTagCommit(tagName);
+            if (orphanCommit) {
+              core.notice(
+                `Deleting orphaned ${tagName}; its GitHub release was previously deleted.`
+              );
+              await github.rest.git.deleteRef({
+                owner,
+                repo,
+                ref: `tags/${tagName}`
+              });
+            }
+
+            try {
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tagName}`,
+                sha: process.env.COMMIT_SHA
+              });
+            } catch (error) {
+              core.setFailed(
+                `Could not reserve ${tagName} at ${process.env.COMMIT_SHA}: ${error.message}`
+              );
+              return;
+            }
+
+            const reservedCommit = await resolveTagCommit(tagName);
+            if (reservedCommit !== commitSha) {
+              core.setFailed(
+                `${tagName} resolved to ${reservedCommit}, expected ${commitSha}.`
+              );
+              return;
+            }
+            core.setOutput('tag_reserved', 'true');
+
+      - name: Publish GitHub prerelease
+        id: publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.alpha.outputs.tag_name }}
+          RELEASE_TITLE: ${{ steps.alpha.outputs.release_title }}
+          RELEASE_SHA: ${{ steps.alpha.outputs.commit_sha }}
+          STABLE_TAG: ${{ steps.alpha.outputs.stable_tag }}
+          TAG_RESERVED: ${{ steps.reserve.outputs.tag_reserved }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repository = $env:REPOSITORY
+
+          function Invoke-GhJson {
+              param(
+                  [Parameter(Mandatory)]
+                  [string] $Endpoint
+              )
+
+              $json = @(& gh api $Endpoint)
+              if ($LASTEXITCODE -ne 0) {
+                  throw "GitHub API request failed: $Endpoint"
+              }
+              return (($json -join [Environment]::NewLine) | ConvertFrom-Json)
+          }
+
+          function Get-ReleaseTagCommit {
+              $reference = Invoke-GhJson `
+                  -Endpoint "repos/$repository/git/ref/tags/$env:RELEASE_TAG"
+              $object = $reference.object
+              for ($depth = 0; $object.type -eq 'tag' -and $depth -lt 8; ++$depth) {
+                  $tag = Invoke-GhJson `
+                      -Endpoint "repos/$repository/git/tags/$($object.sha)"
+                  $object = $tag.object
+              }
+              if ($object.type -eq 'tag') {
+                  throw "$env:RELEASE_TAG exceeds the annotated-tag depth limit."
+              }
+              if ($object.type -ne 'commit') {
+                  throw "$env:RELEASE_TAG resolves to unsupported object type $($object.type)."
+              }
+              return $object.sha.ToLowerInvariant()
+          }
+
+          function Assert-ReleaseTagCommit {
+              $actual = Get-ReleaseTagCommit
+              $expected = $env:RELEASE_SHA.ToLowerInvariant()
+              if ($actual -cne $expected) {
+                  throw "$env:RELEASE_TAG resolves to $actual, expected $expected."
+              }
+          }
+
+          $assets = @(
+              Get-ChildItem -LiteralPath 'dist/alpha' -Filter '*.zip' -File |
+                  Sort-Object Name |
+                  ForEach-Object { $_.FullName }
+          )
+          $assets += (Resolve-Path 'dist/alpha/SHA256SUMS.txt').Path
+
+          $published = $false
+          $createdReleaseId = $null
+          $createAttempted = $false
+          try {
+              if ($env:TAG_RESERVED -cne 'true') {
+                  throw 'The exact release tag was not reserved by the preceding gate.'
+              }
+              Assert-ReleaseTagCommit
+
+              $createPayload = @{
+                  tag_name = $env:RELEASE_TAG
+                  target_commitish = $env:RELEASE_SHA
+                  name = $env:RELEASE_TITLE
+                  body = Get-Content -LiteralPath 'build/alpha/ALPHA.md' -Raw
+                  draft = $true
+                  prerelease = $true
+                  make_latest = 'false'
+              } | ConvertTo-Json
+              $createAttempted = $true
+              $createdJson = $createPayload | gh api --method POST `
+                  "repos/$repository/releases" --input -
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'Could not create the private draft alpha release.'
+              }
+              $created = $createdJson | ConvertFrom-Json
+              $createdReleaseId = [long] $created.id
+              if (-not $created.draft -or -not $created.prerelease -or
+                  $created.tag_name -cne $env:RELEASE_TAG) {
+                  throw 'GitHub returned an unexpected draft release.'
+              }
+              Assert-ReleaseTagCommit
+
+              $uploadBase = ([string] $created.upload_url).Replace(
+                  '{?name,label}', '')
+              $expectedUploadBase =
+                  "https://uploads.github.com/repos/$repository/releases/$createdReleaseId/assets"
+              if ($uploadBase -cne $expectedUploadBase) {
+                  throw 'GitHub returned an unexpected release-asset upload URL.'
+              }
+              $uploadHeaders = @{
+                  Accept = 'application/vnd.github+json'
+                  Authorization = "Bearer $env:GH_TOKEN"
+                  'X-GitHub-Api-Version' = '2022-11-28'
+              }
+              foreach ($asset in $assets) {
+                  $assetName = [IO.Path]::GetFileName($asset)
+                  $encodedName = [Uri]::EscapeDataString($assetName)
+                  $uploaded = Invoke-RestMethod -Method Post `
+                      -Uri "${uploadBase}?name=$encodedName" `
+                      -Headers $uploadHeaders `
+                      -ContentType 'application/octet-stream' `
+                      -InFile $asset
+                  if ($uploaded.name -cne $assetName -or
+                      $uploaded.state -cne 'uploaded') {
+                      throw "GitHub returned an unexpected asset for $assetName."
+                  }
+              }
+              Assert-ReleaseTagCommit
+
+              $publishPayload = @{
+                  draft = $false
+                  prerelease = $true
+                  make_latest = 'false'
+              } | ConvertTo-Json
+              $publishedJson = $publishPayload | gh api --method PATCH `
+                  "repos/$repository/releases/$createdReleaseId" --input -
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'Could not publish the completed draft as a prerelease.'
+              }
+              $release = $publishedJson | ConvertFrom-Json
+              if ($release.draft -or -not $release.prerelease -or
+                  $release.tag_name -ne $env:RELEASE_TAG) {
+                  throw 'GitHub returned an unexpected release after publication.'
+              }
+              Assert-ReleaseTagCommit
+
+              $latestStable = & gh api "repos/$repository/releases/latest" --jq '.tag_name'
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'Could not resolve the latest stable GitHub release.'
+              }
+              if ($latestStable.Trim() -cne $env:STABLE_TAG) {
+                  throw "Stable Latest changed from $env:STABLE_TAG to $latestStable."
+              }
+
+              $published = $true
+              Write-Host "Published $($release.tag_name) without changing stable Latest."
+          } catch {
+              $publicationError = $_
+              $releaseRemoved = -not $createAttempted
+              if ($null -ne $createdReleaseId) {
+                  Write-Warning "Alpha publication failed; removing only release ID $createdReleaseId created by this run."
+                  & gh api --method DELETE "repos/$repository/releases/$createdReleaseId"
+                  if ($LASTEXITCODE -eq 0) {
+                      $releaseRemoved = $true
+                  } else {
+                      $releaseRemoved = $false
+                      Write-Warning "Could not remove release ID $createdReleaseId; preserving its tag."
+                  }
+              }
+
+              if ($releaseRemoved -and $env:TAG_RESERVED -ceq 'true') {
+                  try {
+                      $currentTagCommit = Get-ReleaseTagCommit
+                      $expectedTagCommit = $env:RELEASE_SHA.ToLowerInvariant()
+                      if ($currentTagCommit -ceq $expectedTagCommit) {
+                          & gh api --method DELETE `
+                              "repos/$repository/git/refs/tags/$env:RELEASE_TAG"
+                          if ($LASTEXITCODE -ne 0) {
+                              Write-Warning "Could not remove reserved tag $env:RELEASE_TAG."
+                          }
+                      } else {
+                          Write-Warning `
+                              "Preserving $env:RELEASE_TAG because it moved to $currentTagCommit."
+                      }
+                  } catch {
+                      Write-Warning `
+                          "Could not prove ownership of $env:RELEASE_TAG; preserving it. $($_.Exception.Message)"
+                  }
+              }
+              throw $publicationError
+          }
+
+          if (-not $published) {
+              throw 'The alpha prerelease was not published.'
+          }

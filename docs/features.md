@@ -15,6 +15,7 @@ contracts.
 |---|---|
 | **Current API 1.3** | First shipped by ERNativeUI 1.3.0. It adds custom top-level Configuration tabs and title-screen status text. |
 | **Supported APIs 1.0, 1.1, and 1.2** | Frozen earlier contracts. Already-compiled clients remain supported by compatible 1.x hosts. |
+| **API 1.4 development roadmap** | Proposed work is publicly tracked in the [API 1.4 roadmap](roadmap/api-1.4.md). It is not an available contract and may change, move, or be rejected before release. |
 | **Future research** | Not implemented in the public API. Do not design a client around it yet. |
 
 ERNativeUI release versions and public API versions are independent. A package
@@ -111,6 +112,11 @@ retain their functional fallbacks; title-screen text is not advertised. See
 The following are post-1.3 investigation targets, not delivery promises. A
 feature that cannot yet satisfy ERNativeUI's lifetime, input, teardown,
 coexistence, and validation requirements may move to a later API.
+
+The separately maintained [API 1.4 development roadmap](roadmap/api-1.4.md)
+tracks reactive-menu proposals and their current evidence states. Roadmap
+entries remain unsupported until they are released and moved into the tables
+above.
 
 | Feature | Intended player experience | Current status |
 |---|---|---|
