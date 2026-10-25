@@ -22,6 +22,9 @@ struct RowPresentationUpdate {
     std::wstring label{};
     std::wstring help{};
     std::optional<std::wstring> caption{};
+    bool interactive{true};
+    ERUI_AvailabilityAppearance availability_appearance{
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
 };
 
 struct RowPresentationView {
@@ -33,6 +36,17 @@ struct RowPresentationView {
 
     [[nodiscard]] explicit operator bool() const noexcept {
         return revision != 0 && label && help;
+    }
+};
+
+struct RowAvailabilityView {
+    bool interactive{true};
+    ERUI_AvailabilityAppearance appearance{
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
+    std::uint64_t revision{};
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return revision != 0;
     }
 };
 
@@ -53,6 +67,9 @@ struct RowPresentationView {
 void synchronize_pending_row_presentations() noexcept;
 
 [[nodiscard]] RowPresentationView row_presentation_view(
+    std::size_t slot) noexcept;
+
+[[nodiscard]] RowAvailabilityView row_availability_view(
     std::size_t slot) noexcept;
 
 [[nodiscard]] bool row_presentation_updates_pending() noexcept;

@@ -1156,6 +1156,22 @@ DWORD run_host() noexcept {
             }
             log::write(
                 "Runtime row-presentation backend preflight passed; API 1.4 label/help updates are available");
+            if (erui::native::native_row_availability_build_supported(
+                    row_update_game)) {
+                if (!registry().enable_row_availability_backend()) {
+                    log::write(
+                        erui::LogLevel::fatal,
+                        "Runtime row-availability backend passed preflight but its API 1.4 capability could not be published before registration opened");
+                    set_api_state(ApiState::failed);
+                    return 1;
+                }
+                log::write(
+                    "Runtime row-availability backend preflight passed; API 1.4 typed-row interaction and appearance updates are available");
+            } else {
+                log::write(
+                    erui::LogLevel::warning,
+                    "Runtime row-availability backend is unavailable for this game executable; API 1.4 remains negotiable without ERUI_CAP_ROW_AVAILABILITY");
+            }
         } else {
             log::write(
                 erui::LogLevel::warning,

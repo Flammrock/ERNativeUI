@@ -622,6 +622,18 @@ bool Registry::updates_backend_available() const noexcept {
     return updates_backend_available_;
 }
 
+bool Registry::enable_row_availability_backend() noexcept {
+    std::lock_guard lock(mutex_);
+    if (open_ || frozen_ || !updates_backend_available_) return false;
+    row_availability_backend_available_ = true;
+    return true;
+}
+
+bool Registry::row_availability_backend_available() const noexcept {
+    std::lock_guard lock(mutex_);
+    return row_availability_backend_available_;
+}
+
 void Registry::open_registration() noexcept {
     std::lock_guard lock(mutex_);
     open_ = true;
@@ -1622,6 +1634,7 @@ ERUI_Result Registry::add_button(
         row.kind = RowKind::button;
         row.label = std::move(label); row.help = std::move(help);
         row.enabled = description->enabled != 0;
+        row.interactive = row.enabled;
         row.button_callback = description->callback; row.user_data = description->user_data;
         if (out_row) *out_row = row.handle;
         note_activity_locked();
@@ -1657,7 +1670,9 @@ ERUI_Result Registry::add_toggle(
         Row& row = create_row_locked(*provider, *page);
         row.kind = RowKind::toggle; row.label = std::move(label);
         row.help = std::move(help);
-        row.enabled = description->enabled != 0; row.native_value = value;
+        row.enabled = description->enabled != 0;
+        row.interactive = row.enabled;
+        row.native_value = value;
         row.public_value.store(value); row.pending_value.store(value);
         row.changed_callback = description->changed_callback; row.user_data = description->user_data;
         if (out_row) *out_row = row.handle;
@@ -1701,7 +1716,9 @@ ERUI_Result Registry::add_slider(
         Row& row = create_row_locked(*provider, *page);
         row.kind = RowKind::slider; row.label = std::move(label);
         row.help = std::move(help);
-        row.enabled = description->enabled != 0; row.native_value = initial_value;
+        row.enabled = description->enabled != 0;
+        row.interactive = row.enabled;
+        row.native_value = initial_value;
         row.public_value.store(initial_value);
         row.pending_value.store(initial_value);
         row.slider = {description->minimum, description->maximum, description->step};
@@ -1799,6 +1816,7 @@ ERUI_Result Registry::add_numeric_slider(
         row.label = std::move(label);
         row.help = std::move(help);
         row.enabled = description->enabled != 0;
+        row.interactive = row.enabled;
         row.native_value = initial_index;
         row.public_value.store(initial_index);
         row.pending_value.store(initial_index);
@@ -1964,6 +1982,7 @@ ERUI_Result Registry::add_custom_slider(
         row.label = std::move(label);
         row.help = std::move(help);
         row.enabled = description->enabled != 0;
+        row.interactive = row.enabled;
         row.native_value = static_cast<std::uint8_t>(
             description->initial_index);
         row.public_value.store(row.native_value);
@@ -2094,6 +2113,7 @@ ERUI_Result Registry::add_choice(
         row.kind = kind; row.label = std::move(label);
         row.help = std::move(help); row.choices = std::move(choices);
         row.enabled = true;
+        row.interactive = true;
         row.native_value = description->initial_index;
         row.public_value.store(description->initial_index);
         row.pending_value.store(description->initial_index);
@@ -2229,6 +2249,7 @@ ERUI_Result Registry::add_color_picker(
         row.label = std::move(label);
         row.help = std::move(help);
         row.enabled = description->enabled != 0;
+        row.interactive = row.enabled;
         row.color_changed_callback = description->changed_callback;
         row.user_data = description->user_data;
         row.color_picker_state = std::move(state);
@@ -2282,7 +2303,9 @@ ERUI_Result Registry::add_submenu(
         Row& row = *row_ptr;
         row.kind = RowKind::submenu; row.label = std::move(label);
         row.help = std::move(help);
-        row.enabled = description->enabled != 0; row.child_page = child.handle;
+        row.enabled = description->enabled != 0;
+        row.interactive = row.enabled;
+        row.child_page = child.handle;
         *out_child_page = child.handle;
         if (out_row) *out_row = row.handle;
         note_activity_locked();
@@ -2686,6 +2709,9 @@ ERUI_Result Registry::commit_updates(
     struct ParsedRowUpdate {
         ERUI_RowHandle row{};
         ERUI_RowUpdateFields fields{};
+        bool interactive{};
+        ERUI_AvailabilityAppearance availability_appearance{
+            ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
         erui::detail::ScaleformStyledText label{};
         erui::detail::ScaleformStyledText help{};
         erui::detail::ScaleformStyledText caption{};
@@ -2699,6 +2725,9 @@ ERUI_Result Registry::commit_updates(
         std::wstring help_html{};
         std::wstring caption_html{};
         bool caption_overridden{};
+        bool interactive{};
+        ERUI_AvailabilityAppearance availability_appearance{
+            ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
         bool materialized{};
     };
 
@@ -2709,7 +2738,9 @@ ERUI_Result Registry::commit_updates(
             description->updates);
         constexpr ERUI_RowUpdateFields kKnownRowFields =
             ERUI_ROW_UPDATE_FIELD_LABEL | ERUI_ROW_UPDATE_FIELD_HELP |
-            ERUI_ROW_UPDATE_FIELD_CAPTION;
+            ERUI_ROW_UPDATE_FIELD_CAPTION |
+            ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
+            ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
 
         for (std::uint32_t index = 0;
              index < description->update_count;
@@ -2742,9 +2773,7 @@ ERUI_Result Registry::commit_updates(
                 row_update.row == ERUI_INVALID_ROW ||
                 row_update.fields == 0 ||
                 (row_update.fields & ~kKnownRowFields) != 0 ||
-                row_update.reserved0 != 0 ||
-                row_update.reserved[0] != 0 ||
-                row_update.reserved[1] != 0) {
+                row_update.reserved != 0) {
                 return ERUI_INVALID_ARGUMENT;
             }
 
@@ -2761,16 +2790,36 @@ ERUI_Result Registry::commit_updates(
                 (row_update.fields & ERUI_ROW_UPDATE_FIELD_HELP) != 0;
             const bool changes_caption =
                 (row_update.fields & ERUI_ROW_UPDATE_FIELD_CAPTION) != 0;
+            const bool changes_interactive =
+                (row_update.fields & ERUI_ROW_UPDATE_FIELD_INTERACTIVE) != 0;
+            const bool changes_appearance =
+                (row_update.fields &
+                    ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
             if ((!changes_label && !canonical_zero_view(row_update.label)) ||
                 (!changes_help && !canonical_zero_view(row_update.help)) ||
                 (!changes_caption &&
-                    !canonical_zero_view(row_update.caption))) {
+                    !canonical_zero_view(row_update.caption)) ||
+                (!changes_interactive && row_update.interactive != 0) ||
+                (changes_interactive && row_update.interactive > 1) ||
+                (!changes_appearance &&
+                    row_update.availability_appearance !=
+                        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY) ||
+                (changes_appearance &&
+                    row_update.availability_appearance !=
+                        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY &&
+                    row_update.availability_appearance !=
+                        ERUI_AVAILABILITY_APPEARANCE_NORMAL &&
+                    row_update.availability_appearance !=
+                        ERUI_AVAILABILITY_APPEARANCE_DISABLED)) {
                 return ERUI_INVALID_ARGUMENT;
             }
 
             ParsedRowUpdate parsed_update{};
             parsed_update.row = row_update.row;
             parsed_update.fields = row_update.fields;
+            parsed_update.interactive = row_update.interactive != 0;
+            parsed_update.availability_appearance =
+                row_update.availability_appearance;
             if (changes_label) {
                 const ERUI_Result parsed_label =
                     erui::detail::parse_scaleform_styled_text(
@@ -2802,6 +2851,42 @@ ERUI_Result Registry::commit_updates(
         }
         if (!provider.committed) return ERUI_INVALID_HANDLE;
 
+        const auto supports_runtime_availability = [](RowKind kind) noexcept {
+            switch (kind) {
+            case RowKind::button:
+            case RowKind::toggle:
+            case RowKind::slider:
+            case RowKind::numeric_slider:
+            case RowKind::custom_slider:
+            case RowKind::inline_choice:
+            case RowKind::popup_choice:
+            case RowKind::text_input:
+            case RowKind::color_picker:
+                return true;
+            case RowKind::submenu:
+                return false;
+            }
+            return false;
+        };
+        const auto materializes_when_construction_disabled =
+            [](RowKind kind) noexcept {
+                switch (kind) {
+                case RowKind::toggle:
+                case RowKind::slider:
+                case RowKind::numeric_slider:
+                case RowKind::custom_slider:
+                case RowKind::inline_choice:
+                case RowKind::popup_choice:
+                case RowKind::text_input:
+                    return true;
+                case RowKind::button:
+                case RowKind::color_picker:
+                case RowKind::submenu:
+                    return false;
+                }
+                return false;
+            };
+
         std::unordered_set<ERUI_RowHandle> unique_rows{};
         unique_rows.reserve(parsed.size());
         std::vector<PendingRowMutation> mutations{};
@@ -2815,6 +2900,20 @@ ERUI_Result Registry::commit_updates(
                 return ERUI_INVALID_HANDLE;
             }
             Row& row = *row_it->second;
+            const bool changes_availability =
+                (update.fields &
+                    (ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
+                     ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE)) != 0;
+            if (changes_availability &&
+                !row_availability_backend_available_) {
+                return ERUI_NOT_SUPPORTED;
+            }
+            if (changes_availability &&
+                (!supports_runtime_availability(row.kind) ||
+                 (!row.enabled &&
+                  !materializes_when_construction_disabled(row.kind)))) {
+                return ERUI_INVALID_ARGUMENT;
+            }
             const bool changes_caption =
                 (update.fields & ERUI_ROW_UPDATE_FIELD_CAPTION) != 0;
             const bool caption_supported = row.kind == RowKind::button ||
@@ -2841,6 +2940,15 @@ ERUI_Result Registry::commit_updates(
                 };
             mutation.caption_overridden =
                 changes_caption || row.caption_overridden;
+            mutation.interactive =
+                (update.fields & ERUI_ROW_UPDATE_FIELD_INTERACTIVE) != 0
+                ? update.interactive
+                : row.interactive;
+            mutation.availability_appearance =
+                (update.fields &
+                    ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0
+                ? update.availability_appearance
+                : row.availability_appearance;
             if (changes_caption) {
                 mutation.caption = std::move(update.caption);
             } else if (row.caption_overridden) {
@@ -2852,9 +2960,7 @@ ERUI_Result Registry::commit_updates(
             // These action-row families have no native disabled state and
             // are deliberately omitted by MenuCompiler while disabled.
             mutation.materialized = row.enabled ||
-                (row.kind != RowKind::button &&
-                 row.kind != RowKind::color_picker &&
-                 row.kind != RowKind::submenu);
+                materializes_when_construction_disabled(row.kind);
             const ERUI_Result label_encoded =
                 erui::detail::encode_scaleform_html(
                     mutation.label, mutation.label_html);
@@ -2881,6 +2987,9 @@ ERUI_Result Registry::commit_updates(
                 .row = mutation.row->handle,
                 .label = mutation.label_html,
                 .help = mutation.help_html,
+                .interactive = mutation.interactive,
+                .availability_appearance =
+                    mutation.availability_appearance,
             };
             if (mutation.caption_overridden) {
                 snapshot.caption = mutation.caption_html;
@@ -2905,6 +3014,9 @@ ERUI_Result Registry::commit_updates(
             mutation.row->caption = std::move(mutation.caption.text);
             mutation.row->caption_styles = std::move(mutation.caption.spans);
             mutation.row->caption_overridden = mutation.caption_overridden;
+            mutation.row->interactive = mutation.interactive;
+            mutation.row->availability_appearance =
+                mutation.availability_appearance;
         }
         ++generation_;
         if (open_) note_activity_locked();
@@ -3234,7 +3346,7 @@ void Registry::append_page_locked(
                 {.callback = &Registry::button_bridge, .user_data = row}, row->enabled);
             break;
         case RowKind::toggle:
-            destination.add_toggle(std::move(label_html), std::move(help_html), row->native_value, row->enabled,
+            destination.add_toggle(std::move(label_html), std::move(help_html), row->native_value, row->interactive,
                 {.callback = &Registry::value_bridge, .user_data = row});
             break;
         case RowKind::slider:

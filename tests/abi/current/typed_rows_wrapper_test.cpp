@@ -99,6 +99,7 @@ int main(int argc, char** argv) {
     auto connected = erui::connect();
     CHECK(connected.success());
     CHECK(connected.value().api_version() == ERUI_API_VERSION_1_4);
+    CHECK(connected.value().supports(erui::Capability::row_availability));
 
     Rows rows{};
     CallbackCounts callbacks{};
@@ -264,25 +265,49 @@ int main(int argc, char** argv) {
         .label(styled_label)
         .caption(L"Button caption")
         .help(std::move(styled_help))
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     CHECK(rows.toggle.edit()
         .help(L"Updated toggle help")
         .commit() == ERUI_OK);
+    auto availability_edit = rows.toggle.edit();
+    CHECK(&availability_edit.interactive(false) == &availability_edit);
+    CHECK(&availability_edit.availability_appearance(
+        erui::AvailabilityAppearance::disabled) == &availability_edit);
+    CHECK(availability_edit.commit() == ERUI_OK);
+    CHECK(rows.toggle.edit()
+        .interactive(true)
+        .availability_appearance(
+            erui::AvailabilityAppearance::follow_interactivity)
+        .commit() == ERUI_OK);
+    CHECK(rows.toggle.edit()
+        .availability_appearance(
+            static_cast<erui::AvailabilityAppearance>(99u))
+        .commit() == ERUI_INVALID_ARGUMENT);
     CHECK(rows.slider.edit()
         .label(L"Slider updated")
         .help(L"Updated slider help")
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     CHECK(rows.numeric.edit()
         .label(L"Numeric updated")
         .help(L"Updated numeric help")
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     CHECK(rows.custom.edit()
         .label(L"Custom updated")
         .help(L"Updated custom help")
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     CHECK(rows.inline_choice.edit()
         .label(L"Inline updated")
         .help(L"Updated inline help")
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     erui::StyledText popup_caption{};
     popup_caption
@@ -296,14 +321,20 @@ int main(int argc, char** argv) {
         .label(L"Popup updated")
         .caption(std::move(popup_caption))
         .help(L"Updated popup help")
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     CHECK(rows.text.edit()
         .label(L"Text updated")
         .help(L"Updated text help")
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     CHECK(rows.color.edit()
         .label(L"Color updated")
         .help(L"Updated color help")
+        .interactive(false)
+        .availability_appearance(erui::AvailabilityAppearance::disabled)
         .commit() == ERUI_OK);
     CHECK(rows.toggle.edit().help(L"").commit() == ERUI_OK);
 

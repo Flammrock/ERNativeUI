@@ -206,6 +206,27 @@ The existing registration-time `enabled` option has different behavior for
 different widgets—some rows are disabled while others are omitted—so API 1.4
 must not silently reuse it as a universal runtime contract.
 
+The admitted production scope covers Button, Toggle, byte Slider, Numeric
+Slider, Custom Slider, Inline Choice, Popup Choice, TextInput, and ColorPicker.
+Every typed edit draft separates focus eligibility from presentation:
+
+```cpp
+target.edit()
+    .interactive(condition)
+    .availability_appearance(
+        erui::AvailabilityAppearance::follow_interactivity)
+    .commit();
+```
+
+`follow_interactivity` selects the normal or disabled presentation from the
+interaction state. `normal` and `disabled` force only that presentation; they
+do not silently re-enable or disable input. Every supported row receives a
+reversible disabled label treatment that preserves its authored transform.
+Toggle and Inline Choice additionally preserve their construction-time native
+movie twins and synchronize localized value text before swapping visibility.
+Submenu remains excluded until its own native controller, focus relocation,
+and page-stack behavior receive separate live proof.
+
 ### Recursive Collapse control and conditional content
 
 A lightweight **Collapse control** is proposed as the convenient native-facing
@@ -451,7 +472,7 @@ concise `1.3-to-1.4` migration guide before the API is frozen.
 | Structured label and help text | Complete for the current presentation scope | Escaping and span-validation tests plus live color, underline, mixed-fragment, callback-update, tab-change, and close/reopen validation |
 | Button and Popup Choice captions | Complete for the current presentation scope | Typed availability, atomic label/caption/help commits, Family A/B target mapping, styled captions, Popup selection independence, frame reapplication, and reconstruction all passed automated and live validation |
 | Whole-row presentation color | Proposed; separate research gate | Proven behavior through focus, disable, transitions, and native timeline updates |
-| Runtime interactivity | Proposed | Every admitted row type skips focus and activation while preserving navigation and help semantics |
+| Runtime interactivity | Complete for the admitted nine-family production scope | Every supported row skips focus and activation, labels and slider values dim and restore without discarding authored style, Toggle/Inline native value twins stay localized, callback self-disable relocates focus safely, and reopen/mouse/controller/tab-switch regression passes; Submenu remains excluded |
 | Recursive Collapse control | Proposed; blocked by update foundation | Acyclic nested groups, preserved descendant state, native header presentation, focus relocation, and pagination flattening |
 | Conditional groups and row visibility | Proposed; blocked by update foundation | Correct visible model, active-editor policy, focus relocation, and atomic publication |
 | Dynamic repagination | Proposed; blocked by row visibility | First/middle/last slice changes, navigation rows, provider coexistence, and no stranded pages |
@@ -584,6 +605,8 @@ contains it. Do not use this log as a substitute for the stable changelog.
 
 | Date | Change | Evidence or build |
 |---|---|---|
+| 2026-10-25 | Completed runtime availability for Button, Toggle, byte Slider, Numeric Slider, Custom Slider, Inline Choice, Popup Choice, TextInput, and ColorPicker while keeping Submenu gated. Interaction and `AvailabilityAppearance` remain independent. | Exact per-family controller validation, reversible Scaleform presentation ownership, atomic registry/state tests, and live nine-family/ten-target matrix validation across repeated enable/disable, tab switching, styled-color restoration, and System reopen cycles |
+| 2026-10-24 | Moved the proven Toggle availability seam into the API 1.4 production candidate with independent interaction and `AvailabilityAppearance`. | Exact-build predicate/Scaleform validation, atomic registry/state tests, and a focused showcase covering forced appearance, initially disabled reversal, and callback self-disable |
 | 2026-10-24 | Added and live-validated a typed, sticky right-hand caption override for Button and Popup Choice edits. Captions share the validated structured-text model; unsupported controls do not expose the operation. | ABI/layout, atomic registry, stable-buffer, Family A/B mapping, typed-wrapper, and showcase regression tests plus live root/subpage, styled caption, Popup selection, repaint, and reconstruction validation |
 | 2026-10-23 | Structured row label/help text moved from research into the API 1.4 production path. Plain text remains escaped; allowlisted fragments support color and underline, while bold/italic remain dependent on effective font faces. | Scaleform HTML escaping/span regression tests and live label/help style proof across callback updates, tab changes, and System close/reopen |
 | 2026-10-22 | Typed C++ row foundation completed without changing the frozen C API 1.3 contract; automated MSVC/MinGW validation and live Tarnished UI Showcase/Custom Tabs Stress regression passed. | `ERNativeUI.ABI.TypedRows.CurrentProductionCpp`, the API 1.0–1.3 compatibility matrix, and live development-build validation |

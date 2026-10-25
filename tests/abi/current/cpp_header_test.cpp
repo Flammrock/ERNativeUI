@@ -68,6 +68,24 @@ struct has_caption_template_bypass<T, std::void_t<decltype(
     std::declval<T&>().template caption<erui::ButtonRowEdit>(
         std::declval<std::wstring_view>()))>> : std::true_type {};
 
+#if defined(ERUI_API_VERSION_1_4)
+template <typename T, typename = void>
+struct has_interactive : std::false_type {};
+
+template <typename T>
+struct has_interactive<T, std::void_t<decltype(
+    std::declval<T&>().interactive(true))>> : std::true_type {};
+
+template <typename T, typename = void>
+struct has_availability_appearance : std::false_type {};
+
+template <typename T>
+struct has_availability_appearance<T, std::void_t<decltype(
+    std::declval<T&>().availability_appearance(
+        erui::AvailabilityAppearance::follow_interactivity))>>
+    : std::true_type {};
+#endif
+
 template <typename T, typename = void>
 struct has_set_value : std::false_type {};
 
@@ -706,6 +724,62 @@ static_assert(std::is_trivially_copyable_v<ERUI_UpdateDesc>);
 static_assert(std::is_trivially_copyable_v<ERUI_UpdateBatchDesc>);
 static_assert(static_cast<ERUI_Capabilities>(erui::Capability::updates) ==
     ERUI_CAP_UPDATES);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::row_availability) == ERUI_CAP_ROW_AVAILABILITY);
+static_assert(static_cast<ERUI_AvailabilityAppearance>(
+    erui::AvailabilityAppearance::follow_interactivity) ==
+    ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY);
+static_assert(static_cast<ERUI_AvailabilityAppearance>(
+    erui::AvailabilityAppearance::normal) ==
+    ERUI_AVAILABILITY_APPEARANCE_NORMAL);
+static_assert(static_cast<ERUI_AvailabilityAppearance>(
+    erui::AvailabilityAppearance::disabled) ==
+    ERUI_AVAILABILITY_APPEARANCE_DISABLED);
+static_assert(has_interactive<erui::ToggleRowEdit>::value);
+static_assert(has_availability_appearance<erui::ToggleRowEdit>::value);
+static_assert(has_interactive<erui::ButtonRowEdit>::value);
+static_assert(has_interactive<erui::SliderRowEdit>::value);
+static_assert(has_interactive<erui::NumericSliderRowEdit>::value);
+static_assert(has_interactive<erui::CustomSliderRowEdit>::value);
+static_assert(has_interactive<erui::InlineChoiceRowEdit>::value);
+static_assert(has_interactive<erui::PopupChoiceRowEdit>::value);
+static_assert(has_interactive<erui::TextInputRowEdit>::value);
+static_assert(has_interactive<erui::ColorPickerRowEdit>::value);
+static_assert(has_availability_appearance<erui::ButtonRowEdit>::value);
+static_assert(has_availability_appearance<erui::SliderRowEdit>::value);
+static_assert(has_availability_appearance<
+    erui::NumericSliderRowEdit>::value);
+static_assert(has_availability_appearance<
+    erui::CustomSliderRowEdit>::value);
+static_assert(has_availability_appearance<
+    erui::InlineChoiceRowEdit>::value);
+static_assert(has_availability_appearance<
+    erui::PopupChoiceRowEdit>::value);
+static_assert(has_availability_appearance<
+    erui::TextInputRowEdit>::value);
+static_assert(has_availability_appearance<
+    erui::ColorPickerRowEdit>::value);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ToggleRowEdit&>().interactive(true)),
+    erui::ToggleRowEdit&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ToggleRowEdit&&>().interactive(false)),
+    erui::ToggleRowEdit&&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ButtonRowEdit&>().interactive(false)),
+    erui::ButtonRowEdit&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ColorPickerRowEdit&&>().availability_appearance(
+        erui::AvailabilityAppearance::normal)),
+    erui::ColorPickerRowEdit&&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ToggleRowEdit&>().availability_appearance(
+        erui::AvailabilityAppearance::disabled)),
+    erui::ToggleRowEdit&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ToggleRowEdit&&>().availability_appearance(
+        erui::AvailabilityAppearance::normal)),
+    erui::ToggleRowEdit&&>);
 static_assert(std::is_same_v<decltype(std::declval<erui::TextStyle&>().color(
     std::declval<erui::Color>())), erui::TextStyle&>);
 static_assert(std::is_same_v<decltype(erui::TextStyle{}.bold()),

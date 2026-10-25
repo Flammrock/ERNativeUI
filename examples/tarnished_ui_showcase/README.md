@@ -20,6 +20,11 @@
   editable row types; its first row alternates every label and help message,
   plus the supported Button and Popup Choice captions, between unmistakable
   A/B variants;
+- an API 1.4 **Row Interaction Matrix** covering Button, Toggle, byte Slider,
+  Numeric Slider, Custom Slider, Inline Choice, Popup Choice, TextInput, and
+  ColorPicker, with an additional red-to-green styled Intensity row that
+  verifies exact color restoration, plus a focused **Runtime Availability**
+  subpage proving that interaction and disabled appearance remain independent;
 - a capability-gated TextInput submenu with the default 16-unit limit and an
   explicit 35-UTF-16-unit field;
 - a nested logical page with 32 generated action rows;
@@ -72,6 +77,28 @@ depends on corresponding faces being present in the effective Scaleform font
 configuration. A compatible configuration may make them visually distinct,
 but that has not yet been validated and ERNativeUI does not patch font
 resources.
+
+The Row Interaction Matrix validates the complete production availability
+scope. Turn **Disable all targets** on, then verify controller, keyboard, and
+mouse navigation skip all ten target rows and that every left-hand label is
+visibly dimmed. Toggle and Inline Choice also use their native disabled
+right-hand presentation, while the byte, numeric, and custom sliders dim their
+right-hand value captions. Turn it off and verify all targets become selectable
+and return to their original presentation. In particular, the Intensity
+percentage must recover its exact red-to-green interpolated color after every
+cycle. Popup Choice deliberately keeps its row label and selected-value caption
+separate. Submenu is not part of this milestone and is intentionally absent
+from the matrix.
+
+The Runtime Availability page has three focused lifecycle checks. Turn
+**Target interaction** off and verify controller and mouse navigation skip
+**Availability target**; switch **Target appearance** among Follow, Normal,
+and Disabled to verify appearance does not silently change interaction. Then
+enable **Construction-disabled target** and verify it becomes selectable with
+the correctly localized value text. Finally, change **Self-disable on change**:
+the callback must complete, focus must move to a surviving row, and the target
+must remain skipped until **Re-enable self-disabling row** is pressed. Repeat
+after leaving/reopening the page and after rapidly closing/reopening System.
 
 The example builds presentation from text and an allowlisted style rather than
 embedding markup:

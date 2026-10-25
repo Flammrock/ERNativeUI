@@ -19,6 +19,7 @@ extern "C" {
 /* Current-host fixture only: pass in configuration.reserved[0]. Frozen
  * contract hosts continue to require every reserved value to be zero. */
 #define ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT (1u << 0)
+#define ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY (1u << 1)
 
 /*
  * Keep the shared control protocol independent of symbols introduced by the

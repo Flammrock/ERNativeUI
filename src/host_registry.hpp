@@ -48,6 +48,11 @@ public:
     // native label/help presentation paths have been live validated.
     [[nodiscard]] bool enable_updates_backend() noexcept;
     [[nodiscard]] bool updates_backend_available() const noexcept;
+    // Typed-row runtime interaction/appearance is advertised independently
+    // from text updates and only after every admitted native controller and
+    // Scaleform presentation seam passes exact-build validation.
+    [[nodiscard]] bool enable_row_availability_backend() noexcept;
+    [[nodiscard]] bool row_availability_backend_available() const noexcept;
     void open_registration() noexcept;
     void set_host_locale(erui::MenuLocalization pagination);
     void set_tab_configuration(erui::detail::TabConfiguration configuration);
@@ -287,6 +292,9 @@ private:
         std::vector<erui::detail::ScaleformTextStyleSpan> caption_styles{};
         bool caption_overridden{};
         bool enabled{true};
+        bool interactive{true};
+        ERUI_AvailabilityAppearance availability_appearance{
+            ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
         ERUI_ButtonCallback button_callback{};
         ERUI_ValueChangedCallback changed_callback{};
         ERUI_NumericSliderChangedCallback numeric_slider_changed_callback{};
@@ -442,6 +450,7 @@ private:
     bool custom_tabs_backend_available_{};
     bool title_screen_text_backend_available_{};
     bool updates_backend_available_{};
+    bool row_availability_backend_available_{};
     bool open_{};
     bool frozen_{};
     std::uint64_t generation_{};

@@ -533,7 +533,7 @@ bool cached_identity_is_globally_unique(
 
 void clear_retired_page_references(void* panel) noexcept {
     if (!panel) return;
-    retire_native_row_presentation_page(panel);
+    retire_native_row_presentation_page(panel, g_addresses);
     void* expected = panel;
     const bool dialog_cleared = g_dialog_input_page.compare_exchange_strong(
         expected, nullptr, std::memory_order_acq_rel,
@@ -1960,6 +1960,7 @@ void __fastcall page_frame_gate_detour(
     synchronize_pending_text_inputs();
     synchronize_color_picker_previews(page);
     erui::detail::synchronize_pending_row_presentations();
+    apply_native_row_availability_pre_frame(page, g_addresses);
 
     PageFrameFn original = g_original_page_frame.load(std::memory_order_acquire);
     if (!original) return;
@@ -2661,7 +2662,7 @@ void reset_hooks() noexcept {
     }
 #endif
     remove_native_slider_presentation();
-    reset_native_row_presentations();
+    reset_native_row_presentations(g_addresses);
     set_color_picker_widget_path_bridge_available(false);
     {
         std::scoped_lock lock{g_scaleform_path_bridge_mutex};

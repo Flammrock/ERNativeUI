@@ -124,7 +124,8 @@ enum {
     ERUI_CAP_CUSTOM_SLIDER = UINT64_C(1) << 17,
     ERUI_CAP_CUSTOM_TABS = UINT64_C(1) << 18,
     ERUI_CAP_TITLE_SCREEN_TEXT = UINT64_C(1) << 19,
-    ERUI_CAP_UPDATES = UINT64_C(1) << 20
+    ERUI_CAP_UPDATES = UINT64_C(1) << 20,
+    ERUI_CAP_ROW_AVAILABILITY = UINT64_C(1) << 21
 };
 
 /*
@@ -806,7 +807,26 @@ enum {
      * visible value while leaving the logical selection unchanged. Other row
      * kinds reject caption updates.
      */
-    ERUI_ROW_UPDATE_FIELD_CAPTION = 1u << 2
+    ERUI_ROW_UPDATE_FIELD_CAPTION = 1u << 2,
+    /* Changes whether the row can receive focus or activation. */
+    ERUI_ROW_UPDATE_FIELD_INTERACTIVE = 1u << 3,
+    /* Selects the row's visual availability independently of interaction. */
+    ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE = 1u << 4
+};
+
+/*
+ * Runtime availability appearance. FOLLOW_INTERACTIVITY uses the disabled
+ * presentation when interactive is false and the normal presentation when it
+ * is true. NORMAL and DISABLED deliberately decouple appearance from input.
+ * API 1.4 supports these update fields for Button, Toggle, byte Slider,
+ * NumericSlider, CustomSlider, InlineChoice, PopupChoice, TextInput, and
+ * ColorPicker rows. Submenu rows are not supported.
+ */
+typedef uint32_t ERUI_AvailabilityAppearance;
+enum {
+    ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY = 0u,
+    ERUI_AVAILABILITY_APPEARANCE_NORMAL = 1u,
+    ERUI_AVAILABILITY_APPEARANCE_DISABLED = 2u
 };
 
 typedef struct ERUI_RowUpdateDesc {
@@ -814,12 +834,23 @@ typedef struct ERUI_RowUpdateDesc {
     uint32_t flags;
     ERUI_RowHandle row;
     ERUI_RowUpdateFields fields;
-    uint32_t reserved0;
+    uint32_t interactive;
     ERUI_StyledTextView label;
     ERUI_StyledTextView help;
     ERUI_StyledTextView caption;
-    uint32_t reserved[2];
+    ERUI_AvailabilityAppearance availability_appearance;
+    uint32_t reserved;
 } ERUI_RowUpdateDesc;
+
+/*
+ * When its field bit is present, interactive must be exactly 0 or 1 and
+ * availability_appearance must name a declared value. When the corresponding
+ * bit is absent, each scalar must be zero. Availability fields additionally
+ * require ERUI_CAP_ROW_AVAILABILITY and a materialized Button, Toggle,
+ * Slider, NumericSlider, CustomSlider, InlineChoice, PopupChoice, TextInput,
+ * or ColorPicker row. Submenu rows are unsupported; a construction-disabled
+ * Button or ColorPicker is omitted by the host and therefore also rejected.
+ */
 
 typedef struct ERUI_UpdateDesc {
     uint32_t size;
@@ -1758,7 +1789,8 @@ typedef struct ERUI_Api {
      * callbacks: native presentation changes occur later at a safe UI boundary.
      * This entry is present in every valid 1.4 table; test ERUI_CAP_UPDATES
      * before calling it because an unvalidated game build may return
-     * ERUI_NOT_SUPPORTED.
+     * ERUI_NOT_SUPPORTED. Availability fields additionally require
+     * ERUI_CAP_ROW_AVAILABILITY.
      */
     ERUI_Result (ERUI_CALL* commit_updates)(
         ERUI_ProviderHandle provider,

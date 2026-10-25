@@ -2031,7 +2031,6 @@ void verify_api_1_4_caption_update_contract() {
     ERUI_RowHandle button_row{};
     ERUI_TEST_CHECK(registry.add_button(
         provider_handle, root, &button, &button_row) == ERUI_OK);
-
     const ERUI_Utf16View choices[] = {
         utf16(L"Zero"), utf16(L"One"), utf16(L"Two")};
     ERUI_ChoiceDesc popup{};
@@ -2301,6 +2300,343 @@ void verify_api_1_4_caption_update_contract() {
     erui::detail::reset_row_presentation_state();
 }
 
+void verify_api_1_4_row_availability_contract() {
+    erui::detail::reset_row_presentation_state();
+
+    // Availability is independently gated even when ordinary text updates
+    // are supported.
+    erui::host::Registry unavailable{};
+    ERUI_TEST_CHECK(unavailable.enable_updates_backend());
+    unavailable.open_registration();
+    ERUI_ProviderDesc unavailable_provider{};
+    unavailable_provider.size = sizeof(unavailable_provider);
+    unavailable_provider.api_version = ERUI_API_VERSION_1_4;
+    unavailable_provider.owner_module = GetModuleHandleW(nullptr);
+    unavailable_provider.provider_id = ascii("availability.unavailable");
+    unavailable_provider.display_name = utf16(L"Availability unavailable");
+    ERUI_ProviderHandle unavailable_handle{};
+    ERUI_PageHandle unavailable_root{};
+    ERUI_TEST_CHECK(unavailable.register_provider(
+        ERUI_API_VERSION_1_4,
+        &unavailable_provider,
+        &unavailable_handle,
+        &unavailable_root) == ERUI_OK);
+    ERUI_ToggleDesc unavailable_toggle{};
+    unavailable_toggle.size = sizeof(unavailable_toggle);
+    unavailable_toggle.label = utf16(L"Toggle");
+    unavailable_toggle.help = utf16(L"Help");
+    unavailable_toggle.enabled = 1u;
+    ERUI_RowHandle unavailable_row{};
+    ERUI_TEST_CHECK(unavailable.add_toggle(
+        unavailable_handle,
+        unavailable_root,
+        &unavailable_toggle,
+        &unavailable_row) == ERUI_OK);
+    ERUI_TEST_CHECK(unavailable.commit_provider(unavailable_handle) == ERUI_OK);
+    ERUI_RowUpdateDesc unavailable_row_update{};
+    unavailable_row_update.size = sizeof(unavailable_row_update);
+    unavailable_row_update.row = unavailable_row;
+    unavailable_row_update.fields = ERUI_ROW_UPDATE_FIELD_INTERACTIVE;
+    unavailable_row_update.interactive = 0u;
+    ERUI_UpdateDesc unavailable_update{};
+    unavailable_update.size = sizeof(unavailable_update);
+    unavailable_update.kind = ERUI_UPDATE_KIND_ROW;
+    unavailable_update.payload = &unavailable_row_update;
+    ERUI_UpdateBatchDesc unavailable_batch{};
+    unavailable_batch.size = sizeof(unavailable_batch);
+    unavailable_batch.updates = &unavailable_update;
+    unavailable_batch.update_count = 1u;
+    unavailable_batch.update_stride = sizeof(unavailable_update);
+    ERUI_TEST_CHECK(unavailable.commit_updates(
+        unavailable_handle, &unavailable_batch) == ERUI_NOT_SUPPORTED);
+
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(!registry.enable_row_availability_backend());
+    ERUI_TEST_CHECK(registry.enable_updates_backend());
+    ERUI_TEST_CHECK(registry.enable_row_availability_backend());
+    registry.open_registration();
+
+    ERUI_ProviderDesc provider{};
+    provider.size = sizeof(provider);
+    provider.api_version = ERUI_API_VERSION_1_4;
+    provider.owner_module = GetModuleHandleW(nullptr);
+    provider.provider_id = ascii("availability.contract");
+    provider.display_name = utf16(L"Availability contract");
+    ERUI_ProviderHandle provider_handle{};
+    ERUI_PageHandle root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4,
+        &provider,
+        &provider_handle,
+        &root) == ERUI_OK);
+
+    ERUI_ToggleDesc toggle{};
+    toggle.size = sizeof(toggle);
+    toggle.label = utf16(L"Target toggle");
+    toggle.help = utf16(L"Original toggle help");
+    toggle.enabled = 1u;
+    ERUI_RowHandle toggle_row{};
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, root, &toggle, &toggle_row) == ERUI_OK);
+
+    ERUI_SliderDesc slider{};
+    slider.size = sizeof(slider);
+    slider.label = utf16(L"Slider");
+    slider.help = utf16(L"Slider help");
+    slider.minimum = 0u;
+    slider.maximum = 2u;
+    slider.step = 1u;
+    slider.enabled = 1u;
+    ERUI_RowHandle slider_row{};
+    ERUI_TEST_CHECK(registry.add_slider(
+        provider_handle, root, &slider, &slider_row) == ERUI_OK);
+
+    unsigned button_presses{};
+    ERUI_ButtonDesc button{};
+    button.size = sizeof(button);
+    button.label = utf16(L"Button");
+    button.help = utf16(L"Button help");
+    button.callback = &pressed;
+    button.user_data = &button_presses;
+    button.enabled = 1u;
+    ERUI_RowHandle button_row{};
+    ERUI_TEST_CHECK(registry.add_button(
+        provider_handle, root, &button, &button_row) == ERUI_OK);
+    button.label = utf16(L"Construction-disabled button");
+    button.help = utf16(L"This action row is not materialized.");
+    button.enabled = 0u;
+    ERUI_RowHandle disabled_button_row{};
+    ERUI_TEST_CHECK(registry.add_button(
+        provider_handle, root, &button, &disabled_button_row) == ERUI_OK);
+
+    ERUI_NumericSliderDesc numeric{};
+    numeric.size = sizeof(numeric);
+    numeric.label = utf16(L"Numeric slider");
+    numeric.help = utf16(L"Numeric slider help");
+    numeric.minimum_scaled_value = -10;
+    numeric.maximum_scaled_value = 10;
+    numeric.step_scaled_value = 1;
+    numeric.initial_scaled_value = 0;
+    numeric.decimal_places = 1u;
+    numeric.enabled = 1u;
+    ERUI_RowHandle numeric_row{};
+    ERUI_TEST_CHECK(registry.add_numeric_slider(
+        provider_handle, root, &numeric, &numeric_row) == ERUI_OK);
+
+    const std::array<ERUI_Utf16View, 3> custom_values{
+        utf16(L"Low"), utf16(L"Medium"), utf16(L"High")};
+    ERUI_CustomSliderDesc custom{};
+    custom.size = sizeof(custom);
+    custom.label = utf16(L"Custom slider");
+    custom.help = utf16(L"Custom slider help");
+    custom.values = custom_values.data();
+    custom.value_count = static_cast<std::uint32_t>(custom_values.size());
+    custom.initial_index = 1u;
+    custom.enabled = 1u;
+    ERUI_RowHandle custom_row{};
+    ERUI_TEST_CHECK(registry.add_custom_slider(
+        provider_handle, root, &custom, &custom_row) == ERUI_OK);
+
+    const std::array<ERUI_Utf16View, 3> choice_values{
+        utf16(L"First"), utf16(L"Second"), utf16(L"Third")};
+    ERUI_ChoiceDesc choice{};
+    choice.size = sizeof(choice);
+    choice.label = utf16(L"Choice");
+    choice.help = utf16(L"Choice help");
+    choice.options = choice_values.data();
+    choice.option_count = static_cast<std::uint32_t>(choice_values.size());
+    choice.initial_index = 1u;
+    ERUI_RowHandle inline_choice_row{};
+    ERUI_TEST_CHECK(registry.add_inline_choice(
+        provider_handle, root, &choice, &inline_choice_row) == ERUI_OK);
+    choice.label = utf16(L"Popup choice");
+    ERUI_RowHandle popup_choice_row{};
+    ERUI_TEST_CHECK(registry.add_popup_choice(
+        provider_handle, root, &choice, &popup_choice_row) == ERUI_OK);
+
+    ERUI_TextInputDesc text_input{};
+    text_input.size = sizeof(text_input);
+    text_input.label = utf16(L"Text input");
+    text_input.help = utf16(L"Text input help");
+    text_input.initial_value = utf16(L"Editable");
+    text_input.placeholder = utf16(L"Type here");
+    text_input.maximum_length = 16u;
+    ERUI_RowHandle text_input_row{};
+    ERUI_TEST_CHECK(registry.add_text_input(
+        provider_handle, root, &text_input, &text_input_row) == ERUI_OK);
+
+    ERUI_ColorPickerDesc color_picker{};
+    color_picker.size = sizeof(color_picker);
+    color_picker.label = utf16(L"Color picker");
+    color_picker.help = utf16(L"Color picker help");
+    color_picker.initial_value = ERUI_Color{96u, 180u, 255u, 0u};
+    color_picker.enabled = 1u;
+    ERUI_RowHandle color_picker_row{};
+    ERUI_TEST_CHECK(registry.add_color_picker(
+        provider_handle, root, &color_picker, &color_picker_row) == ERUI_OK);
+    color_picker.label = utf16(L"Construction-disabled color picker");
+    color_picker.help = utf16(L"This action row is not materialized.");
+    color_picker.enabled = 0u;
+    ERUI_RowHandle disabled_color_picker_row{};
+    ERUI_TEST_CHECK(registry.add_color_picker(
+        provider_handle,
+        root,
+        &color_picker,
+        &disabled_color_picker_row) == ERUI_OK);
+
+    ERUI_SubmenuDesc submenu{};
+    submenu.size = sizeof(submenu);
+    submenu.label = utf16(L"Submenu");
+    submenu.help = utf16(L"Submenu help");
+    submenu.page_title = utf16(L"Child page");
+    submenu.enabled = 1u;
+    ERUI_PageHandle child_page{};
+    ERUI_RowHandle submenu_row{};
+    ERUI_TEST_CHECK(registry.add_submenu(
+        provider_handle,
+        root,
+        &submenu,
+        &child_page,
+        &submenu_row) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
+
+    ERUI_RowUpdateDesc availability{};
+    availability.size = sizeof(availability);
+    availability.row = toggle_row;
+    availability.fields = ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
+        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+    availability.interactive = 0u;
+    availability.availability_appearance =
+        ERUI_AVAILABILITY_APPEARANCE_DISABLED;
+    ERUI_UpdateDesc update{};
+    update.size = sizeof(update);
+    update.kind = ERUI_UPDATE_KIND_ROW;
+    update.payload = &availability;
+    ERUI_UpdateBatchDesc batch{};
+    batch.size = sizeof(batch);
+    batch.updates = &update;
+    batch.update_count = 1u;
+    batch.update_stride = sizeof(update);
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_OK);
+
+    // Every type-specific row family validated in game accepts the same
+    // availability fields. Submenu remains outside this contract.
+    const std::array availability_rows{
+        button_row,
+        slider_row,
+        numeric_row,
+        custom_row,
+        inline_choice_row,
+        popup_choice_row,
+        text_input_row,
+        color_picker_row,
+    };
+    for (const ERUI_RowHandle row : availability_rows) {
+        availability.row = row;
+        update.payload = &availability;
+        ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+            ERUI_OK);
+    }
+    availability.row = toggle_row;
+
+    // Button and ColorPicker construction-disabled rows are intentionally
+    // omitted by MenuCompiler. Availability cannot target a native row that
+    // does not exist, so reject it instead of silently accepting no snapshot.
+    const std::array omitted_availability_rows{
+        disabled_button_row, disabled_color_picker_row};
+    for (const ERUI_RowHandle row : omitted_availability_rows) {
+        availability.row = row;
+        update.payload = &availability;
+        ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+            ERUI_INVALID_ARGUMENT);
+    }
+    availability.row = toggle_row;
+
+    ERUI_RowUpdateDesc invalid = availability;
+    invalid.fields = ERUI_ROW_UPDATE_FIELD_INTERACTIVE;
+    invalid.interactive = 2u;
+    invalid.availability_appearance =
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY;
+    update.payload = &invalid;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    invalid = availability;
+    invalid.fields = ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+    invalid.interactive = 0u;
+    invalid.availability_appearance =
+        static_cast<ERUI_AvailabilityAppearance>(99u);
+    update.payload = &invalid;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    invalid = availability;
+    invalid.fields = ERUI_ROW_UPDATE_FIELD_HELP;
+    invalid.help = styled_text(L"Hidden payload");
+    invalid.interactive = 1u;
+    invalid.availability_appearance =
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY;
+    update.payload = &invalid;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    invalid = availability;
+    invalid.fields = ERUI_ROW_UPDATE_FIELD_INTERACTIVE;
+    invalid.interactive = 1u;
+    invalid.availability_appearance = ERUI_AVAILABILITY_APPEARANCE_NORMAL;
+    update.payload = &invalid;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    invalid = availability;
+    invalid.row = submenu_row;
+    invalid.fields = ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+    invalid.interactive = 0u;
+    invalid.availability_appearance =
+        ERUI_AVAILABILITY_APPEARANCE_DISABLED;
+    update.payload = &invalid;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    ERUI_RowUpdateDesc valid_help{};
+    valid_help.size = sizeof(valid_help);
+    valid_help.row = toggle_row;
+    valid_help.fields = ERUI_ROW_UPDATE_FIELD_HELP;
+    valid_help.help = styled_text(L"Must roll back");
+    ERUI_UpdateDesc valid_help_update{};
+    valid_help_update.size = sizeof(valid_help_update);
+    valid_help_update.kind = ERUI_UPDATE_KIND_ROW;
+    valid_help_update.payload = &valid_help;
+    ERUI_UpdateDesc invalid_submenu_update{};
+    invalid_submenu_update.size = sizeof(invalid_submenu_update);
+    invalid_submenu_update.kind = ERUI_UPDATE_KIND_ROW;
+    invalid_submenu_update.payload = &invalid;
+    const std::array<ERUI_UpdateDesc, 2> atomic_updates{
+        valid_help_update, invalid_submenu_update};
+    batch.updates = atomic_updates.data();
+    batch.update_count = static_cast<std::uint32_t>(atomic_updates.size());
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+    const auto compiled_toggle = std::find_if(
+        compiled->root_page().rows.begin(),
+        compiled->root_page().rows.end(),
+        [&](const erui::detail::CompiledRow& row) {
+            return row.row == toggle_row;
+        });
+    ERUI_TEST_CHECK(compiled_toggle != compiled->root_page().rows.end());
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_toggle->help_id)) == L"Original toggle help");
+
+    erui::detail::reset_row_presentation_state();
+}
+
 } // namespace
 
 int main() {
@@ -2316,6 +2652,7 @@ int main() {
     verify_api_1_4_row_update_contract();
     verify_api_1_4_button_styled_update_before_freeze();
     verify_api_1_4_caption_update_contract();
+    verify_api_1_4_row_availability_contract();
 
     ERUI_Api early_v1{};
     early_v1.size = ERUI_API_V1_0_SIZE;

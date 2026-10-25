@@ -88,6 +88,14 @@ enum class Capability : ERUI_Capabilities {
     custom_tabs = ERUI_CAP_CUSTOM_TABS,
     title_screen_text = ERUI_CAP_TITLE_SCREEN_TEXT,
     updates = ERUI_CAP_UPDATES,
+    row_availability = ERUI_CAP_ROW_AVAILABILITY,
+};
+
+enum class AvailabilityAppearance : ERUI_AvailabilityAppearance {
+    follow_interactivity =
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY,
+    normal = ERUI_AVAILABILITY_APPEARANCE_NORMAL,
+    disabled = ERUI_AVAILABILITY_APPEARANCE_DISABLED,
 };
 
 enum class TabIconFormat : ERUI_TabIconFormat {
@@ -1397,7 +1405,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_CUSTOM_SLIDER |
                     ERUI_CAP_CUSTOM_TABS |
                     ERUI_CAP_TITLE_SCREEN_TEXT |
-                    ERUI_CAP_UPDATES)) == 0;
+                    ERUI_CAP_UPDATES |
+                    ERUI_CAP_ROW_AVAILABILITY)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -1421,7 +1430,8 @@ inline bool api_complete_for_version(
                 (ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
                     ERUI_CAP_CUSTOM_TABS |
                     ERUI_CAP_TITLE_SCREEN_TEXT |
-                    ERUI_CAP_UPDATES)) == 0;
+                    ERUI_CAP_UPDATES |
+                    ERUI_CAP_ROW_AVAILABILITY)) == 0;
     }
     if (version == ERUI_API_VERSION_1_2) {
         return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
@@ -1448,7 +1458,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
             (api.capabilities & ERUI_CAP_CUSTOM_TABS) == 0 &&
             (api.capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0 &&
-            (api.capabilities & ERUI_CAP_UPDATES) == 0;
+            (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
+            (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0;
     }
     if (version == ERUI_API_VERSION_1_3) {
         return api.size == ERUI_API_V1_3_SIZE && api.add_text_input &&
@@ -1474,7 +1485,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
             (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
             (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
-            (api.capabilities & ERUI_CAP_UPDATES) == 0;
+            (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
+            (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0;
     }
     if (version == ERUI_API_VERSION_1_4) {
         return api.size == ERUI_API_V1_4_SIZE && api.add_text_input &&
@@ -1499,7 +1511,9 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_INPUT_BINDINGS) != 0 &&
             (api.capabilities & ERUI_CAP_STORAGE) != 0 &&
             (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
-            (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0;
+            (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
+            ((api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 ||
+             (api.capabilities & ERUI_CAP_UPDATES) != 0);
     }
     return false;
 }
@@ -2136,6 +2150,28 @@ public:
         return std::move(derived());
     }
 
+    Derived& interactive(bool value) & noexcept {
+        set_interactive(value);
+        return derived();
+    }
+
+    Derived&& interactive(bool value) && noexcept {
+        set_interactive(value);
+        return std::move(derived());
+    }
+
+    Derived& availability_appearance(
+        AvailabilityAppearance value) & noexcept {
+        set_availability_appearance(value);
+        return derived();
+    }
+
+    Derived&& availability_appearance(
+        AvailabilityAppearance value) && noexcept {
+        set_availability_appearance(value);
+        return std::move(derived());
+    }
+
     [[nodiscard]] ERUI_Result commit() noexcept {
         if (committed_) return ERUI_ALREADY_COMMITTED;
         committed_ = true;
@@ -2148,6 +2184,14 @@ public:
         }
         if ((context_->api.capabilities & ERUI_CAP_UPDATES) == 0 ||
             !context_->api.commit_updates) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        constexpr ERUI_RowUpdateFields availability_fields =
+            ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
+            ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+        if ((fields_ & availability_fields) != 0 &&
+            (context_->api.capabilities &
+                ERUI_CAP_ROW_AVAILABILITY) == 0) {
             return ERUI_NOT_SUPPORTED;
         }
 
@@ -2163,6 +2207,14 @@ public:
         }
         if ((fields_ & ERUI_ROW_UPDATE_FIELD_CAPTION) != 0) {
             row_update.caption = styled_text_view(caption_);
+        }
+        if ((fields_ & ERUI_ROW_UPDATE_FIELD_INTERACTIVE) != 0) {
+            row_update.interactive = interactive_ ? 1u : 0u;
+        }
+        if ((fields_ &
+                ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0) {
+            row_update.availability_appearance =
+                static_cast<ERUI_AvailabilityAppearance>(appearance_);
         }
 
         ERUI_UpdateDesc update{};
@@ -2195,6 +2247,29 @@ protected:
     void set_caption(StyledText&& value) noexcept {
         set_styled_text(
             std::move(value), caption_, ERUI_ROW_UPDATE_FIELD_CAPTION);
+    }
+
+    void set_interactive(bool value) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        interactive_ = value;
+        fields_ |= ERUI_ROW_UPDATE_FIELD_INTERACTIVE;
+    }
+
+    void set_availability_appearance(
+        AvailabilityAppearance value) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        switch (value) {
+        case AvailabilityAppearance::follow_interactivity:
+        case AvailabilityAppearance::normal:
+        case AvailabilityAppearance::disabled:
+            appearance_ = value;
+            fields_ |=
+                ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+            return;
+        default:
+            error_ = ERUI_INVALID_ARGUMENT;
+            return;
+        }
     }
 
 private:
@@ -2294,6 +2369,9 @@ private:
     ERUI_RowUpdateFields fields_{};
     ERUI_Result error_{ERUI_OK};
     bool committed_{};
+    bool interactive_{};
+    AvailabilityAppearance appearance_{
+        AvailabilityAppearance::follow_interactivity};
     StyledText label_{};
     StyledText help_{};
     StyledText caption_{};
@@ -2363,6 +2441,7 @@ public:
     ToggleRowEdit(ToggleRowEdit&&) noexcept = default;
     ToggleRowEdit& operator=(ToggleRowEdit&&) noexcept = default;
     ~ToggleRowEdit() = default;
+
 private:
     friend class ToggleRow;
     ToggleRowEdit(

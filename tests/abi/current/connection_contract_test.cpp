@@ -96,9 +96,50 @@ int main(int argc, char** argv) {
         capability_gated.size = ERUI_API_V1_4_SIZE;
         CHECK(host.get_api(ERUI_API_VERSION_1_4, &capability_gated) == ERUI_OK);
         CHECK(capability_gated.commit_updates != nullptr);
-        capability_gated.capabilities &= ~ERUI_CAP_UPDATES;
+        capability_gated.capabilities &=
+            ~(ERUI_CAP_UPDATES | ERUI_CAP_ROW_AVAILABILITY);
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_ROW_AVAILABILITY;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_UPDATES;
+        capability_gated.capabilities &= ~ERUI_CAP_ROW_AVAILABILITY;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+    }
+
+    {
+        const auto config = configuration(0, ERUI_OK, ERUI_OK,
+            ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY);
+        CHECK(configure(&config) == ERUI_OK);
+        auto connected = erui::connect(0ms);
+        CHECK(connected.success());
+        CHECK(connected.value().supports(erui::Capability::updates));
+        CHECK(!connected.value().supports(
+            erui::Capability::row_availability));
+
+        erui::ToggleRow toggle{};
+        erui::ProviderOptions provider{};
+        provider.provider_id = "tests.row-availability-capability-absent";
+        provider.display_name = L"Row availability capability absent";
+        provider.owner_module = GetModuleHandleW(nullptr);
+        const auto registered = connected.value().register_menu(
+            provider,
+            [&](erui::Menu& menu) noexcept {
+                toggle = menu.root().add_toggle(
+                    L"Toggle", L"Availability must be capability gated", 1u);
+            });
+        CHECK(registered.success());
+        CHECK(toggle.valid());
+        CHECK(toggle.edit().interactive(false).commit() ==
+            ERUI_NOT_SUPPORTED);
+        CHECK(toggle.edit()
+            .availability_appearance(
+                erui::AvailabilityAppearance::disabled)
+            .commit() == ERUI_NOT_SUPPORTED);
+        CHECK(toggle.edit().help(L"Text updates remain available").commit() ==
+            ERUI_OK);
     }
 
     {
@@ -147,6 +188,8 @@ int main(int argc, char** argv) {
         CHECK(connected.value().supports(
             erui::Capability::title_screen_text));
         CHECK(connected.value().supports(erui::Capability::updates));
+        CHECK(connected.value().supports(
+            erui::Capability::row_availability));
 
         auto observed = snapshot(get_snapshot);
         CHECK(observed.get_api_calls == 3);

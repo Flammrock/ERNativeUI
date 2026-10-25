@@ -424,6 +424,8 @@ _Static_assert(ERUI_API_V1_3_SIZE == 384u,
 #if defined(ERUI_API_VERSION_1_4)
 _Static_assert(ERUI_CAP_UPDATES == (UINT64_C(1) << 20),
     "updates capability bit drift");
+_Static_assert(ERUI_CAP_ROW_AVAILABILITY == (UINT64_C(1) << 21),
+    "row-availability capability bit drift");
 _Static_assert(ERUI_UPDATE_KIND_ROW == 1u,
     "row update kind drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_LABEL == (1u << 0),
@@ -432,6 +434,16 @@ _Static_assert(ERUI_ROW_UPDATE_FIELD_HELP == (1u << 1),
     "row-help field bit drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_CAPTION == (1u << 2),
     "row-caption field bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_INTERACTIVE == (1u << 3),
+    "row-interactive field bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4),
+    "row-availability-appearance field bit drift");
+_Static_assert(ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY == 0u,
+    "follow-interactivity appearance value drift");
+_Static_assert(ERUI_AVAILABILITY_APPEARANCE_NORMAL == 1u,
+    "normal availability appearance value drift");
+_Static_assert(ERUI_AVAILABILITY_APPEARANCE_DISABLED == 2u,
+    "disabled availability appearance value drift");
 _Static_assert(ERUI_UPDATE_MAX_COUNT == 4096u,
     "update batch limit drift");
 _Static_assert(ERUI_STYLED_TEXT_MAX_CODE_UNITS == 4096u,
@@ -476,13 +488,17 @@ _Static_assert(offsetof(ERUI_RowUpdateDesc, row) == 8u,
     "row-update handle offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, fields) == 16u,
     "row-update fields offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, interactive) == 20u,
+    "row-update interactive offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, label) == 24u,
     "row-update label offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, help) == 72u,
     "row-update help offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, caption) == 120u,
     "row-update caption offset drift");
-_Static_assert(offsetof(ERUI_RowUpdateDesc, reserved) == 168u,
+_Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,
+    "row-update availability-appearance offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, reserved) == 172u,
     "row-update reserved offset drift");
 _Static_assert(sizeof(ERUI_UpdateDesc) == 24u,
     "update-envelope descriptor size drift");

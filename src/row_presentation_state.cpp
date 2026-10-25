@@ -30,6 +30,10 @@ struct PendingSnapshot {
     std::wstring help{};
     std::optional<std::wstring> caption{};
     std::uint64_t revision{};
+    bool interactive{true};
+    ERUI_AvailabilityAppearance availability_appearance{
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
+    std::uint64_t availability_revision{};
 };
 
 struct Entry {
@@ -42,6 +46,14 @@ struct Entry {
     std::unique_ptr<wchar_t[]> caption_buffer{};
     std::uint64_t desired_revision{};
     std::uint64_t applied_revision{};
+    bool desired_interactive{true};
+    bool applied_interactive{true};
+    ERUI_AvailabilityAppearance desired_availability_appearance{
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
+    ERUI_AvailabilityAppearance applied_availability_appearance{
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
+    std::uint64_t desired_availability_revision{1};
+    std::uint64_t applied_availability_revision{1};
     bool applied_caption_override{};
     bool dirty{};
 };
@@ -52,17 +64,26 @@ std::unordered_map<RowIdentity, std::size_t, RowIdentityHash> g_slots{};
 std::unordered_map<RowIdentity, PendingSnapshot, RowIdentityHash>
     g_preconfiguration_updates{};
 std::uint64_t g_revision{};
+std::uint64_t g_availability_revision{1};
 bool g_configured{};
 bool g_pending{};
 
 bool valid_snapshot(const RowPresentationUpdate& update) noexcept {
+    const bool valid_appearance =
+        update.availability_appearance ==
+            ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY ||
+        update.availability_appearance ==
+            ERUI_AVAILABILITY_APPEARANCE_NORMAL ||
+        update.availability_appearance ==
+            ERUI_AVAILABILITY_APPEARANCE_DISABLED;
     return update.provider != ERUI_INVALID_PROVIDER &&
         update.row != ERUI_INVALID_ROW && !update.label.empty() &&
         update.label.size() <= row_presentation_max_text_units &&
         update.help.size() <= row_presentation_max_text_units &&
         (!update.caption.has_value() ||
             (!update.caption->empty() &&
-             update.caption->size() <= row_presentation_max_text_units));
+             update.caption->size() <= row_presentation_max_text_units)) &&
+        valid_appearance;
 }
 
 void copy_to_buffer(
@@ -90,6 +111,9 @@ ERUI_Result submit_row_presentation_updates(
         std::lock_guard lock(g_mutex);
         std::uint64_t revision = g_revision + 1u;
         if (revision == 0) revision = 1;
+        std::uint64_t availability_revision =
+            g_availability_revision + 1u;
+        if (availability_revision == 0) availability_revision = 1;
 
         if (!g_configured) {
             // The registry has already validated duplicate targets. Reserve
@@ -101,10 +125,15 @@ ERUI_Result submit_row_presentation_updates(
                     .help = std::move(update.help),
                     .caption = std::move(update.caption),
                     .revision = revision,
+                    .interactive = update.interactive,
+                    .availability_appearance =
+                        update.availability_appearance,
+                    .availability_revision = availability_revision,
                 };
             }
             g_preconfiguration_updates = std::move(staged);
             g_revision = revision;
+            g_availability_revision = availability_revision;
             g_pending = true;
             return ERUI_OK;
         }
@@ -161,9 +190,14 @@ ERUI_Result submit_row_presentation_updates(
             entry.desired_help = std::move(updates[index].help);
             entry.desired_caption = std::move(updates[index].caption);
             entry.desired_revision = revision;
+            entry.desired_interactive = updates[index].interactive;
+            entry.desired_availability_appearance =
+                updates[index].availability_appearance;
+            entry.desired_availability_revision = availability_revision;
             entry.dirty = true;
         }
         g_revision = revision;
+        g_availability_revision = availability_revision;
         g_pending = true;
         return ERUI_OK;
     } catch (const std::bad_alloc&) {
@@ -210,6 +244,8 @@ bool configure_row_presentation_state(CompiledMenu& menu) noexcept {
                     static_cast<int>(row.help_id));
                 entry->desired_label = label ? label : L"";
                 entry->desired_help = help ? help : L"";
+                entry->desired_interactive = row.enabled;
+                entry->applied_interactive = row.enabled;
 
                 if (const auto pending =
                         g_preconfiguration_updates.find(identity);
@@ -218,6 +254,12 @@ bool configure_row_presentation_state(CompiledMenu& menu) noexcept {
                     entry->desired_help = pending->second.help;
                     entry->desired_caption = pending->second.caption;
                     entry->desired_revision = pending->second.revision;
+                    entry->desired_interactive =
+                        pending->second.interactive;
+                    entry->desired_availability_appearance =
+                        pending->second.availability_appearance;
+                    entry->desired_availability_revision =
+                        pending->second.availability_revision;
                     entry->label_buffer = std::make_unique<wchar_t[]>(
                         row_presentation_max_text_units + 1u);
                     entry->help_buffer = std::make_unique<wchar_t[]>(
@@ -280,6 +322,11 @@ void synchronize_pending_row_presentations() noexcept {
         entry.applied_caption_override =
             entry.desired_caption.has_value();
         entry.applied_revision = entry.desired_revision;
+        entry.applied_interactive = entry.desired_interactive;
+        entry.applied_availability_appearance =
+            entry.desired_availability_appearance;
+        entry.applied_availability_revision =
+            entry.desired_availability_revision;
         entry.dirty = false;
     }
     g_pending = still_pending;
@@ -303,6 +350,17 @@ RowPresentationView row_presentation_view(std::size_t slot) noexcept {
     };
 }
 
+RowAvailabilityView row_availability_view(std::size_t slot) noexcept {
+    std::lock_guard lock(g_mutex);
+    if (!g_configured || slot >= g_entries.size()) return {};
+    const Entry& entry = *g_entries[slot];
+    return {
+        .interactive = entry.applied_interactive,
+        .appearance = entry.applied_availability_appearance,
+        .revision = entry.applied_availability_revision,
+    };
+}
+
 bool row_presentation_updates_pending() noexcept {
     std::lock_guard lock(g_mutex);
     return g_pending;
@@ -319,6 +377,7 @@ void reset_row_presentation_state() noexcept {
     g_slots.clear();
     g_preconfiguration_updates.clear();
     g_revision = 0;
+    g_availability_revision = 1;
     g_configured = false;
     g_pending = false;
 }

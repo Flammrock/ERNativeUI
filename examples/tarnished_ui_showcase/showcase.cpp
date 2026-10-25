@@ -45,8 +45,40 @@ std::atomic<std::uint8_t> g_label_help_toggle{1};
 std::atomic<std::uint8_t> g_label_help_slider{5};
 std::atomic<std::uint8_t> g_label_help_inline_choice{0};
 std::atomic<std::uint8_t> g_label_help_popup_choice{1};
+std::atomic<std::uint8_t> g_availability_controller{1};
+std::atomic<std::uint8_t> g_availability_appearance{0};
+std::atomic<std::uint8_t> g_availability_target_value{1};
+std::atomic<std::uint8_t> g_initially_disabled_controller{0};
+std::atomic<std::uint8_t> g_initially_disabled_value{1};
+std::atomic<std::uint8_t> g_self_disabling_value{0};
+erui::ToggleRow g_availability_target{};
+erui::ToggleRow g_initially_disabled_target{};
+erui::ToggleRow g_self_disabling_target{};
+
+struct AvailabilityMatrixRows {
+    erui::SliderRow intensity{};
+    erui::ButtonRow button{};
+    erui::ToggleRow toggle{};
+    erui::SliderRow slider{};
+    erui::NumericSliderRow numeric_slider{};
+    erui::CustomSliderRow custom_slider{};
+    erui::InlineChoiceRow inline_choice{};
+    erui::PopupChoiceRow popup_choice{};
+    erui::TextInputRow text_input{};
+    erui::ColorPickerRow color_picker{};
+};
+
+AvailabilityMatrixRows g_availability_matrix_rows{};
+std::atomic<std::uint8_t> g_availability_matrix_disabled{0};
+std::atomic<std::uint8_t> g_availability_matrix_intensity{50};
+std::atomic<std::uint8_t> g_availability_matrix_toggle{1};
+std::atomic<std::uint8_t> g_availability_matrix_slider{5};
+std::atomic<std::uint8_t> g_availability_matrix_inline_choice{0};
+std::atomic<std::uint8_t> g_availability_matrix_popup_choice{1};
 constexpr std::array<std::wstring_view, 3> kLabelHelpChoiceValues{
     L"VALUE ZERO", L"VALUE ONE", L"VALUE TWO"};
+constexpr std::array<std::wstring_view, 3> kAvailabilityAppearanceValues{
+    L"Follow", L"Normal", L"Disabled"};
 
 struct ShowcaseActionState {
     explicit ShowcaseActionState(const wchar_t* name) noexcept
@@ -70,6 +102,7 @@ struct ColorPickerState {
 ColorPickerState g_root_color{{}, {171u, 125u, 99u}};
 ColorPickerState g_subpage_color{{}, {90u, 174u, 63u}};
 ColorPickerState g_label_help_color{{}, {107u, 100u, 80u}};
+ColorPickerState g_availability_matrix_color{{}, {107u, 100u, 80u}};
 
 struct TextInputState {
     std::mutex mutex{};
@@ -79,6 +112,7 @@ struct TextInputState {
 TextInputState g_player_note{};
 TextInputState g_extended_note{};
 TextInputState g_label_help_text{};
+TextInputState g_availability_matrix_text{};
 
 struct PopupVariant {
     std::wstring label{};
@@ -203,6 +237,37 @@ ERUI_Result commit_intensity_presentation(std::uint8_t value) noexcept {
         .append(L".");
 
     return g_intensity_row.edit()
+        .label(std::move(label))
+        .help(std::move(help))
+        .commit();
+}
+
+ERUI_Result commit_availability_matrix_intensity_presentation(
+    std::uint8_t value) noexcept {
+    if (!g_availability_matrix_rows.intensity.valid()) return ERUI_OK;
+
+    wchar_t percentage[16]{};
+    _snwprintf_s(
+        percentage,
+        std::size(percentage),
+        _TRUNCATE,
+        L"%u%%",
+        static_cast<unsigned>(value));
+
+    const erui::TextStyle percentage_style =
+        erui::TextStyle{}.color(intensity_color(value));
+    erui::StyledText label{};
+    label.append(g_text ? g_text->intensity : L"Intensity")
+        .append(L" (")
+        .append(percentage, percentage_style)
+        .append(L")");
+
+    erui::StyledText help{};
+    help.append(L"This styled availability target must restore its original ")
+        .append(percentage, percentage_style)
+        .append(L" color after being disabled and re-enabled.");
+
+    return g_availability_matrix_rows.intensity.edit()
         .label(std::move(label))
         .help(std::move(help))
         .commit();
@@ -382,6 +447,155 @@ void ERUI_CALL intensity_changed(void* context, std::uint8_t value) noexcept {
     if (commit_intensity_presentation(value) != ERUI_OK) {
         debug(L"Could not commit the API 1.4 intensity row edit.");
     }
+}
+
+void ERUI_CALL availability_matrix_intensity_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (!g_registration.supports(erui::Capability::updates)) return;
+
+    if (commit_availability_matrix_intensity_presentation(value) != ERUI_OK) {
+        debug(L"Could not update the availability-matrix intensity row.");
+    }
+}
+
+erui::AvailabilityAppearance availability_appearance(
+    std::uint8_t value) noexcept {
+    switch (value) {
+    case 1: return erui::AvailabilityAppearance::normal;
+    case 2: return erui::AvailabilityAppearance::disabled;
+    default: return erui::AvailabilityAppearance::follow_interactivity;
+    }
+}
+
+ERUI_Result commit_availability_target() noexcept {
+    return g_availability_target.edit()
+        .interactive(
+            g_availability_controller.load(std::memory_order_acquire) != 0)
+        .availability_appearance(availability_appearance(
+            g_availability_appearance.load(std::memory_order_acquire)))
+        .commit();
+}
+
+void ERUI_CALL availability_interaction_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (commit_availability_target() != ERUI_OK) {
+        debug(L"Could not update the availability target interaction.");
+    }
+}
+
+void ERUI_CALL availability_appearance_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (commit_availability_target() != ERUI_OK) {
+        debug(L"Could not update the availability target appearance.");
+    }
+}
+
+void ERUI_CALL initially_disabled_interaction_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    const ERUI_Result result = g_initially_disabled_target.edit()
+        .interactive(value != 0)
+        .availability_appearance(
+            erui::AvailabilityAppearance::follow_interactivity)
+        .commit();
+    if (result != ERUI_OK) {
+        debug(L"Could not update the initially disabled Toggle.");
+    }
+}
+
+void ERUI_CALL self_disabling_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (g_self_disabling_target.edit().interactive(false).commit() !=
+        ERUI_OK) {
+        debug(L"Could not disable the currently focused Toggle.");
+    }
+}
+
+void reenable_self_disabling_target() noexcept {
+    if (g_self_disabling_target.edit().interactive(true).commit() !=
+        ERUI_OK) {
+        debug(L"Could not re-enable the self-disabling Toggle.");
+    }
+}
+
+template <typename Row>
+ERUI_Result commit_matrix_availability(
+    const Row& row,
+    bool interactive) noexcept {
+    if (!row.valid()) return ERUI_OK;
+    return row.edit()
+        .interactive(interactive)
+        .availability_appearance(
+            erui::AvailabilityAppearance::follow_interactivity)
+        .commit();
+}
+
+ERUI_Result commit_availability_matrix(bool interactive) noexcept {
+    ERUI_Result first_failure = ERUI_OK;
+    const auto apply = [&](const auto& row) {
+        const ERUI_Result result =
+            commit_matrix_availability(row, interactive);
+        if (first_failure == ERUI_OK && result != ERUI_OK) {
+            first_failure = result;
+        }
+    };
+
+    apply(g_availability_matrix_rows.intensity);
+    apply(g_availability_matrix_rows.button);
+    apply(g_availability_matrix_rows.toggle);
+    apply(g_availability_matrix_rows.slider);
+    apply(g_availability_matrix_rows.numeric_slider);
+    apply(g_availability_matrix_rows.custom_slider);
+    apply(g_availability_matrix_rows.inline_choice);
+    apply(g_availability_matrix_rows.popup_choice);
+    apply(g_availability_matrix_rows.text_input);
+    apply(g_availability_matrix_rows.color_picker);
+    return first_failure;
+}
+
+ERUI_Result commit_availability_matrix_popup_caption(
+    std::uint8_t selected_index) noexcept {
+    if (!g_availability_matrix_rows.popup_choice.valid()) {
+        return ERUI_OK;
+    }
+    if (selected_index >= kLabelHelpChoiceValues.size()) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+    return g_availability_matrix_rows.popup_choice.edit()
+        .label(L"Popup Choice target")
+        .caption(kLabelHelpChoiceValues[selected_index])
+        .commit();
+}
+
+void ERUI_CALL availability_matrix_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (commit_availability_matrix(value == 0u) != ERUI_OK) {
+        debug(L"Could not update one or more availability-matrix rows.");
+    }
+}
+
+void ERUI_CALL availability_matrix_popup_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (commit_availability_matrix_popup_caption(value) != ERUI_OK) {
+        debug(L"Could not update the availability Popup Choice caption.");
+    }
+}
+
+void availability_matrix_button_pressed() noexcept {
+    debug(L"Availability-matrix Button activated.");
 }
 
 void numeric_slider_changed(
@@ -886,6 +1100,208 @@ DWORD WINAPI initialize(void*) noexcept {
             }
         }
 
+        if (menu.supports(erui::Capability::row_availability)) {
+            auto availability_matrix = root.add_submenu(
+                L"Row Interaction Matrix",
+                L"Validates runtime interaction and disabled presentation on every supported typed row.",
+                L"Row Interaction Matrix",
+                L"Disable all targets, then verify every target is skipped and visibly dimmed.");
+
+            availability_matrix.add_toggle(
+                L"Disable all targets",
+                L"On makes every target below non-interactive and selects its disabled presentation.",
+                g_availability_matrix_disabled.load(
+                    std::memory_order_acquire),
+                &availability_matrix_changed,
+                &g_availability_matrix_disabled);
+
+            erui::SliderOptions matrix_intensity{};
+            matrix_intensity.minimum = 0;
+            matrix_intensity.maximum = 100;
+            matrix_intensity.step = 5;
+            matrix_intensity.initial_value =
+                g_availability_matrix_intensity.load(
+                    std::memory_order_acquire);
+            g_availability_matrix_rows.intensity =
+                availability_matrix.add_slider(
+                    L"Intensity",
+                    L"A styled red-to-green label verifies exact appearance restoration.",
+                    matrix_intensity,
+                    &availability_matrix_intensity_changed,
+                    &g_availability_matrix_intensity);
+
+            g_availability_matrix_rows.button =
+                availability_matrix.add_button<
+                    &availability_matrix_button_pressed>(
+                        L"Button target",
+                        L"This Button participates in the availability matrix.");
+
+            g_availability_matrix_rows.toggle =
+                availability_matrix.add_toggle(
+                    L"Toggle target",
+                    L"This Toggle participates in the availability matrix.",
+                    g_availability_matrix_toggle.load(
+                        std::memory_order_acquire),
+                    &value_changed,
+                    &g_availability_matrix_toggle);
+
+            erui::SliderOptions matrix_slider{};
+            matrix_slider.minimum = 0;
+            matrix_slider.maximum = 10;
+            matrix_slider.step = 1;
+            matrix_slider.initial_value =
+                g_availability_matrix_slider.load(std::memory_order_acquire);
+            g_availability_matrix_rows.slider =
+                availability_matrix.add_slider(
+                    L"Byte Slider target",
+                    L"This byte Slider participates in the availability matrix.",
+                    matrix_slider,
+                    &value_changed,
+                    &g_availability_matrix_slider);
+
+            if (menu.supports(erui::Capability::numeric_slider)) {
+                erui::NumericSliderOptions matrix_numeric{};
+                matrix_numeric.minimum = -1.0;
+                matrix_numeric.maximum = 1.0;
+                matrix_numeric.step = 0.1;
+                matrix_numeric.initial_value = 0.0;
+                matrix_numeric.decimal_places = 1;
+                g_availability_matrix_rows.numeric_slider =
+                    availability_matrix.add_slider<&numeric_slider_changed>(
+                        L"Numeric Slider target",
+                        L"This Numeric Slider participates in the availability matrix.",
+                        matrix_numeric);
+            }
+
+            if (menu.supports(erui::Capability::custom_slider)) {
+                erui::CustomSliderOptions matrix_custom{};
+                matrix_custom.value_count = 3;
+                matrix_custom.initial_index = 1;
+                matrix_custom.format_value =
+                    [](std::uint32_t index, std::uint32_t) -> std::wstring {
+                        constexpr std::array<std::wstring_view, 3> values{
+                            L"Low", L"Medium", L"High"};
+                        return index < values.size()
+                            ? std::wstring(values[index])
+                            : std::wstring{};
+                    };
+                g_availability_matrix_rows.custom_slider =
+                    availability_matrix.add_custom_slider<
+                        &custom_slider_changed>(
+                            L"Custom Slider target",
+                            L"This Custom Slider participates in the availability matrix.",
+                            matrix_custom);
+            }
+
+            erui::ChoiceOptions matrix_choice{};
+            matrix_choice.values = kLabelHelpChoiceValues.data();
+            matrix_choice.count = kLabelHelpChoiceValues.size();
+            matrix_choice.initial_index =
+                g_availability_matrix_inline_choice.load(
+                    std::memory_order_acquire);
+            g_availability_matrix_rows.inline_choice =
+                availability_matrix.add_inline_choice(
+                    L"Inline Choice target",
+                    L"This Inline Choice participates in the availability matrix.",
+                    matrix_choice,
+                    &value_changed,
+                    &g_availability_matrix_inline_choice);
+
+            matrix_choice.initial_index =
+                g_availability_matrix_popup_choice.load(
+                    std::memory_order_acquire);
+            g_availability_matrix_rows.popup_choice =
+                availability_matrix.add_popup_choice(
+                    L"Popup Choice target",
+                    L"This Popup Choice participates in the availability matrix.",
+                    matrix_choice,
+                    &availability_matrix_popup_changed,
+                    &g_availability_matrix_popup_choice);
+
+            if (menu.supports(erui::Capability::text_input)) {
+                erui::TextInputOptions matrix_text{};
+                matrix_text.initial_value = L"Editable";
+                matrix_text.placeholder = L"Enter text";
+                g_availability_matrix_rows.text_input =
+                    availability_matrix.add_text_input<&text_input_changed>(
+                        L"Text Input target",
+                        L"This TextInput participates in the availability matrix.",
+                        matrix_text,
+                        g_availability_matrix_text);
+            }
+
+            if (menu.supports(erui::Capability::color_picker)) {
+                erui::ColorPickerOptions matrix_color{};
+                matrix_color.initial_value = {107u, 100u, 80u};
+                g_availability_matrix_rows.color_picker =
+                    availability_matrix.add_color_picker<
+                        &color_picker_changed>(
+                            L"Color Picker target",
+                            L"This ColorPicker participates in the availability matrix.",
+                            matrix_color,
+                            g_availability_matrix_color);
+            }
+
+            auto availability = root.add_submenu(
+                L"Runtime Availability",
+                L"Validates focus eligibility and native disabled presentation.",
+                L"Runtime Availability",
+                L"Interaction and appearance are independent API 1.4 properties.");
+
+            availability.add_toggle(
+                L"Target interaction",
+                L"Off makes the ordinary target below impossible to focus or activate.",
+                g_availability_controller.load(std::memory_order_acquire),
+                &availability_interaction_changed,
+                &g_availability_controller);
+
+            erui::ChoiceOptions appearance{};
+            appearance.values = kAvailabilityAppearanceValues.data();
+            appearance.count = kAvailabilityAppearanceValues.size();
+            appearance.initial_index =
+                g_availability_appearance.load(std::memory_order_acquire);
+            availability.add_inline_choice(
+                L"Target appearance",
+                L"Follow tracks interaction; Normal and Disabled force only the visual state.",
+                appearance,
+                &availability_appearance_changed,
+                &g_availability_appearance);
+
+            g_availability_target = availability.add_toggle(
+                L"Availability target",
+                L"Its focus eligibility and native appearance are controlled above.",
+                g_availability_target_value.load(std::memory_order_acquire),
+                &value_changed,
+                &g_availability_target_value);
+
+            availability.add_toggle(
+                L"Enable construction-disabled target",
+                L"Tests synchronization from the authored gray twin back to the normal twin.",
+                g_initially_disabled_controller.load(
+                    std::memory_order_acquire),
+                &initially_disabled_interaction_changed,
+                &g_initially_disabled_controller);
+
+            g_initially_disabled_target = availability.add_toggle(
+                L"Construction-disabled target",
+                L"This row starts disabled and becomes selectable when enabled above.",
+                g_initially_disabled_value.load(std::memory_order_acquire),
+                &value_changed,
+                &g_initially_disabled_value,
+                false);
+
+            g_self_disabling_target = availability.add_toggle(
+                L"Self-disable on change",
+                L"Changing this row commits interactive(false) from its own callback.",
+                g_self_disabling_value.load(std::memory_order_acquire),
+                &self_disabling_changed,
+                &g_self_disabling_value);
+
+            availability.add_button<&reenable_self_disabling_target>(
+                L"Re-enable self-disabling row",
+                L"Restores the row above after its callback moved focus away.");
+        }
+
         if (menu.supports(erui::Capability::numeric_slider) ||
             menu.supports(erui::Capability::custom_slider)) {
             erui::Page advanced_sliders = root.add_submenu(
@@ -1140,6 +1556,23 @@ DWORD WINAPI initialize(void*) noexcept {
                 g_label_help_variant.load(std::memory_order_acquire)) !=
             ERUI_OK) {
             debug(L"Could not apply one or more initial row presentations.");
+        }
+        if (g_registration.supports(erui::Capability::row_availability)) {
+            if (commit_availability_matrix_intensity_presentation(
+                    g_availability_matrix_intensity.load(
+                        std::memory_order_acquire)) != ERUI_OK) {
+                debug(L"Could not apply the initial availability-matrix intensity presentation.");
+            }
+            if (commit_availability_matrix_popup_caption(
+                    g_availability_matrix_popup_choice.load(
+                        std::memory_order_acquire)) != ERUI_OK) {
+                debug(L"Could not apply the initial availability Popup Choice caption.");
+            }
+            if (commit_availability_matrix(
+                    g_availability_matrix_disabled.load(
+                        std::memory_order_acquire) == 0u) != ERUI_OK) {
+                debug(L"Could not apply the initial availability matrix.");
+            }
         }
     }
     debug(L"Menu registered successfully.");

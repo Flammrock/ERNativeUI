@@ -137,8 +137,24 @@ _Static_assert(sizeof(ERUI_StyledTextView) == 48u,
     "ERUI styled-text view ABI drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_CAPTION == (1u << 2),
     "ERUI row-caption field bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_INTERACTIVE == (1u << 3),
+    "ERUI row-interactive field bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4),
+    "ERUI row-appearance field bit drift");
+_Static_assert(ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY == 0u,
+    "ERUI follow-interactivity appearance drift");
+_Static_assert(ERUI_AVAILABILITY_APPEARANCE_NORMAL == 1u,
+    "ERUI normal appearance drift");
+_Static_assert(ERUI_AVAILABILITY_APPEARANCE_DISABLED == 2u,
+    "ERUI disabled appearance drift");
 _Static_assert(sizeof(ERUI_RowUpdateDesc) == 176u,
     "ERUI row-update descriptor ABI drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, interactive) == 20u,
+    "ERUI row-update interactive offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,
+    "ERUI row-update appearance offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, reserved) == 172u,
+    "ERUI row-update reserved offset drift");
 _Static_assert(sizeof(ERUI_UpdateDesc) == 24u,
     "ERUI update descriptor ABI drift");
 _Static_assert(sizeof(ERUI_UpdateBatchDesc) == 32u,
@@ -181,6 +197,8 @@ _Static_assert(ERUI_CAP_TITLE_SCREEN_TEXT == (UINT64_C(1) << 19),
     "ERUI title-screen text capability drift");
 _Static_assert(ERUI_CAP_UPDATES == (UINT64_C(1) << 20),
     "ERUI updates capability drift");
+_Static_assert(ERUI_CAP_ROW_AVAILABILITY == (UINT64_C(1) << 21),
+    "ERUI row-availability capability drift");
 _Static_assert(ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR == (1u << 0),
     "ERUI title-screen custom-color flag drift");
 _Static_assert(ERUI_TITLE_SCREEN_CORNER_TOP_LEFT == 1u,
@@ -347,7 +365,12 @@ int main(void) {
     text_style.color.blue = 80u;
     row_update.size = (uint32_t)sizeof(row_update);
     row_update.fields = ERUI_ROW_UPDATE_FIELD_LABEL |
-        ERUI_ROW_UPDATE_FIELD_HELP;
+        ERUI_ROW_UPDATE_FIELD_HELP |
+        ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
+        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+    row_update.interactive = 1u;
+    row_update.availability_appearance =
+        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY;
     row_update.label.size = (uint32_t)sizeof(row_update.label);
     row_update.label.spans = &text_style;
     row_update.label.span_count = 1u;

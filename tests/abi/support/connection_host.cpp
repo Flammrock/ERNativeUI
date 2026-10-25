@@ -35,7 +35,8 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_COLOR_PICKER | ERUI_CAP_BUILTIN_PAGES |
     ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
     ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
-    ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT | ERUI_CAP_UPDATES;
+    ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT | ERUI_CAP_UPDATES |
+    ERUI_CAP_ROW_AVAILABILITY;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
@@ -964,7 +965,9 @@ ERUI_Result ERUI_CALL commit_updates(
     };
     constexpr ERUI_RowUpdateFields kKnownFields =
         ERUI_ROW_UPDATE_FIELD_LABEL | ERUI_ROW_UPDATE_FIELD_HELP |
-        ERUI_ROW_UPDATE_FIELD_CAPTION;
+        ERUI_ROW_UPDATE_FIELD_CAPTION |
+        ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
+        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
     std::unordered_set<ERUI_RowHandle> rows{};
     try {
         rows.reserve(description->update_count);
@@ -995,8 +998,7 @@ ERUI_Result ERUI_CALL commit_updates(
         ERUI_RowUpdateDesc row{};
         std::memcpy(&row, update.payload, sizeof(row));
         if (row.flags != 0 || row.row == ERUI_INVALID_ROW || row.fields == 0 ||
-            (row.fields & ~kKnownFields) != 0 || row.reserved0 != 0 ||
-            row.reserved[0] != 0 || row.reserved[1] != 0) {
+            (row.fields & ~kKnownFields) != 0 || row.reserved != 0) {
             return ERUI_INVALID_ARGUMENT;
         }
         try {
@@ -1009,12 +1011,27 @@ ERUI_Result ERUI_CALL commit_updates(
         const bool help = (row.fields & ERUI_ROW_UPDATE_FIELD_HELP) != 0;
         const bool caption =
             (row.fields & ERUI_ROW_UPDATE_FIELD_CAPTION) != 0;
+        const bool interactive =
+            (row.fields & ERUI_ROW_UPDATE_FIELD_INTERACTIVE) != 0;
+        const bool appearance =
+            (row.fields &
+                ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
         if ((!label && !canonical_zero_view(row.label)) ||
             (!help && !canonical_zero_view(row.help)) ||
             (!caption && !canonical_zero_view(row.caption)) ||
             (label && !valid_view(row.label, false)) ||
             (help && !valid_view(row.help, true)) ||
-            (caption && !valid_view(row.caption, false))) {
+            (caption && !valid_view(row.caption, false)) ||
+            (!interactive && row.interactive != 0) ||
+            (interactive && row.interactive > 1u) ||
+            (!appearance && row.availability_appearance !=
+                ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY) ||
+            (appearance && row.availability_appearance !=
+                    ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY &&
+                row.availability_appearance !=
+                    ERUI_AVAILABILITY_APPEARANCE_NORMAL &&
+                row.availability_appearance !=
+                    ERUI_AVAILABILITY_APPEARANCE_DISABLED)) {
             return ERUI_INVALID_ARGUMENT;
         }
     }
@@ -1078,11 +1095,16 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
     if (version >= ERUI_API_VERSION_1_4) {
         api.commit_updates = &commit_updates;
     } else {
-        api.capabilities &= ~ERUI_CAP_UPDATES;
+        api.capabilities &= ~(ERUI_CAP_UPDATES |
+            ERUI_CAP_ROW_AVAILABILITY);
     }
     if ((g_disabled_features.load(std::memory_order_relaxed) &
             ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0) {
         api.capabilities &= ~ERUI_CAP_TITLE_SCREEN_TEXT;
+    }
+    if ((g_disabled_features.load(std::memory_order_relaxed) &
+            ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY) != 0) {
+        api.capabilities &= ~ERUI_CAP_ROW_AVAILABILITY;
     }
     return api;
 }
@@ -1095,7 +1117,8 @@ ERUI_TestConfigureConnection(
     if (!configuration || configuration->size != sizeof(*configuration) ||
         configuration->version != ERUI_TEST_CONNECTION_CONTROL_VERSION ||
         (configuration->reserved[0] &
-            ~ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0 ||
+            ~(ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT |
+                ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY)) != 0 ||
         configuration->reserved[1] != 0 ||
         configuration->reserved[2] != 0) {
         return ERUI_INVALID_ARGUMENT;
