@@ -278,12 +278,61 @@ constexpr std::string_view kTextInputEditorFactoryPattern =
     "4C 8B DC 4D 89 4B 20 49 89 4B 08 55 56 57 "
     "48 81 EC 90 00 00 00 49 C7 43 90 FE FF FF FF";
 
+// Bytes of kNativeBackPattern that an inline hook may overwrite: the whole
+// prologue up to the `mov rbx, rcx` (5 + 1 + 7 + 9). A 5-byte rel32 jump and
+// a 14-byte absolute jump both end inside it, so the rest stays untouched.
+constexpr std::size_t kNativeBackHookablePrologue = 22;
+
+[[nodiscard]] std::string_view pattern_after_bytes(
+    std::string_view pattern,
+    std::size_t bytes) noexcept {
+    std::size_t cursor = 0;
+    for (std::size_t skipped = 0; skipped < bytes; ++skipped) {
+        while (cursor < pattern.size() && pattern[cursor] == ' ') ++cursor;
+        while (cursor < pattern.size() && pattern[cursor] != ' ') ++cursor;
+    }
+    while (cursor < pattern.size() && pattern[cursor] == ' ') ++cursor;
+    return pattern.substr(cursor);
+}
+
+// Another mod may already hold an inline hook on the function: its jump
+// replaces the first instructions while the body stays as the game shipped
+// it. At the RVA of a verified build profile, a recognised hook jump followed
+// by the untouched rest of the pattern is still the same function, and both
+// calling it and hooking it again chain through the other mod's hook.
+[[nodiscard]] bool matches_behind_hook_jump(
+    const ModuleView& game,
+    const std::uint8_t* address,
+    std::string_view pattern,
+    std::size_t hookable_prologue) noexcept {
+    if (!address || pattern.empty() || hookable_prologue == 0) return false;
+    const bool hook_jump = game.matches(address, "E9") ||
+        game.matches(address, "FF 25") ||
+        game.matches(address, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? FF E0");
+    if (!hook_jump) return false;
+    const std::string_view tail = pattern_after_bytes(pattern, hookable_prologue);
+    return !tail.empty() && game.matches(address + hookable_prologue, tail);
+}
+
+void log_hooked_fallback(
+    const char* name,
+    const std::uint8_t* fallback,
+    std::uintptr_t fallback_rva) noexcept {
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "Address %-22s = %p (fallback RVA 0x%" PRIXPTR "; entry already hooked by another module, body validated)",
+        name,
+        static_cast<const void*>(fallback),
+        fallback_rva);
+}
+
 std::uint8_t* resolve_direct(
     const ModuleView& game,
     const char* name,
     std::string_view scan_pattern,
     std::uintptr_t fallback_rva,
-    std::string_view fallback_validation = {}) noexcept {
+    std::string_view fallback_validation = {},
+    std::size_t hookable_prologue = 0) noexcept {
     const ScanResult scan = game.scan_executable(scan_pattern);
     if (scan.address && scan.matches == 1) {
         erui::detail::logf(
@@ -319,6 +368,12 @@ std::uint8_t* resolve_direct(
             name,
             static_cast<void*>(fallback),
             fallback_rva);
+        return fallback;
+    }
+    if (fallback && game.is_executable(fallback) &&
+        matches_behind_hook_jump(
+            game, fallback, fallback_validation, hookable_prologue)) {
+        log_hooked_fallback(name, fallback, fallback_rva);
         return fallback;
     }
 
@@ -400,7 +455,8 @@ std::uint8_t* resolve_optional_direct(
     const char* name,
     std::string_view scan_pattern,
     std::uintptr_t fallback_rva,
-    std::string_view fallback_validation) noexcept {
+    std::string_view fallback_validation,
+    std::size_t hookable_prologue = 0) noexcept {
     const ScanResult scan = game.scan_executable(scan_pattern);
     if (scan.address && scan.matches == 1) {
         erui::detail::logf(
@@ -423,6 +479,12 @@ std::uint8_t* resolve_optional_direct(
             name,
             static_cast<void*>(fallback),
             fallback_rva);
+        return fallback;
+    }
+    if (fallback && game.is_executable(fallback) &&
+        matches_behind_hook_jump(
+            game, fallback, fallback_validation, hookable_prologue)) {
+        log_hooked_fallback(name, fallback, fallback_rva);
         return fallback;
     }
 
@@ -1826,7 +1888,7 @@ bool resolve_game_addresses(
             menu_runtime_profile
                 ? menu_runtime_profile->native_back_rva
                 : std::uintptr_t{0},
-            kNativeBackPattern));
+            kNativeBackPattern, kNativeBackHookablePrologue));
         if (!output.native_back) {
             return false;
         }
@@ -1839,7 +1901,7 @@ bool resolve_game_addresses(
                 menu_runtime_profile
                     ? menu_runtime_profile->native_back_rva
                     : std::uintptr_t{0},
-                kNativeBackPattern));
+                kNativeBackPattern, kNativeBackHookablePrologue));
     }
 
     if (require_custom_text || require_text_inputs ||
