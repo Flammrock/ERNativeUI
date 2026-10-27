@@ -20,6 +20,7 @@ extern "C" {
  * contract hosts continue to require every reserved value to be zero. */
 #define ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT (1u << 0)
 #define ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY (1u << 1)
+#define ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY (1u << 2)
 
 /*
  * Keep the shared control protocol independent of symbols introduced by the
@@ -70,6 +71,22 @@ typedef struct ERUI_TestTitleScreenTextObservation {
 typedef ERUI_Result (ERUI_CALL* ERUI_TestGetTitleScreenTextObservationFn)(
     uint32_t index,
     ERUI_TestTitleScreenTextObservation* out_observation);
+
+#if defined(ERUI_API_VERSION_1_4)
+/* Exact row-update descriptor observation used only by the current wrapper. */
+typedef struct ERUI_TestRowUpdateObservation {
+    uint32_t size;
+    uint32_t descriptor_size;
+    ERUI_RowHandle row;
+    ERUI_RowUpdateFields fields;
+    uint32_t visible;
+    uint32_t reserved[2];
+} ERUI_TestRowUpdateObservation;
+
+typedef ERUI_Result (ERUI_CALL* ERUI_TestGetRowUpdateObservationFn)(
+    uint32_t index,
+    ERUI_TestRowUpdateObservation* out_observation);
+#endif
 
 /*
  * Simulates one player-originated assignment update. The fixture updates its

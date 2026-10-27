@@ -1,5 +1,16 @@
 # ColorPicker
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#color-picker"><code>color_picker</code></a>
+    </td>
+  </tr>
+</table>
+
 A `ColorPicker` adds an RGB color row to an `erui::Page`. Confirm opens Elden
 Ring's native character-creation color editor, and the row displays the last
 confirmed color.
@@ -164,15 +175,15 @@ with other threads and keep the callback short.
 hides Elden Ring's private packed representation and does not promise an alpha
 channel.
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check host support.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.1 |
-| Capability | `erui::Capability::color_picker` / `ERUI_CAP_COLOR_PICKER` |
+| Required capability | `erui::Capability::color_picker` / `ERUI_CAP_COLOR_PICKER` |
 | GFX presentation | With runtime patching enabled, ERNativeUI completes the standalone bracketed live swatch |
 | Disabled behavior | `enabled = false` omits the row because this action path has no proven disabled appearance |
 | Runtime value | `erui::Color` with byte-sized red, green, and blue channels |

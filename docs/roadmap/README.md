@@ -5,15 +5,17 @@ stable release. It exists so players, mod authors, testers, and contributors
 can follow progress without confusing development plans with published API
 contracts.
 
-The current stable contract is **ERUI API 1.3**, first published by
-ERNativeUI 1.3.0. Everything in this roadmap remains unavailable to ordinary
-client mods until a compatible release publishes it.
+The current source contract is **ERUI API 1.4** and its feature scope is
+complete. It has not been frozen or published yet. The latest published stable
+contract remains API 1.3, first published by ERNativeUI 1.3.0. API 1.4's
+remaining work is final validation, contract freeze, migration documentation,
+and publication rather than additional feature scope.
 
 ## Active roadmap
 
 | Target | Theme | Status | Roadmap |
 |---|---|---|---|
-| ERUI API 1.4 | Reactive native menus: atomic updates, recursive Collapse controls, conditional content, repagination, and tab visibility | Proposed; alpha infrastructure is implementing, while feature research and ABI work have not started | [API 1.4 roadmap](api-1.4.md) |
+| ERUI API 1.4 | Typed row references plus atomic text/style, availability, visibility, and repagination updates | Pre-freeze release preparation; feature scope complete | [API 1.4 release scope](api-1.4.md) |
 
 ## Status vocabulary
 

@@ -1,5 +1,16 @@
 # Custom Configuration tabs
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="capabilities.md#custom-tabs"><code>custom_tabs</code></a>
+    </td>
+  </tr>
+</table>
+
 API 1.3 lets a client mod add its own top-level tab to Elden Ring's
 **System** screen. The tab receives an ordinary ERNativeUI page, so it can
 contain the same settings controls and automatic pagination as a submenu or a
@@ -20,7 +31,7 @@ requiring any knowledge of Elden Ring's UI objects or ERNativeUI's hooks.
 | Add a top-level tab to System | [Create a custom tab](#create-a-custom-tab) |
 | Give the tab an icon without loading a file | [Create the icon in code](#create-the-icon-in-code) |
 | Use a PNG or another existing image | [Convert an existing image](#convert-an-existing-image) |
-| Connect and register the menu safely | [Check availability and register](#check-availability-and-register) |
+| Connect and register the menu safely | [Check capabilities and register](#check-capabilities-and-register) |
 | Add settings controls to the tab | [Add controls to the tab](#add-controls-to-the-tab) |
 | Translate the title and rows | [Localize player-facing text](#localize-player-facing-text) |
 | Choose stable IDs and tab order | [Choose identity and ordering](#choose-identity-and-ordering) |
@@ -63,8 +74,8 @@ That is the complete tab declaration:
 - `title` is the text shown to the player; and
 - `menu.add_tab` returns the page that receives the mod's controls.
 
-With no icon supplied, ERNativeUI uses its fallback tab glyph. The next section
-adds a custom image without introducing an image-loading dependency.
+With no icon supplied, ERNativeUI uses its default triangle icon. The next
+section adds a custom image without introducing an image-loading dependency.
 
 ## Create the icon in code
 
@@ -151,7 +162,7 @@ for transparency.
 
 The host copies all 4,096 bytes during `menu.add_tab`, so the client does not
 need to keep the source buffer alive after the call. Leaving `tab.icon` empty
-selects the fallback glyph.
+selects the default triangle icon.
 
 The buildable
 [Showcase Screenshot Helper](../../examples/showcase_screenshot_helper/README.md)
@@ -220,7 +231,7 @@ Windows DIB/BMP pixels are commonly stored in blue, green, red, opacity order
 and may run from the bottom row upward. Convert them to the contract above
 before calling `menu.add_tab`.
 
-## Check availability and register
+## Check capabilities and register
 
 Check the capability on the established connection before registration. A
 valid API 1.3 connection can still omit custom tabs when the installed Elden
@@ -455,9 +466,9 @@ if ((api.capabilities & ERUI_CAP_CUSTOM_TABS) != 0) {
 }
 ```
 
-Set `tab.icon` to `NULL` for the fallback glyph. As in C++, the host copies
-the descriptor and pixels before `add_tab` returns. The strict-C header is the
-normative ABI contract.
+Set `tab.icon` to `NULL` for the default triangle icon. As in C++, the host
+copies the descriptor and pixels before `add_tab` returns. The strict-C header
+is the normative ABI contract.
 
 ## Troubleshooting
 

@@ -84,6 +84,13 @@ struct has_availability_appearance<T, std::void_t<decltype(
     std::declval<T&>().availability_appearance(
         erui::AvailabilityAppearance::follow_interactivity))>>
     : std::true_type {};
+
+template <typename T, typename = void>
+struct has_visible : std::false_type {};
+
+template <typename T>
+struct has_visible<T, std::void_t<decltype(
+    std::declval<T&>().visible(true))>> : std::true_type {};
 #endif
 
 template <typename T, typename = void>
@@ -715,6 +722,7 @@ static_assert(!has_legacy_title_screen_text_overload<erui::Menu>::value);
 static_assert(sizeof(ERUI_TextStyleSpan) == 32);
 static_assert(sizeof(ERUI_StyledTextView) == 48);
 static_assert(sizeof(ERUI_RowUpdateDesc) == 176);
+static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172);
 static_assert(sizeof(ERUI_UpdateDesc) == 24);
 static_assert(sizeof(ERUI_UpdateBatchDesc) == 32);
 static_assert(std::is_trivially_copyable_v<ERUI_TextStyleSpan>);
@@ -726,6 +734,8 @@ static_assert(static_cast<ERUI_Capabilities>(erui::Capability::updates) ==
     ERUI_CAP_UPDATES);
 static_assert(static_cast<ERUI_Capabilities>(
     erui::Capability::row_availability) == ERUI_CAP_ROW_AVAILABILITY);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::row_visibility) == ERUI_CAP_ROW_VISIBILITY);
 static_assert(static_cast<ERUI_AvailabilityAppearance>(
     erui::AvailabilityAppearance::follow_interactivity) ==
     ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY);
@@ -745,6 +755,15 @@ static_assert(has_interactive<erui::InlineChoiceRowEdit>::value);
 static_assert(has_interactive<erui::PopupChoiceRowEdit>::value);
 static_assert(has_interactive<erui::TextInputRowEdit>::value);
 static_assert(has_interactive<erui::ColorPickerRowEdit>::value);
+static_assert(has_visible<erui::ButtonRowEdit>::value);
+static_assert(has_visible<erui::ToggleRowEdit>::value);
+static_assert(has_visible<erui::SliderRowEdit>::value);
+static_assert(has_visible<erui::NumericSliderRowEdit>::value);
+static_assert(has_visible<erui::CustomSliderRowEdit>::value);
+static_assert(has_visible<erui::InlineChoiceRowEdit>::value);
+static_assert(has_visible<erui::PopupChoiceRowEdit>::value);
+static_assert(has_visible<erui::TextInputRowEdit>::value);
+static_assert(has_visible<erui::ColorPickerRowEdit>::value);
 static_assert(has_availability_appearance<erui::ButtonRowEdit>::value);
 static_assert(has_availability_appearance<erui::SliderRowEdit>::value);
 static_assert(has_availability_appearance<
@@ -764,6 +783,12 @@ static_assert(std::is_same_v<decltype(
     erui::ToggleRowEdit&>);
 static_assert(std::is_same_v<decltype(
     std::declval<erui::ToggleRowEdit&&>().interactive(false)),
+    erui::ToggleRowEdit&&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ToggleRowEdit&>().visible(true)),
+    erui::ToggleRowEdit&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::ToggleRowEdit&&>().visible(false)),
     erui::ToggleRowEdit&&>);
 static_assert(std::is_same_v<decltype(
     std::declval<erui::ButtonRowEdit&>().interactive(false)),

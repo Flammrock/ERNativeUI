@@ -84,7 +84,7 @@ When `cache_supported` is `false`, the Button is not rendered and does not
 consume a pagination slot. Its callback must still be a valid function because
 ERNativeUI validates the complete Button declaration during registration.
 
-## When availability can change later
+## When interaction can change later
 
 Use `enabled` only for a condition that is known while registering the menu
 and remains stable for the process. Changing the original C++ variable later
@@ -99,5 +99,5 @@ Programmatic value methods such as `Registration::set_value()` change a
 control's value, not its enabled state.
 
 [Controls index](../README.md) |
-[Availability and capabilities](../../availability.md) |
+[Capabilities](../../capabilities.md) |
 [Button](../button.md)

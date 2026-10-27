@@ -141,6 +141,8 @@ _Static_assert(ERUI_ROW_UPDATE_FIELD_INTERACTIVE == (1u << 3),
     "ERUI row-interactive field bit drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4),
     "ERUI row-appearance field bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_VISIBLE == (1u << 5),
+    "ERUI row-visible field bit drift");
 _Static_assert(ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY == 0u,
     "ERUI follow-interactivity appearance drift");
 _Static_assert(ERUI_AVAILABILITY_APPEARANCE_NORMAL == 1u,
@@ -153,8 +155,8 @@ _Static_assert(offsetof(ERUI_RowUpdateDesc, interactive) == 20u,
     "ERUI row-update interactive offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,
     "ERUI row-update appearance offset drift");
-_Static_assert(offsetof(ERUI_RowUpdateDesc, reserved) == 172u,
-    "ERUI row-update reserved offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172u,
+    "ERUI row-update visible offset drift");
 _Static_assert(sizeof(ERUI_UpdateDesc) == 24u,
     "ERUI update descriptor ABI drift");
 _Static_assert(sizeof(ERUI_UpdateBatchDesc) == 32u,
@@ -199,6 +201,8 @@ _Static_assert(ERUI_CAP_UPDATES == (UINT64_C(1) << 20),
     "ERUI updates capability drift");
 _Static_assert(ERUI_CAP_ROW_AVAILABILITY == (UINT64_C(1) << 21),
     "ERUI row-availability capability drift");
+_Static_assert(ERUI_CAP_ROW_VISIBILITY == (UINT64_C(1) << 22),
+    "ERUI row-visibility capability drift");
 _Static_assert(ERUI_TITLE_SCREEN_TEXT_USE_CUSTOM_COLOR == (1u << 0),
     "ERUI title-screen custom-color flag drift");
 _Static_assert(ERUI_TITLE_SCREEN_CORNER_TOP_LEFT == 1u,
@@ -367,10 +371,12 @@ int main(void) {
     row_update.fields = ERUI_ROW_UPDATE_FIELD_LABEL |
         ERUI_ROW_UPDATE_FIELD_HELP |
         ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
-        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE |
+        ERUI_ROW_UPDATE_FIELD_VISIBLE;
     row_update.interactive = 1u;
     row_update.availability_appearance =
         ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY;
+    row_update.visible = 1u;
     row_update.label.size = (uint32_t)sizeof(row_update.label);
     row_update.label.spans = &text_style;
     row_update.label.span_count = 1u;
@@ -414,6 +420,7 @@ int main(void) {
         ERUI_CAP_BUILTIN_PAGES == 0u || ERUI_CAP_INPUT_BINDINGS == 0u ||
         ERUI_CAP_STORAGE == 0u || ERUI_CAP_NUMERIC_SLIDER == 0u ||
         ERUI_CAP_CUSTOM_SLIDER == 0u || ERUI_CAP_UPDATES == 0u ||
+        ERUI_CAP_ROW_VISIBILITY == 0u || row_update.visible != 1u ||
         update_batch.updates != &update ||
         update.payload != &row_update ||
         ERUI_PAGE_TITLE_BUFFER_CAPACITY < 1u;

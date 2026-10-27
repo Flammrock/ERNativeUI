@@ -280,6 +280,53 @@ struct RowPresentationMaterializationTicket {
     bool armed{};
 };
 
+// A page owns at most one deferred selected-help publication. Newer help
+// generations replace an older request while a modal or visibility rebuild
+// blocks publication. Every pointer is revalidated against the page epoch and
+// physical binding before it can enter native code.
+struct SelectedHelpRefreshTicket {
+    void* page{};
+    void* native_row{};
+    const wchar_t* source{};
+    std::size_t physical_index{detail::invalid_compiled_index};
+    std::size_t presentation_slot{detail::invalid_compiled_index};
+    std::uint64_t page_epoch{};
+    std::uint64_t help_revision{};
+    bool armed{};
+};
+
+enum class SelectedHelpRefreshDecision : std::uint8_t {
+    none,
+    defer,
+    discard,
+    publish,
+};
+
+// Native-free lifecycle policy used by the bridge and unit tests. Selection
+// mismatch is consumed: moving focus already asks Elden Ring to present that
+// row's current help source, so retrying an old request would be incorrect.
+[[nodiscard]] constexpr SelectedHelpRefreshDecision
+select_help_refresh_decision(
+    const SelectedHelpRefreshTicket& ticket,
+    bool blocked,
+    std::uint64_t current_page_epoch,
+    std::uint32_t selected_count,
+    std::uint32_t selected_index,
+    std::size_t maximum_rows = 16) noexcept {
+    if (!ticket.armed) return SelectedHelpRefreshDecision::none;
+    if (blocked) return SelectedHelpRefreshDecision::defer;
+    if (!ticket.page || !ticket.native_row || !ticket.source ||
+        ticket.page_epoch == 0 || ticket.help_revision == 0 ||
+        ticket.physical_index == detail::invalid_compiled_index ||
+        ticket.presentation_slot == detail::invalid_compiled_index ||
+        ticket.page_epoch != current_page_epoch || selected_count == 0 ||
+        selected_count > maximum_rows || selected_index >= selected_count ||
+        selected_index != ticket.physical_index) {
+        return SelectedHelpRefreshDecision::discard;
+    }
+    return SelectedHelpRefreshDecision::publish;
+}
+
 // Exact-build availability check used before API provider registration opens.
 [[nodiscard]] bool native_row_presentation_build_supported(
     const ModuleView& game) noexcept;
@@ -316,8 +363,15 @@ void complete_native_row_presentation_materialization(
 // cannot republish their construction-selected availability presentation. A paused
 // frame may also call it directly while a native modal dialog owns the update
 // path.
-void apply_native_row_presentations(
+[[nodiscard]] SelectedHelpRefreshTicket apply_native_row_presentations(
     void* page,
+    const GameAddresses& addresses) noexcept;
+
+// Consumes an exact pending ticket before directly invoking the validated
+// native selected-help presenter. The call always occurs outside the
+// presentation mutex and only from the page-frame UI thread.
+void publish_native_selected_help(
+    SelectedHelpRefreshTicket ticket,
     const GameAddresses& addresses) noexcept;
 
 // Installs the desired EditProperty eligibility byte before Elden Ring's

@@ -1,5 +1,6 @@
 #include "native_tab_catalogue.hpp"
 
+#include "default_tab_icon.hpp"
 #include "menu.hpp"
 #include "test_assertions.hpp"
 
@@ -11,6 +12,44 @@
 #include <vector>
 
 namespace {
+
+constexpr std::size_t icon_offset(std::size_t x, std::size_t y) noexcept {
+    return (y * ERUI_TAB_ICON_WIDTH + x) * 4U;
+}
+
+constexpr std::uint64_t default_icon_checksum() noexcept {
+    std::uint64_t checksum = 1469598103934665603ULL;
+    for (const std::uint8_t value :
+         erui::native::default_custom_tab_icon_rgba8) {
+        checksum ^= value;
+        checksum *= 1099511628211ULL;
+    }
+    return checksum;
+}
+
+static_assert(erui::native::default_custom_tab_icon_rgba8.size() ==
+    ERUI_TAB_ICON_RGBA8_BYTE_COUNT);
+static_assert(erui::native::custom_tab_icon_requests_raster(
+    erui::TabIconSource::fallback));
+static_assert(erui::native::custom_tab_icon_requests_raster(
+    erui::TabIconSource::rgba8));
+static_assert(erui::native::default_custom_tab_icon_rgba8[
+    icon_offset(0, 0) + 3U] == 0);
+static_assert(erui::native::default_custom_tab_icon_rgba8[
+    icon_offset(15, 4) + 3U] == 160);
+static_assert(erui::native::default_custom_tab_icon_rgba8[
+    icon_offset(15, 8) + 0U] == 107);
+static_assert(erui::native::default_custom_tab_icon_rgba8[
+    icon_offset(15, 8) + 1U] == 100);
+static_assert(erui::native::default_custom_tab_icon_rgba8[
+    icon_offset(15, 8) + 2U] == 80);
+static_assert(erui::native::default_custom_tab_icon_rgba8[
+    icon_offset(15, 8) + 3U] == 255);
+static_assert(erui::native::default_custom_tab_icon_rgba8[
+    icon_offset(15, 12) + 3U] ==
+    erui::native::default_custom_tab_icon_rgba8[
+        icon_offset(16, 12) + 3U]);
+static_assert(default_icon_checksum() == 0x060E1AD1E6E4B6F7ULL);
 
 using erui::TabIconSource;
 using erui::TabMetadata;

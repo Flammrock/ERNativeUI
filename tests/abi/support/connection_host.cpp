@@ -36,7 +36,7 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
     ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
     ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT | ERUI_CAP_UPDATES |
-    ERUI_CAP_ROW_AVAILABILITY;
+    ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
@@ -74,6 +74,7 @@ std::unordered_map<ERUI_InputActionHandle, ActionState> g_actions{};
 std::uint32_t g_custom_tab_count{};
 std::uint32_t g_title_screen_text_count{};
 std::vector<TitleScreenTextState> g_title_screen_text_observations{};
+std::vector<ERUI_TestRowUpdateObservation> g_row_update_observations{};
 
 bool valid_slot(std::uint32_t state, std::uint32_t input,
     std::uint32_t count) noexcept {
@@ -967,10 +968,13 @@ ERUI_Result ERUI_CALL commit_updates(
         ERUI_ROW_UPDATE_FIELD_LABEL | ERUI_ROW_UPDATE_FIELD_HELP |
         ERUI_ROW_UPDATE_FIELD_CAPTION |
         ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
-        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE |
+        ERUI_ROW_UPDATE_FIELD_VISIBLE;
     std::unordered_set<ERUI_RowHandle> rows{};
+    std::vector<ERUI_TestRowUpdateObservation> observations{};
     try {
         rows.reserve(description->update_count);
+        observations.reserve(description->update_count);
     } catch (...) {
         return ERUI_OUT_OF_MEMORY;
     }
@@ -998,7 +1002,7 @@ ERUI_Result ERUI_CALL commit_updates(
         ERUI_RowUpdateDesc row{};
         std::memcpy(&row, update.payload, sizeof(row));
         if (row.flags != 0 || row.row == ERUI_INVALID_ROW || row.fields == 0 ||
-            (row.fields & ~kKnownFields) != 0 || row.reserved != 0) {
+            (row.fields & ~kKnownFields) != 0) {
             return ERUI_INVALID_ARGUMENT;
         }
         try {
@@ -1016,6 +1020,8 @@ ERUI_Result ERUI_CALL commit_updates(
         const bool appearance =
             (row.fields &
                 ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
+        const bool visible =
+            (row.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
         if ((!label && !canonical_zero_view(row.label)) ||
             (!help && !canonical_zero_view(row.help)) ||
             (!caption && !canonical_zero_view(row.caption)) ||
@@ -1031,9 +1037,28 @@ ERUI_Result ERUI_CALL commit_updates(
                 row.availability_appearance !=
                     ERUI_AVAILABILITY_APPEARANCE_NORMAL &&
                 row.availability_appearance !=
-                    ERUI_AVAILABILITY_APPEARANCE_DISABLED)) {
+                    ERUI_AVAILABILITY_APPEARANCE_DISABLED) ||
+            (!visible && row.visible != 0) ||
+            (visible && row.visible > 1u)) {
             return ERUI_INVALID_ARGUMENT;
         }
+        ERUI_TestRowUpdateObservation observation{};
+        observation.size = sizeof(observation);
+        observation.descriptor_size = row.size;
+        observation.row = row.row;
+        observation.fields = row.fields;
+        observation.visible = row.visible;
+        observations.push_back(observation);
+    }
+    try {
+        std::lock_guard lock(g_state_mutex);
+        g_row_update_observations.reserve(
+            g_row_update_observations.size() + observations.size());
+        g_row_update_observations.insert(
+            g_row_update_observations.end(),
+            observations.begin(), observations.end());
+    } catch (...) {
+        return ERUI_OUT_OF_MEMORY;
     }
     return ERUI_OK;
 }
@@ -1096,7 +1121,7 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
         api.commit_updates = &commit_updates;
     } else {
         api.capabilities &= ~(ERUI_CAP_UPDATES |
-            ERUI_CAP_ROW_AVAILABILITY);
+            ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY);
     }
     if ((g_disabled_features.load(std::memory_order_relaxed) &
             ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0) {
@@ -1105,6 +1130,10 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
     if ((g_disabled_features.load(std::memory_order_relaxed) &
             ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY) != 0) {
         api.capabilities &= ~ERUI_CAP_ROW_AVAILABILITY;
+    }
+    if ((g_disabled_features.load(std::memory_order_relaxed) &
+            ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY) != 0) {
+        api.capabilities &= ~ERUI_CAP_ROW_VISIBILITY;
     }
     return api;
 }
@@ -1118,7 +1147,8 @@ ERUI_TestConfigureConnection(
         configuration->version != ERUI_TEST_CONNECTION_CONTROL_VERSION ||
         (configuration->reserved[0] &
             ~(ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT |
-                ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY)) != 0 ||
+                ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY |
+                ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY)) != 0 ||
         configuration->reserved[1] != 0 ||
         configuration->reserved[2] != 0) {
         return ERUI_INVALID_ARGUMENT;
@@ -1143,6 +1173,7 @@ ERUI_TestConfigureConnection(
         g_custom_tab_count = 0;
         g_title_screen_text_count = 0;
         g_title_screen_text_observations.clear();
+        g_row_update_observations.clear();
     }
     return ERUI_OK;
 }
@@ -1172,6 +1203,22 @@ ERUI_TestGetTitleScreenTextObservation(
         observation.text[unit] = static_cast<std::uint16_t>(source.text[unit]);
     }
     *out_observation = observation;
+    return ERUI_OK;
+}
+
+extern "C" __declspec(dllexport) ERUI_Result ERUI_CALL
+ERUI_TestGetRowUpdateObservation(
+    std::uint32_t index,
+    ERUI_TestRowUpdateObservation* out_observation) {
+    if (!out_observation || out_observation->size < sizeof(*out_observation)) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    std::lock_guard lock(g_state_mutex);
+    if (index >= g_row_update_observations.size()) {
+        return ERUI_NOT_FOUND;
+    }
+    *out_observation = g_row_update_observations[index];
     return ERUI_OK;
 }
 

@@ -93,6 +93,20 @@ bool same_profile(
 }
 
 bool same_profile(
+    const erui::native::SelectedHelpPresenterAddressProfile& left,
+    const erui::native::SelectedHelpPresenterAddressProfile& right) noexcept {
+    return left.build == right.build &&
+        left.image_size == right.image_size &&
+        left.presenter_rva == right.presenter_rva &&
+        left.clone_wrapper_rva == right.clone_wrapper_rva &&
+        left.inner_clone_rva == right.inner_clone_rva &&
+        left.two_owned_string_cleanup_rva ==
+            right.two_owned_string_cleanup_rva &&
+        left.owned_string_clone_rva == right.owned_string_clone_rva &&
+        left.help_thunk_rva == right.help_thunk_rva;
+}
+
+bool same_profile(
     const erui::native::ColorPickerAddressProfile& left,
     const erui::native::ColorPickerAddressProfile& right) noexcept {
     return left.build == right.build &&
@@ -347,6 +361,40 @@ int main() {
             0x748180, 0x9594A0, 0x74B5F0, 0x74B300,
             0x95D4C0, 0x962850, 0x86AAC0, 0x9629D0,
             0x9627E0, 0x2B17B68, 0x2B17BA0, 0x2B17BD8}));
+
+    const auto* const help_270 =
+        erui::native::find_selected_help_presenter_address_profile(
+            EldenRingBuild::v2_7_0_0);
+    const auto* const help_271 =
+        erui::native::find_selected_help_presenter_address_profile(
+            EldenRingBuild::v2_7_1_0);
+    const auto* const help_272 =
+        erui::native::find_selected_help_presenter_address_profile(
+            EldenRingBuild::v2_7_2_0);
+    ERUI_TEST_CHECK(help_270 == nullptr);
+    ERUI_TEST_CHECK(help_271 && help_272);
+    ERUI_TEST_CHECK(same_profile(
+        *help_271,
+        erui::native::SelectedHelpPresenterAddressProfile{
+            EldenRingBuild::v2_7_1_0,
+            0x5E0DA00,
+            0x977BE0,
+            0x93D300,
+            0x78EB60,
+            0x7373A0,
+            0x117910,
+            0x7469C0}));
+    ERUI_TEST_CHECK(same_profile(
+        *help_272,
+        erui::native::SelectedHelpPresenterAddressProfile{
+            EldenRingBuild::v2_7_2_0,
+            0x5DFD600,
+            0x978090,
+            0x93D7B0,
+            0x78F010,
+            0x737850,
+            0x117910,
+            0x746E70}));
 
     const auto* const color_270 =
         erui::native::find_color_picker_address_profile(

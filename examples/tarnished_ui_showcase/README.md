@@ -5,7 +5,7 @@
 - runtime localization for all 15 language identifiers currently reported by
   Elden Ring's Steamworks interface, explicit `vietnamese` identifier support,
   and English fallback for every other future identifier;
-- one explicit API 1.3 connection reused for localization and registration;
+- one explicit API 1.4 connection reused for localization and registration;
 - host-owned toggle and slider values;
 - a dedicated advanced-slider submenu containing `x0.6`, signed `-0.5`, and
   `3.0s` Numeric Sliders plus a deliberately absurd Custom Slider that moves
@@ -25,6 +25,10 @@
   ColorPicker, with an additional red-to-green styled Intensity row that
   verifies exact color restoration, plus a focused **Runtime Availability**
   subpage proving that interaction and disabled appearance remain independent;
+- API 1.4 **Reactive Layout** matrices on Game Options, a custom tab, and an
+  ordinary subpage; each rebuilds mixed row types and pagination immediately
+  from a retained Slider callback through `.visible(bool)`, without a separate
+  Refresh button;
 - a capability-gated TextInput submenu with the default 16-unit limit and an
   explicit 35-UTF-16-unit field;
 - a nested logical page with 32 generated action rows;
@@ -100,6 +104,33 @@ the callback must complete, focus must move to a surviving row, and the target
 must remain skipped until **Re-enable self-disabling row** is pressed. Repeat
 after leaving/reopening the page and after rapidly closing/reopening System.
 
+The Reactive Layout matrix is repeated on three native surfaces: the normal
+Game Options tab, the **Reactive Layout** custom tab, and the **Reactive Layout
+subpage** opened from Game Options. Each starts with **Layout configuration =
+0** and contains Button, Toggle, byte Slider, Numeric Slider, Custom Slider,
+Inline Choice, Popup Choice, TextInput, ColorPicker, and eight pagination
+targets. There is no Refresh row: changing the Slider commits every requested
+`.visible(...)` edit directly from its callback.
+
+- `0` (**Full**) shows every target and spans two physical slices on the
+  isolated custom-tab and subpage matrices.
+- `1` (**Compact**) keeps a mixed subset and three pagination targets; it fits
+  one physical page, so Next disappears immediately.
+- `2` (**Minimal**) leaves only Layout configuration and the always-visible
+  sentinel.
+
+On each surface, test `0 -> 1 -> 2 -> 1 -> 0`, including once while focused on
+a row that the next layout hides. The page must not close or flash, focus must
+move to a surviving row, Next/Previous must track the current row count, and
+every value/editor state must survive reconstruction. Repeat after switching
+tabs, backing out of/reopening the subpage, and closing/reopening System. The
+sentinel must never disappear or duplicate.
+
+On the Reactive Layout subpage, also test the focused title transition
+`0 -> 1 -> 0`: its heading must change from the two-slice `Reactive Layout
+subpage (1/2)` variant to the one-slice `Reactive Layout subpage` title and
+back to `(1/2)` in place, without a page close/open transition or stale title.
+
 The example builds presentation from text and an allowlisted style rather than
 embedding markup:
 
@@ -119,6 +150,11 @@ Existing `label(L"...")`, `caption(L"...")`, and `help(L"...")` calls are
 literal-text APIs; the host escapes their contents before sending them to
 Scaleform. Caption editing is available only on `ButtonRowEdit` and
 `PopupChoiceRowEdit` in this milestone.
+
+For a focused mod-author explanation of the same surface, including
+capability checks, commit semantics, interaction versus appearance, visibility
+and pagination behavior, read the
+[API 1.4 row-updates guides](../../docs/guides/row-updates/README.md).
 
 The showcase declares semantic defaults, then loads optional overrides from
 `mods/tarnished-showcase/config.ini` beside

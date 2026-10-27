@@ -101,10 +101,64 @@ void compile_physical_titles(
     }
 }
 
-void compile_live_capacity_physical_titles(
+std::size_t maximum_visible_slice_count(
+    const CompiledMenu& compiled,
+    std::size_t page_index) {
+    const CompiledPage& page = compiled.pages[page_index];
+    const bool has_live_first_page_capacity =
+        page_index == compiled.root_page_index ||
+        compiled.is_builtin_page_index(page_index) ||
+        page.kind == PageKind::tab;
+    const std::size_t first_page_capacity =
+        has_live_first_page_capacity ? 1 : native_subpage_capacity;
+    PageSlice first_slice{};
+    if (!resolve_paginated_slice(
+            page_index,
+            page.rows.size(),
+            first_page_capacity,
+            native_subpage_capacity,
+            0,
+            first_slice)) {
+        throw std::logic_error(
+            "physical title variants could not resolve their first slice");
+    }
+    return first_slice.slice_count;
+}
+
+[[nodiscard]] bool page_has_runtime_visibility(
+    const CompiledPage& page) noexcept {
+    return std::any_of(
+        page.rows.begin(), page.rows.end(), [](const CompiledRow& row) {
+            return row.visibility_editable;
+        });
+}
+
+void compile_physical_title_variants(
     CompiledMenu& compiled,
     const Page& input,
     CompiledPage& output,
+    std::size_t page_index) {
+    const std::size_t maximum_slice_count =
+        maximum_visible_slice_count(compiled, page_index);
+    output.physical_title_variants.by_slice_count.resize(
+        maximum_slice_count + 1);
+    for (std::size_t slice_count = 1;
+         slice_count <= maximum_slice_count;
+         ++slice_count) {
+        compile_physical_titles(
+            compiled,
+            input,
+            output,
+            page_index,
+            slice_count,
+            output.physical_title_variants.by_slice_count[slice_count]);
+    }
+}
+
+void compile_live_capacity_physical_titles(
+    CompiledMenu& compiled,
+    const Page& input,
+    const CompiledPage& output,
     std::size_t page_index,
     std::unique_ptr<BuiltinPhysicalTitlePlan>& destination) {
     auto plan = std::make_unique<BuiltinPhysicalTitlePlan>();
@@ -137,13 +191,28 @@ void compile_live_capacity_physical_titles(
         if (existing == plan->variants.end()) {
             BuiltinPhysicalTitleVariant variant{};
             variant.slice_count = first_slice.slice_count;
-            compile_physical_titles(
-                compiled,
-                input,
-                output,
-                page_index,
-                first_slice.slice_count,
-                variant.title_ids);
+            if (page_has_runtime_visibility(output)) {
+                const std::vector<TextId>* const titles =
+                    output.physical_title_variants.titles_for(
+                        first_slice.slice_count);
+                if (!titles) {
+                    throw std::logic_error(
+                        "built-in page title variant was not precompiled");
+                }
+                variant.title_ids = *titles;
+            } else {
+                // Preserve the frozen API 1.0-1.3 formatter contract for a
+                // page that cannot change topology. It receives exactly the
+                // original live-capacity title plans, not every API 1.4
+                // visibility count that could exist on another page.
+                compile_physical_titles(
+                    compiled,
+                    input,
+                    output,
+                    page_index,
+                    first_slice.slice_count,
+                    variant.title_ids);
+            }
             plan->variants.push_back(std::move(variant));
             variant_index = plan->variants.size() - 1;
         } else {
@@ -286,6 +355,7 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
             compiled_row.kind = row.kind;
             compiled_row.provider = row.provider;
             compiled_row.row = row.row;
+            compiled_row.visibility_editable = row.visibility_editable;
             compiled_row.label_id = compiled->texts.add(row.label);
             compiled_row.help_id = compiled->texts.add(row.help);
             register_text_binding(
@@ -472,26 +542,74 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
         }
     }
 
-    for (std::size_t page_index = 0; page_index < compiled->pages.size(); ++page_index) {
-        if (compiled->is_builtin_page_index(page_index)) continue;
-        compile_physical_titles(
+    // Visibility can reduce an editable logical page to each slice count
+    // between one and the maximum produced by its full row set. Compile that
+    // complete matrix before freezing text storage; runtime rebuilds then
+    // select one immutable vector without formatting or allocation. Pages
+    // owned only by API 1.0-1.3 providers deliberately retain their frozen
+    // formatter call pattern and never allocate this matrix.
+    for (std::size_t page_index = 0; page_index < compiled->pages.size();
+         ++page_index) {
+        if (!page_has_runtime_visibility(compiled->pages[page_index])) {
+            continue;
+        }
+        compile_physical_title_variants(
             *compiled,
             *menu.pages_[page_index],
             compiled->pages[page_index],
-            page_index,
-            compiled->page_plans[page_index].slices.size(),
-            compiled->pages[page_index].physical_title_ids);
+            page_index);
+    }
+
+    // Retain the original full-row title plans for existing callers. Their
+    // IDs are aliases of the matching precompiled visibility variant, so the
+    // formatter is still invoked only once per (page number, page count).
+    for (std::size_t page_index = 0; page_index < compiled->pages.size();
+         ++page_index) {
+        if (compiled->is_builtin_page_index(page_index)) continue;
+        const std::size_t slice_count =
+            compiled->page_plans[page_index].slices.size();
+        CompiledPage& page = compiled->pages[page_index];
+        if (page_has_runtime_visibility(page)) {
+            const std::vector<TextId>* const titles =
+                page.physical_title_variants.titles_for(slice_count);
+            if (!titles) {
+                throw std::logic_error(
+                    "ordinary page title plan was not precompiled");
+            }
+            page.physical_title_ids = *titles;
+        } else {
+            compile_physical_titles(
+                *compiled,
+                *menu.pages_[page_index],
+                page,
+                page_index,
+                slice_count,
+                page.physical_title_ids);
+        }
     }
     for (std::uint8_t capacity = game_options_min_plan_capacity;
          capacity <= game_options_max_visual_capacity; ++capacity) {
         const std::size_t index = capacity - game_options_min_plan_capacity;
-        compile_physical_titles(
-            *compiled,
-            *menu.root_page_,
-            compiled->root_page(),
-            compiled->root_page_index,
-            compiled->root_plans[index].pages.slices.size(),
-            compiled->root_physical_title_ids[index]);
+        const std::size_t slice_count =
+            compiled->root_plans[index].pages.slices.size();
+        if (page_has_runtime_visibility(compiled->root_page())) {
+            const std::vector<TextId>* const titles =
+                compiled->root_page().physical_title_variants.titles_for(
+                    slice_count);
+            if (!titles) {
+                throw std::logic_error(
+                    "root page title plan was not precompiled");
+            }
+            compiled->root_physical_title_ids[index] = *titles;
+        } else {
+            compile_physical_titles(
+                *compiled,
+                *menu.root_page_,
+                compiled->root_page(),
+                compiled->root_page_index,
+                slice_count,
+                compiled->root_physical_title_ids[index]);
+        }
     }
     // Category zero is Game Options and already uses the root-title plans
     // above. Other built-in panels reveal their free capacity only after the

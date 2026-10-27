@@ -33,6 +33,10 @@ struct RowPresentationView {
     // Null keeps the right-hand control text under native ownership.
     const wchar_t* caption{};
     std::uint64_t revision{};
+    // Advances only when the stable help payload changes. Native row
+    // presentation uses this generation to avoid republishing focused help
+    // for label-, caption-, or availability-only edits.
+    std::uint64_t help_revision{};
 
     [[nodiscard]] explicit operator bool() const noexcept {
         return revision != 0 && label && help;

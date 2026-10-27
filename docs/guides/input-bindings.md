@@ -1,5 +1,16 @@
 # Input bindings
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="capabilities.md#input-bindings"><code>input_bindings</code></a>
+    </td>
+  </tr>
+</table>
+
 An input binding connects one action in a mod to a controller button, keyboard
 key, or mouse button that the player can change in Elden Ring's settings.
 
@@ -762,7 +773,7 @@ shows the data structures and codec.
   lifetime. Hot-unloading a committed provider is unsupported.
 
 For exact limits and error behavior, read
-[Lifecycle, errors, and limits](../reference/lifecycle-errors-and-limits.md#important-api-11-limits).
+[Lifecycle, errors, and limits](../reference/lifecycle-errors-and-limits.md#important-api-14-limits).
 
 ## How this feature was found
 

@@ -38,6 +38,10 @@ using PageFrameFn = void(__fastcall*)(
     void* page,
     float frame_value,
     std::uint8_t* input_enabled);
+// Rebuilds the visible LineHelp text from the currently selected native row.
+// The exact-build resolver proves its row-source clone and ownership path
+// before API 1.4 row updates are exposed.
+using SelectedHelpPresenterFn = void(__fastcall*)(void* page);
 using BufferConstructorFn = void*(__fastcall*)(void* destination);
 using TextReferenceFn = void*(__fastcall*)(void* destination, std::uint32_t message_id);
 using AddToggleFn = void(__fastcall*)(
@@ -159,6 +163,7 @@ struct GameAddresses {
     OpenSubPageFn open_sub_page{};
     NativeBackFn native_back{};
     PageFrameFn page_frame{};
+    SelectedHelpPresenterFn selected_help_presenter{};
     BufferConstructorFn on_off_list{};
     BufferConstructorFn menu_context{};
     TextReferenceFn text_ref_help{};
@@ -217,11 +222,12 @@ struct GameAddresses {
 
     // API 1.4 row presentation updates reuse only the validated physical
     // OptionSetting row identity, the ordinary-caption and action-controller
-    // identities, the page-frame boundary, and the narrow Scaleform title
-    // bridge. They deliberately do not depend on the software-keyboard editor
-    // path.
+    // identities, the page-frame boundary, the narrow Scaleform title bridge,
+    // and the exact selected-help presenter. They deliberately do not depend
+    // on the software-keyboard editor path.
     [[nodiscard]] bool row_presentation_complete() const noexcept {
-        return page_frame && option_setting_dialog_vtable &&
+        return page_frame && selected_help_presenter &&
+            option_setting_dialog_vtable &&
             edit_property_vtable && text_input_controller_vtable &&
             action_button_controller_vtable &&
             title_bridge_complete();

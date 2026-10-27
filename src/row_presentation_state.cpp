@@ -30,6 +30,7 @@ struct PendingSnapshot {
     std::wstring help{};
     std::optional<std::wstring> caption{};
     std::uint64_t revision{};
+    std::uint64_t help_revision{};
     bool interactive{true};
     ERUI_AvailabilityAppearance availability_appearance{
         ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
@@ -46,6 +47,8 @@ struct Entry {
     std::unique_ptr<wchar_t[]> caption_buffer{};
     std::uint64_t desired_revision{};
     std::uint64_t applied_revision{};
+    std::uint64_t desired_help_revision{};
+    std::uint64_t applied_help_revision{};
     bool desired_interactive{true};
     bool applied_interactive{true};
     ERUI_AvailabilityAppearance desired_availability_appearance{
@@ -64,6 +67,7 @@ std::unordered_map<RowIdentity, std::size_t, RowIdentityHash> g_slots{};
 std::unordered_map<RowIdentity, PendingSnapshot, RowIdentityHash>
     g_preconfiguration_updates{};
 std::uint64_t g_revision{};
+std::uint64_t g_help_revision{};
 std::uint64_t g_availability_revision{1};
 bool g_configured{};
 bool g_pending{};
@@ -93,6 +97,21 @@ void copy_to_buffer(
     destination[source.size()] = L'\0';
 }
 
+[[nodiscard]] bool buffer_equals(
+    const std::wstring& source,
+    const wchar_t* destination) noexcept {
+    return destination &&
+        std::equal(source.begin(), source.end(), destination) &&
+        destination[source.size()] == L'\0';
+}
+
+[[nodiscard]] std::uint64_t next_revision(
+    std::uint64_t current) noexcept {
+    std::uint64_t next = current + 1u;
+    if (next == 0) next = 1;
+    return next;
+}
+
 } // namespace
 
 ERUI_Result submit_row_presentation_updates(
@@ -109,30 +128,54 @@ ERUI_Result submit_row_presentation_updates(
             std::unique_ptr<wchar_t[]> caption{};
         };
         std::lock_guard lock(g_mutex);
-        std::uint64_t revision = g_revision + 1u;
-        if (revision == 0) revision = 1;
-        std::uint64_t availability_revision =
-            g_availability_revision + 1u;
-        if (availability_revision == 0) availability_revision = 1;
+        const std::uint64_t revision = next_revision(g_revision);
+        const std::uint64_t availability_revision =
+            next_revision(g_availability_revision);
 
         if (!g_configured) {
             // The registry has already validated duplicate targets. Reserve
             // all nodes first so map growth cannot partially publish.
             auto staged = g_preconfiguration_updates;
+            std::vector<bool> help_changed{};
+            help_changed.reserve(updates.size());
+            bool batch_help_changed = false;
+            for (const RowPresentationUpdate& update : updates) {
+                const auto existing = staged.find(
+                    RowIdentity{update.provider, update.row});
+                const bool changed = existing == staged.end() ||
+                    existing->second.help != update.help;
+                help_changed.push_back(changed);
+                batch_help_changed = batch_help_changed || changed;
+            }
+            const std::uint64_t help_revision = batch_help_changed
+                ? next_revision(g_help_revision)
+                : g_help_revision;
+            std::size_t update_index = 0;
             for (RowPresentationUpdate& update : updates) {
-                staged[RowIdentity{update.provider, update.row}] = {
+                const RowIdentity identity{update.provider, update.row};
+                const auto existing = staged.find(identity);
+                const std::uint64_t row_help_revision =
+                    help_changed[update_index]
+                    ? help_revision
+                    : (existing != staged.end()
+                        ? existing->second.help_revision
+                        : std::uint64_t{0});
+                staged[identity] = {
                     .label = std::move(update.label),
                     .help = std::move(update.help),
                     .caption = std::move(update.caption),
                     .revision = revision,
+                    .help_revision = row_help_revision,
                     .interactive = update.interactive,
                     .availability_appearance =
                         update.availability_appearance,
                     .availability_revision = availability_revision,
                 };
+                ++update_index;
             }
             g_preconfiguration_updates = std::move(staged);
             g_revision = revision;
+            if (batch_help_changed) g_help_revision = help_revision;
             g_availability_revision = availability_revision;
             g_pending = true;
             return ERUI_OK;
@@ -148,6 +191,19 @@ ERUI_Result submit_row_presentation_updates(
             }
             slots.push_back(found->second);
         }
+
+        std::vector<bool> help_changed{};
+        help_changed.reserve(updates.size());
+        bool batch_help_changed = false;
+        for (std::size_t index = 0; index < updates.size(); ++index) {
+            const bool changed =
+                g_entries[slots[index]]->desired_help != updates[index].help;
+            help_changed.push_back(changed);
+            batch_help_changed = batch_help_changed || changed;
+        }
+        const std::uint64_t help_revision = batch_help_changed
+            ? next_revision(g_help_revision)
+            : g_help_revision;
 
         // Allocate only buffers that do not exist yet. Every allocation is
         // completed before publication, preserving all-or-nothing OOM
@@ -190,6 +246,9 @@ ERUI_Result submit_row_presentation_updates(
             entry.desired_help = std::move(updates[index].help);
             entry.desired_caption = std::move(updates[index].caption);
             entry.desired_revision = revision;
+            if (help_changed[index]) {
+                entry.desired_help_revision = help_revision;
+            }
             entry.desired_interactive = updates[index].interactive;
             entry.desired_availability_appearance =
                 updates[index].availability_appearance;
@@ -197,6 +256,7 @@ ERUI_Result submit_row_presentation_updates(
             entry.dirty = true;
         }
         g_revision = revision;
+        if (batch_help_changed) g_help_revision = help_revision;
         g_availability_revision = availability_revision;
         g_pending = true;
         return ERUI_OK;
@@ -250,10 +310,16 @@ bool configure_row_presentation_state(CompiledMenu& menu) noexcept {
                 if (const auto pending =
                         g_preconfiguration_updates.find(identity);
                     pending != g_preconfiguration_updates.end()) {
+                    const bool help_differs_from_registration =
+                        entry->desired_help != pending->second.help;
                     entry->desired_label = pending->second.label;
                     entry->desired_help = pending->second.help;
                     entry->desired_caption = pending->second.caption;
                     entry->desired_revision = pending->second.revision;
+                    entry->desired_help_revision =
+                        help_differs_from_registration
+                        ? pending->second.help_revision
+                        : std::uint64_t{0};
                     entry->desired_interactive =
                         pending->second.interactive;
                     entry->desired_availability_appearance =
@@ -313,6 +379,14 @@ void synchronize_pending_row_presentations() noexcept {
             still_pending = true;
             continue;
         }
+        // A caller may queue several complete snapshots before this UI
+        // boundary. If the final help payload equals the already-published
+        // buffer, collapse the intermediate edits without creating a native
+        // help-refresh generation.
+        if (entry.applied_revision != 0 &&
+            buffer_equals(entry.desired_help, entry.help_buffer.get())) {
+            entry.desired_help_revision = entry.applied_help_revision;
+        }
         copy_to_buffer(entry.desired_label, entry.label_buffer.get());
         copy_to_buffer(entry.desired_help, entry.help_buffer.get());
         if (entry.desired_caption.has_value()) {
@@ -322,6 +396,7 @@ void synchronize_pending_row_presentations() noexcept {
         entry.applied_caption_override =
             entry.desired_caption.has_value();
         entry.applied_revision = entry.desired_revision;
+        entry.applied_help_revision = entry.desired_help_revision;
         entry.applied_interactive = entry.desired_interactive;
         entry.applied_availability_appearance =
             entry.desired_availability_appearance;
@@ -347,6 +422,7 @@ RowPresentationView row_presentation_view(std::size_t slot) noexcept {
             ? entry.caption_buffer.get()
             : nullptr,
         .revision = entry.applied_revision,
+        .help_revision = entry.applied_help_revision,
     };
 }
 
@@ -377,6 +453,7 @@ void reset_row_presentation_state() noexcept {
     g_slots.clear();
     g_preconfiguration_updates.clear();
     g_revision = 0;
+    g_help_revision = 0;
     g_availability_revision = 1;
     g_configured = false;
     g_pending = false;

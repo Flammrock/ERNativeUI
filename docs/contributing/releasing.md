@@ -198,7 +198,7 @@ Before releasing, also review:
 - the current [What's New showcase](../whats-new/README.md), including every
   image, guide, migration, example, and archive link from both README entry
   points;
-- the frozen API 1.0, 1.1, 1.2, and 1.3 client tests and the current API 1.3
+- the frozen API 1.0, 1.1, 1.2, and 1.3 client tests and the current API 1.4
   C/C++ contract tests included in the normal test suite;
 - the manual MinGW-w64-to-MSVC runtime gate in
   [VALIDATION.md](../../VALIDATION.md#cross-toolchain-client-validation).
@@ -396,7 +396,7 @@ Release.
 - Test a fresh Mod Engine 2 installation using the published Nexus ZIP.
 - Test an SDK consumer using the published Windows ZIP.
 - Confirm clients built against APIs 1.0, 1.1, 1.2, and 1.3 still register with
-  the current host and a current client negotiates API 1.3. Include previously
+  the current host and a current client negotiates API 1.4. Include previously
   built binaries and clients intentionally built from every frozen SDK.
 - Record any newly verified game or mod compatibility in the compatibility
   guide through a normal follow-up change.
@@ -409,8 +409,9 @@ Release.
 For the next release, continue landing Conventional Commits. Release Please
 will update the same release PR until it is merged, then calculate subsequent
 project releases from the commits after the new tag. A project patch release
-can retain ERUI API 1.3 unchanged; a new API contract requires its own design,
-compatibility fixtures, migration guide, and explicit version decision.
+can retain the newly published ERUI API unchanged; a new API contract requires
+its own design, compatibility fixtures, migration guide, and explicit version
+decision.
 
 ## 9. Freeze a newly published API contract
 

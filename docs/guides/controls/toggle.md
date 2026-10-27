@@ -1,5 +1,17 @@
 # Toggle
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#toggle"><code>toggle</code></a> ·
+      <a href="../capabilities.md#host-owned-values"><code>host_owned_values</code></a>
+    </td>
+  </tr>
+</table>
+
 A `Toggle` adds an on/off setting to an `erui::Page`. The player changes it
 with Elden Ring's left/right controls, and ERNativeUI stores the selected
 state as `0` (Off) or `1` (On).
@@ -192,15 +204,15 @@ registration.get_value(raw_toggle, raw_value);
 registration.set_value(raw_toggle, 1);
 ```
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check a capability in client code.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.0 |
-| Capability | `erui::Capability::toggle` / `ERUI_CAP_TOGGLE` |
+| Required capability | `erui::Capability::toggle` / `ERUI_CAP_TOGGLE` |
 | GFX presentation | Uses the stock native toggle widget |
 | Runtime value | Typed C++ access uses `bool`; the raw host value is always normalized to `0` or `1` |
 

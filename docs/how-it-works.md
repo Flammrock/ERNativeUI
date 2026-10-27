@@ -20,7 +20,7 @@ import library, call `LoadLibrary` for the host, or bundle a private host copy.
 
 ## Connect, then register
 
-An API 1.3 C++ client starts from a worker thread after `DllMain` has returned:
+An API 1.4 C++ client starts from a worker thread after `DllMain` has returned:
 
 ```cpp
 const auto connection = erui::connect();
@@ -45,14 +45,15 @@ const auto registration = connection.value().register_menu(
     });
 ```
 
-`connect()` requests the exact API 1.3 contract and waits for the host's
+`connect()` requests the exact API 1.4 contract and waits for the host's
 bounded startup-readiness process. It does not silently downgrade to an older API.
 A successful `Connection` owns a copy of the negotiated function table, so it
 is safe for normal value semantics inside the client.
 
-Clients built with the API 1.0, 1.1, or 1.2 SDK continue to request their
-frozen function-table contract. Clients built with the API 1.3 SDK use the
-current table. No wrapper silently changes the API selected by its headers.
+Clients built with the API 1.0, 1.1, 1.2, or 1.3 SDK continue to request their
+frozen function-table contract. Clients built with the current API 1.4 source
+SDK use the current table. No wrapper silently changes the API selected by its
+headers.
 
 ## Registration is declarative
 

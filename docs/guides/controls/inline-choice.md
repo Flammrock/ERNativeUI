@@ -1,5 +1,17 @@
 # Inline Choice
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#inline-choice"><code>inline_choice</code></a> ·
+      <a href="../capabilities.md#host-owned-values"><code>host_owned_values</code></a>
+    </td>
+  </tr>
+</table>
+
 An `Inline Choice` displays one label from a fixed list on an `erui::Page`.
 The player presses left or right to select another label without opening a
 popup.
@@ -202,15 +214,15 @@ The current C++17 header does not provide a template/state callback overload
 for Inline Choice. Use the callback and state-pointer form demonstrated above
 when the mod needs immediate change notifications.
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check host support.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.0 |
-| Capability | `erui::Capability::inline_choice` / `ERUI_CAP_INLINE_CHOICE` |
+| Required capability | `erui::Capability::inline_choice` / `ERUI_CAP_INLINE_CHOICE` |
 | GFX presentation | Uses the stock native choice widget |
 | Runtime value | Zero-based `std::uint8_t` option index |
 

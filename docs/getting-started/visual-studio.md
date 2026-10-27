@@ -5,8 +5,9 @@ Visual Studio interface. You do not need a `CMakeLists.txt`, package manager,
 or ERNativeUI `.lib`.
 
 Complete [Install the SDK](setup.md) first. You need Visual Studio 2022 with
-the **Desktop development with C++** workload and an extracted Windows x64 SDK
-from ERNativeUI 1.3.0 or a later compatible 1.x release retaining API 1.3.
+the **Desktop development with C++** workload and a matching extracted Windows
+x64 SDK. The current source guide uses API 1.4; use the API 1.3 release-tagged
+guide when intentionally targeting the latest published stable SDK instead.
 
 ## 1. Create a DLL project
 

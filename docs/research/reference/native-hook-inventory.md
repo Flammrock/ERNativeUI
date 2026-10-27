@@ -1,6 +1,6 @@
 # Current native hook and call inventory
 
-Status: **source-verified production inventory** for the current ERUI API 1.3
+Status: **source-verified production inventory** for the current ERUI API 1.4
 implementation. This page was reconciled against the current host, runtime,
 resolver, and feature backends; it is not copied from the historical symbol
 CSV or the earlier research notebooks.

@@ -40,5 +40,32 @@ int main() {
         true, false, false, false));
     ERUI_TEST_CHECK(!erui::detail::pagination_requires_submenus(
         false, true, true, true));
+
+    // The build-locked API 1.4 presentation pump is not required merely
+    // because an earlier-API client registered ordinary rows.
+    static_assert(!erui::detail::runtime_requires_row_presentations(
+        true, false, 12));
+    static_assert(!erui::detail::runtime_requires_row_presentations(
+        false, true, 12));
+    static_assert(!erui::detail::runtime_requires_row_presentations(
+        true, true, 0));
+    static_assert(erui::detail::runtime_requires_row_presentations(
+        true, true, 1));
+
+    // Capability preflight may intentionally withhold only row visibility
+    // when another mod already patched one of its optional native entries.
+    // That reduced API 1.4 host must still install. Conversely, a backend
+    // advertised before registration must fail closed if its exact build or
+    // native aggregate changes before hook installation.
+    static_assert(erui::detail::runtime_row_visibility_backend_valid(
+        false, true, false));
+    static_assert(erui::detail::runtime_row_visibility_backend_valid(
+        false, false, false));
+    static_assert(erui::detail::runtime_row_visibility_backend_valid(
+        true, true, true));
+    static_assert(!erui::detail::runtime_row_visibility_backend_valid(
+        true, true, false));
+    static_assert(!erui::detail::runtime_row_visibility_backend_valid(
+        true, false, true));
     return 0;
 }

@@ -1,4 +1,5 @@
 #include "addresses.hpp"
+#include "color_picker.hpp"
 #include "menu_compiler.hpp"
 #include "native_menu.hpp"
 #include "runtime_state.hpp"
@@ -14,6 +15,30 @@
 #include <functional>
 
 namespace {
+
+using erui::detail::PageRoute;
+using erui::native::ColorPickerWidgetHost;
+
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::root_main(0, 13)) == ColorPickerWidgetHost::game_options);
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::builtin_main(0, 1, 13)) ==
+    ColorPickerWidgetHost::camera_options);
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::builtin_main(0, 8, 13)) == ColorPickerWidgetHost::graphics);
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::tab_main(0, 13)) == ColorPickerWidgetHost::graphics);
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::submenu(0)) == ColorPickerWidgetHost::subpage);
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::root_continuation(0, 13, 1)) ==
+    ColorPickerWidgetHost::subpage);
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::builtin_continuation(0, 8, 13, 1)) ==
+    ColorPickerWidgetHost::subpage);
+static_assert(erui::native::color_picker_widget_host_for_route(
+    PageRoute::tab_continuation(0, 13, 1)) ==
+    ColorPickerWidgetHost::subpage);
 
 std::function<void()> g_captured_action{};
 std::uint32_t g_native_constructor_calls{};

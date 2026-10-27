@@ -413,6 +413,7 @@ int main() {
     assert(std::wstring(first.label) == L"Before compile");
     assert(std::wstring(first.help) == L"Queued before compile");
     assert(first.caption == nullptr);
+    assert(first.help_revision != 0);
     const auto first_availability =
         erui::detail::row_availability_view(0);
     assert(first_availability);
@@ -460,6 +461,7 @@ int main() {
     assert(std::wstring(second.label) == L"After compile");
     assert(std::wstring(second.help).empty());
     assert(std::wstring(second.caption) == L"Caption after compile");
+    assert(second.help_revision > first.help_revision);
     const auto second_availability =
         erui::detail::row_availability_view(0);
     assert(second_availability.revision > first_availability.revision);
@@ -494,6 +496,7 @@ int main() {
     assert(std::wstring(caption_second.help) ==
         L"Caption-only generation preserves companions");
     assert(std::wstring(caption_second.caption) == L"Second caption");
+    assert(caption_second.help_revision > second.help_revision);
 
     // Invalid snapshots are rejected before touching the accepted state.
     assert(erui::detail::submit_row_presentation_updates({
@@ -610,12 +613,104 @@ int main() {
     assert(std::wstring(preconfigured.label) == L"Preconfigured label");
     assert(std::wstring(preconfigured.help) == L"Preconfigured help");
     assert(std::wstring(preconfigured.caption) == L"Preconfigured caption");
+    assert(preconfigured.help_revision != 0);
     const auto preconfigured_availability =
         erui::detail::row_availability_view(0);
     assert(preconfigured_availability);
     assert(!preconfigured_availability.interactive);
     assert(preconfigured_availability.appearance ==
         ERUI_AVAILABILITY_APPEARANCE_DISABLED);
+    erui::detail::reset_row_presentation_state();
+
+    // Help refreshes have their own content generation. Complete snapshots
+    // that only alter label, caption, or availability still advance the
+    // general revision without scheduling a focused-help republish.
+    auto help_generation_menu = make_menu();
+    assert(erui::detail::configure_row_presentation_state(
+        *help_generation_menu));
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Baseline label",
+            .help = L"Original help",
+            .caption = L"Baseline caption",
+        },
+    }) == ERUI_OK);
+    erui::detail::synchronize_pending_row_presentations();
+    const auto help_baseline =
+        erui::detail::row_presentation_view(0);
+    assert(help_baseline);
+    assert(help_baseline.help_revision == 0);
+
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Label and caption only",
+            .help = L"Original help",
+            .caption = L"Changed caption",
+            .interactive = false,
+            .availability_appearance =
+                ERUI_AVAILABILITY_APPEARANCE_DISABLED,
+        },
+    }) == ERUI_OK);
+    erui::detail::synchronize_pending_row_presentations();
+    const auto help_unchanged =
+        erui::detail::row_presentation_view(0);
+    assert(help_unchanged.revision > help_baseline.revision);
+    assert(help_unchanged.help_revision == help_baseline.help_revision);
+
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"First queued help",
+            .help = L"Queued help A",
+            .caption = L"Changed caption",
+        },
+    }) == ERUI_OK);
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Latest queued help",
+            .help = L"Queued help B",
+            .caption = L"Changed caption",
+        },
+    }) == ERUI_OK);
+    erui::detail::synchronize_pending_row_presentations();
+    const auto help_coalesced =
+        erui::detail::row_presentation_view(0);
+    assert(std::wstring(help_coalesced.help) == L"Queued help B");
+    assert(help_coalesced.help_revision > help_unchanged.help_revision);
+
+    const std::uint64_t coalesced_help_revision =
+        help_coalesced.help_revision;
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Transient help",
+            .help = L"Transient help C",
+            .caption = L"Changed caption",
+        },
+    }) == ERUI_OK);
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Reverted before sync",
+            .help = L"Queued help B",
+            .caption = L"Changed caption",
+        },
+    }) == ERUI_OK);
+    erui::detail::synchronize_pending_row_presentations();
+    const auto help_reverted =
+        erui::detail::row_presentation_view(0);
+    assert(std::wstring(help_reverted.help) == L"Queued help B");
+    assert(help_reverted.revision > help_coalesced.revision);
+    assert(help_reverted.help_revision == coalesced_help_revision);
     erui::detail::reset_row_presentation_state();
     return 0;
 }

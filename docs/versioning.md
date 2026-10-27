@@ -6,11 +6,12 @@ questions and must not be compared as though they were one value.
 | Version axis | Baseline in these docs | What it describes | Where it is checked |
 |---|---:|---|---|
 | ERNativeUI release/package version | **Selected package** | The SDK, host, documentation, and release notes shipped together. It follows Semantic Versioning. | At configure time by CMake and when selecting a release/download. |
-| ERUI public API version | **1.3** | The current binary function-table contract understood by a client and `ERNativeUI.dll`. | At runtime through `ERUI_GetApi`, or by the C++ wrapper during `erui::connect()`. |
+| ERUI public API version | **1.4 pre-release** | The current source function-table contract understood by a client and `ERNativeUI.dll`. | At runtime through `ERUI_GetApi`, or by the C++ wrapper during `erui::connect()`. |
 
-This documentation describes the finished ERUI API 1.3 contract, first
-packaged by ERNativeUI 1.3.0. The release and API numbers remain independent;
-a later compatible project release may retain the same API unchanged.
+This documentation describes the current ERUI API 1.4 pre-release
+contract. Its feature scope is complete, but it is not frozen or published
+yet. The release and API numbers remain independent; a later compatible
+project release may retain the same API unchanged.
 
 ## Release and package version
 
@@ -68,6 +69,7 @@ ERUI_API_VERSION_1_0
 ERUI_API_VERSION_1_1
 ERUI_API_VERSION_1_2
 ERUI_API_VERSION_1_3
+ERUI_API_VERSION_1_4
 ERUI_API_VERSION_CURRENT
 ```
 
@@ -76,9 +78,9 @@ then requests the contract it was compiled to understand:
 
 ```c
 ERUI_Api api = {0};
-api.size = ERUI_API_V1_3_SIZE;
+api.size = ERUI_API_V1_4_SIZE;
 
-ERUI_Result result = get_api(ERUI_API_VERSION_1_3, &api);
+ERUI_Result result = get_api(ERUI_API_VERSION_1_4, &api);
 ```
 
 The request negotiates a function-table layout. It does not ask whether the
@@ -92,19 +94,19 @@ The C++17 wrapper performs the same negotiation through:
 const auto connection = erui::connect();
 ```
 
-The current wrapper requests ERUI API 1.3 exactly. If the loaded host exposes
-only API 1.0, 1.1, or 1.2, connection fails cleanly; a successful CMake
+The current wrapper requests ERUI API 1.4 exactly. If the loaded host exposes
+only API 1.0 through 1.3, connection fails cleanly; a successful CMake
 configure against an SDK on the build machine cannot make an older DLL on the
 player's machine support a newer runtime API.
 
 API version and capability bits remain distinct parts of the C contract. The
-current C++ wrapper accepts API 1.3 only when its complete required function
-table is present. Capability checks still matter: custom tabs are
-game-build-gated, while title-screen text also requires the player's default-on
-runtime GFX patching setting. `Capability::custom_tabs` or
-`Capability::title_screen_text` can therefore be absent on a valid 1.3
-connection. Disabling runtime GFX patching removes title-screen text without
-removing custom tabs.
+current C++ wrapper accepts API 1.4 only when its complete required function
+table is present. Capability checks still matter: custom tabs, row
+availability, and row visibility are game-build-gated, while title-screen text
+also requires the player's default-on runtime GFX patching setting. Those
+capabilities can therefore be absent on a valid 1.4 connection. Disabling
+runtime GFX patching removes title-screen text without removing custom tabs or
+the independent row-update capabilities.
 Successful negotiation does not guarantee that every native path can be
 installed, so operations can still fail safely for reasons unrelated to
 either version number.
@@ -121,11 +123,11 @@ example, these are illustrations of the versioning model, not promises about
 future releases:
 
 - A patch release could fix a native hook or documentation problem while
-  continuing to expose ERUI API **1.3** unchanged.
+  continuing to expose a published ERUI API unchanged.
 - A release with a new package minor could add tooling while still retaining
-  ERUI API **1.3** if no new function-table contract were needed.
-- A future 1.x release could introduce a later ERUI API and would retain the
-  API 1.0 through 1.3 entry points under the same-major compatibility policy.
+  the same ERUI API if no new function-table contract were needed.
+- A future 1.x release could introduce a later ERUI API and would retain all
+  published API 1.x entry points under the same-major compatibility policy.
 
 Conversely, incrementing an ERUI API version is a deliberate binary-contract
 decision. It is not an automatic consequence of changing the package's minor
@@ -157,6 +159,7 @@ For the current line, this means:
 | ERNativeUI 1.1.0 SDK / API 1.1 | ERNativeUI 1.1.0 and every later 1.x host |
 | ERNativeUI 1.2.0 SDK / API 1.2 | ERNativeUI 1.2.0 and every later 1.x host |
 | ERNativeUI 1.3.0 SDK / API 1.3 | ERNativeUI 1.3.0 and every later compatible 1.x host |
+| Current source SDK / API 1.4 pre-release | A matching API 1.4 development host; the permanent minimum release is recorded when API 1.4 is published |
 
 The shared major number defines this compatibility policy; it does not couple
 the release minor to the API minor.
@@ -164,7 +167,7 @@ the release minor to the API minor.
 ```text
 build/configure time                         game runtime
 --------------------                         ------------
-find_package(ERNativeUI <release>)            ERUI_GetApi(API 1.3)
+find_package(ERNativeUI <release>)            ERUI_GetApi(API 1.4)
         |                                             |
         v                                             v
 select an acceptable SDK package             negotiate a DLL function table
@@ -176,15 +179,16 @@ remains the final protection when their installed host is different.
 
 ## Earlier-API compatibility in the current host
 
-The current host preserves the released API 1.0, 1.1, and 1.2 binary
+The current host preserves the released API 1.0, 1.1, 1.2, and 1.3 binary
 contracts. A client DLL already built with one of those headers requests that
-same frozen table from a host exposing API 1.3. It does not need to be
+same frozen table from a host exposing API 1.4. It does not need to be
 recompiled merely because the installed host changed.
 
 Staying on an older SDK is a valid deliberate compatibility choice. Source
-code intentionally rebuilt with the API 1.3 wrapper requests API 1.3 and must
-run with a host that supports it. Do not treat the preserved older tables as
-an automatic downgrade path for a client compiled with the API 1.3 wrapper.
+code intentionally rebuilt with the current API 1.4 wrapper requests API 1.4
+and must run with a host that supports it. Do not treat the preserved older
+tables as an automatic downgrade path for a client compiled with the API 1.4
+wrapper.
 
 See the permanent [adjacent API migration guides](migrations/README.md) for
 source changes between public API versions. Migration guides describe how to
@@ -198,7 +202,7 @@ Record both when they matter:
 - In build instructions, state the chosen **ERNativeUI SDK release** and the
   minimum release/package version used by `find_package`.
 - In ABI documentation or a strict-C negotiation call, state the required
-  **ERUI API**, for example API 1.3.
+  **ERUI API**, for example API 1.4.
 - In player requirements, name an ERNativeUI release known to contain the API
   and capabilities your mod uses, then allow later hosts from that compatible
   release-major line.

@@ -15,6 +15,7 @@ namespace erui::native {
 inline constexpr std::size_t scaleform_path_result_size = 0x60;
 inline constexpr std::size_t scaleform_text_value_offset = 0x08;
 inline constexpr std::size_t scaleform_destructor_member_offset = 0x28;
+inline constexpr std::size_t native_page_title_result_offset = 0x230;
 
 inline constexpr char native_menu_title_source_path[] = "MenuTitle/Text_0";
 inline constexpr char custom_outer_title_path[] =
@@ -43,6 +44,13 @@ struct CapturedTitleTarget {
                 static_cast<std::byte*>(persistent_result) +
                 scaleform_text_value_offset)
             : nullptr;
+    }
+
+    [[nodiscard]] bool owned_by(const void* page) const noexcept {
+        return valid() && page && persistent_result ==
+            static_cast<const void*>(
+                static_cast<const std::byte*>(page) +
+                native_page_title_result_offset);
     }
 };
 

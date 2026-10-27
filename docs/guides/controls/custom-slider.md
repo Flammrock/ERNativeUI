@@ -1,5 +1,16 @@
 # Custom Slider
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#custom-slider"><code>custom_slider</code></a>
+    </td>
+  </tr>
+</table>
+
 A Custom Slider maps each native slider position to any text chosen by the
 mod. The values do not need to be numeric, ordered, or related:
 
@@ -182,17 +193,17 @@ native row without invoking the player-change callback.
 continue using `Registration::get_custom_slider_index` and
 `Registration::set_custom_slider_index` with a retained raw handle.
 
-## Availability
+## Capability requirements
 
 | Property | Value |
 |---|---|
 | First public API | 1.2 |
-| Capability | `erui::Capability::custom_slider` / `ERUI_CAP_CUSTOM_SLIDER` |
+| Required capability | `erui::Capability::custom_slider` / `ERUI_CAP_CUSTOM_SLIDER` |
 | GFX presentation | Uses the stock native slider widget |
 | Positions | 2 through 256 |
 | Maximum text per position | 64 valid UTF-16 code units |
 
-See [Availability and capabilities](../availability.md) before using a
+See [the `custom_slider` capability](../capabilities.md#custom-slider) before using a
 feature that may be absent from the connected host.
 
 ## Common mistakes

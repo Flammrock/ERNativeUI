@@ -288,7 +288,8 @@ public:
     // runtime.
     Page& identify_last_row(
         ERUI_ProviderHandle provider,
-        ERUI_RowHandle row);
+        ERUI_RowHandle row,
+        bool visibility_editable = false);
 
     [[nodiscard]] PageKind kind() const noexcept { return kind_; }
     [[nodiscard]] std::wstring_view title() const noexcept { return title_; }
@@ -309,6 +310,7 @@ private:
         RowKind kind{RowKind::toggle};
         ERUI_ProviderHandle provider{ERUI_INVALID_PROVIDER};
         ERUI_RowHandle row{ERUI_INVALID_ROW};
+        bool visibility_editable{};
         std::wstring label{};
         std::wstring help{};
         volatile std::uint8_t* byte_value{};

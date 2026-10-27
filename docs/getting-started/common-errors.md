@@ -6,7 +6,7 @@ the expected menu or callback behavior. Start by preserving the full C++
 `ERUI_Result`. “The menu did not appear” alone cannot distinguish host loading,
 API negotiation, provider validation, and native hook installation.
 
-ERNativeUI exposes four public API generations:
+ERNativeUI exposes five public API generations in the current source tree:
 
 - **Released API 1.0:** the frozen SDK shipped with ERNativeUI 1.0.0. Any
   client built with it remains supported by later 1.x hosts.
@@ -18,6 +18,9 @@ ERNativeUI exposes four public API generations:
 - **Released API 1.3:** introduced with ERNativeUI 1.3.0. It appends
   client-owned top-level Configuration tabs and title-screen status text while
   preserving all three earlier contracts.
+- **Current API 1.4 pre-release:** adds typed row references and atomic runtime
+  text/style, availability, and visibility updates. Its feature scope is
+  complete, but it is not frozen or published yet.
 
 See [Feature status](../features.md) for the exact boundary and
 [How ERNativeUI works](../how-it-works.md) for the lifecycle and ownership
@@ -129,21 +132,22 @@ does not negotiate the runtime ERUI API.
 
 **Symptom**
 
-- `ERUI_UNSUPPORTED_VERSION`, `ErrorCode::incompatible_api`, or “API 1.3 is
+- `ERUI_UNSUPPORTED_VERSION`, `ErrorCode::incompatible_api`, or “API 1.4 is
   required; update ERNativeUI.dll.”
 - A raw-C function pointer is null or an operation returns
   `ERUI_NOT_SUPPORTED`.
-- An API 1.3 client works with an ERNativeUI 1.3.0 host but not a host exposing
-  only API 1.0, 1.1, or 1.2.
+- An API 1.4 client works with a matching development host but not a host
+  exposing only API 1.0 through 1.3.
 
 **Likely cause**
 
 Version negotiation selects a complete, exact function-table contract. API
-1.0 is frozen at 128 bytes, API 1.1 at 320 bytes, API 1.2 at 368 bytes, and
-the API 1.3 table is 384 bytes. An API 1.3 client cannot use a host
-exposing only an earlier table, and the current C++ wrapper intentionally does
-not downgrade. Conversely, any client built with an earlier SDK is supported
-by later compatible 1.x hosts through its unchanged function-table contract.
+1.0 is frozen at 128 bytes, API 1.1 at 320 bytes, API 1.2 at 368 bytes, API
+1.3 at 384 bytes, and the current API 1.4 table is 392 bytes. An API 1.4 client
+cannot use a host exposing only an earlier table, and the current C++ wrapper
+intentionally does not downgrade. Conversely, any client built with an earlier
+SDK is supported by later compatible 1.x hosts through its unchanged
+function-table contract.
 
 **Fix**
 
@@ -159,7 +163,7 @@ by later compatible 1.x hosts through its unchanged function-table contract.
   optional feature. Do not infer availability from a similarly named Elden
   Ring widget or from a non-null pointer belonging to another API version.
 - `ERUI_NOT_SUPPORTED` can also mean that a game-version-sensitive optional
-  native facility was unavailable. In particular, a valid API 1.3 connection
+  native facility was unavailable. In particular, a valid API 1.4 connection
   may omit `ERUI_CAP_CUSTOM_TABS` or `ERUI_CAP_TITLE_SCREEN_TEXT` when the
   installed executable has not passed the corresponding native validation.
   Title-screen text is also absent when the player's

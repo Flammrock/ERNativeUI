@@ -41,14 +41,18 @@ verification, and troubleshooting.
    set up the SDK, build a minimal client, deploy it, and diagnose common
    integration errors.
 2. Check the [supported features](features.md), including API-version and
-   release status.
+   release status, then use the centralized
+   [capability reference](guides/capabilities.md) to negotiate each required
+   host feature.
 3. Check [game and mod compatibility](COMPATIBILITY.md) for the running game
    build, other DLLs, and modified-GFX compatibility.
 4. Understand the independent [release and API versions](versioning.md).
 5. Read [how ERNativeUI works](how-it-works.md) for the host/client model,
    registration lifecycle, ownership, and callbacks.
-6. Use the task-oriented [mod-author guides](guides/README.md) and concise
-   [API reference](reference/README.md) while building real features.
+6. Use the task-oriented [mod-author guides](guides/README.md), concise
+   [API reference](reference/README.md), and centralized
+   [error-handling policy](reference/error-handling.md) while building real
+   features.
 7. Continue from the extensively commented
    [mod template](../examples/template/README.md).
 
@@ -66,8 +70,9 @@ Five focused, buildable examples are also available:
   demonstrates the broader menu, dialog, presentation, localization, and
   input APIs.
 - [Showcase Screenshot Helper](../examples/showcase_screenshot_helper/README.md)
-  reads an INI beside its DLL and publishes one isolated English control or
-  custom tab so documentation screenshots can match their minimal examples.
+  reads an INI beside its DLL and publishes one deterministic English control,
+  custom tab, title-screen layout, or focused API 1.4 row-update scene so
+  documentation screenshots can match their minimal examples.
 - [Custom Tabs Stress](../examples/custom_tabs_stress/README.md) exercises a
   fixed 50-tab, 1,000-row workload for integration and performance testing;
   ordinary mods should follow the dedicated custom-tab guide instead.
@@ -80,18 +85,14 @@ The public SDK has two header-only client surfaces: a friendly C++17 wrapper
 and a strict C ABI. Client mods discover the already-loaded host at runtime;
 they do not link an ERNativeUI import library.
 
-## I want to follow API development
+## I want to use API 1.4 row updates
 
-The [development roadmap](roadmap/README.md) records proposed work separately
-from shipped API contracts. The active [API 1.4 roadmap](roadmap/api-1.4.md)
-tracks reactive controls, nested Collapse controls, conditional content,
-dynamic pagination, and custom-tab visibility with explicit proof gates and
-progress states.
-
-Manually selected development milestones will follow the
-[alpha build policy](contributing/alpha-builds.md). Until a roadmap item is
-marked Released and appears in the feature matrix and public headers, client
-mods must not treat it as an available API.
+The [row-updates guides](guides/row-updates/README.md) document the API 1.4
+behavior for label/help/caption updates, availability, visibility, and typed
+value access. Strict-C clients can also
+[commit updates to several rows atomically](guides/row-updates/batching.md).
+The [feature matrix](features.md) summarizes the corresponding capabilities,
+limits, and player-visible behavior.
 
 ## I want to understand or contribute to ERNativeUI
 

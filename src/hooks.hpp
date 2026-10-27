@@ -5,7 +5,13 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace erui::detail {
+struct PageRoute;
+}
+
 namespace erui::native {
+
+struct CapturedTitleTarget;
 
 enum class HookInstallStatus : std::uint8_t {
     success,
@@ -14,7 +20,8 @@ enum class HookInstallStatus : std::uint8_t {
 
 HookInstallStatus install_native_menu_hooks(
     const GameAddresses& addresses,
-    const PreservedSharedMenuAddresses* preserved_shared = nullptr) noexcept;
+    const PreservedSharedMenuAddresses* preserved_shared = nullptr,
+    bool enable_row_presentations = false) noexcept;
 // Read-only validation for the exact native Graphics carrier contract used by
 // custom tabs. This never creates hooks or mutates runtime state.
 bool preflight_native_tab_carrier(const GameAddresses& addresses) noexcept;
@@ -23,6 +30,22 @@ bool preflight_native_tab_carrier(const GameAddresses& addresses) noexcept;
 // Unlike preflight_native_tab_carrier(), this does not compare original game
 // bytes: those entry points are expected to have been patched already.
 bool native_tab_graphics_carrier_installed() noexcept;
+
+// Read-only identity proof used by the API 1.4 in-place row rebuild. It is
+// true only for the currently committed custom-tab category-8 carrier and
+// never accepts the native Graphics route or an aliased panel.
+bool validate_native_row_visibility_tab_carrier(
+    void* page,
+    std::size_t logical_page_index) noexcept;
+
+// Reapplies the already-captured, page-owned submenu title target after an
+// in-place visibility rebuild. Main root/built-in/tab pages deliberately have
+// no captured target: their native heading is unchanged by slice-count edits.
+void reapply_native_row_visibility_page_title(
+    void* page,
+    const CapturedTitleTarget& captured,
+    const erui::detail::PageRoute& route,
+    std::size_t slice_count) noexcept;
 
 // Exact-target health check for the shared Scaleform path bridge owned by the
 // menu-hook layer. The native-tab installer runs after ordinary menu hooks,

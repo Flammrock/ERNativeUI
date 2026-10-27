@@ -1,5 +1,16 @@
 # Title-screen text
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="capabilities.md#title-screen-text"><code>title_screen_text</code></a>
+    </td>
+  </tr>
+</table>
+
 API 1.3 lets a client mod add short version, status, or compatibility lines to
 any corner of Elden Ring's title screen. Each call adds one immutable line.
 ERNativeUI chooses the coordinates from the effective title movie, preserves
@@ -23,7 +34,7 @@ client is the
 | Which corners can I use? | [Choose a corner](#choose-a-corner) |
 | How do I keep the native color or select my own? | [Choose a color](#choose-a-color) |
 | How do I add several lines? | [Add and order multiple lines](#add-and-order-multiple-lines) |
-| What capability and registration checks are required? | [Check availability and register](#check-availability-and-register) |
+| What capability and registration checks are required? | [Check capabilities and register](#check-capabilities-and-register) |
 | How do I translate the text? | [Localize player-facing text](#localize-player-facing-text) |
 | How long do strings live, and what are the limits? | [Lifetime and limits](#lifetime-and-limits) |
 | How does this coexist with DLC text, modified GFX, and other DLLs? | [Layout and compatibility](#layout-and-compatibility) |
@@ -134,7 +145,7 @@ A client should not depend on DLL load timing to determine visual order.
 Use separate calls even when the lines belong together. One call containing
 a line-break character is rejected.
 
-## Check availability and register
+## Check capabilities and register
 
 `Capability::title_screen_text` is optional even on a valid API 1.3
 connection because the host must first validate the runtime presentation

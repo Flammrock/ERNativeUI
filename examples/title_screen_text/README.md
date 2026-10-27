@@ -1,7 +1,9 @@
 # Title-Screen Text Example
 
-`TitleScreenTextExample.dll` is a focused API 1.3 client example. One provider
-registers one line in each of the four title-screen corners:
+`TitleScreenTextExample.dll` is a focused title-screen-text example. The
+feature was introduced in API 1.3; the in-tree build uses the current exact
+API 1.4 wrapper. One provider registers one line in each of the four
+title-screen corners:
 
 - the top-left, top-right, and bottom-left lines inherit the native text color;
 - the bottom-right line uses the explicit color `RGB(216, 167, 103)`.
@@ -94,7 +96,9 @@ build\deploy\Release\examples\TitleScreenTextExample.dll
 
 The standalone project deliberately has no package-version constraint because
 the SDK package release and negotiated runtime API are separate versions. Its
-headers must expose the API 1.3 title-screen text declarations.
+headers must expose the API 1.3 title-screen-text declarations, while the
+selected wrapper requests its own exact API. The current source SDK requests
+API 1.4; an intentionally selected API 1.3 SDK continues to request API 1.3.
 
 ```bat
 cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=C:\sdk\ERNativeUI

@@ -1,5 +1,16 @@
 # Provider storage
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="capabilities.md#storage"><code>storage</code></a>
+    </td>
+  </tr>
+</table>
+
 API 1.1 provides an optional host-owned, provider-scoped INI document for mods
 that do not already have a configuration backend. The C++17 wrapper supports
 UTF-8 strings, booleans, numbers, and input assignments; strict C exposes raw

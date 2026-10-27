@@ -1,5 +1,16 @@
 # Button
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#button"><code>button</code></a>
+    </td>
+  </tr>
+</table>
+
 A `Button` adds an action row to an `erui::Page`. When the player presses
 Elden Ring's Confirm control, ERNativeUI calls the function attached to that
 row. Unlike a Toggle or Slider, a Button does not store a value.
@@ -172,15 +183,15 @@ behavior.
 
 Button has no separate options object.
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check a capability in client code.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.0 |
-| Capability | `erui::Capability::button` / `ERUI_CAP_BUTTON` |
+| Required capability | `erui::Capability::button` / `ERUI_CAP_BUTTON` |
 | GFX presentation | Runtime completion supplies the matching left-label field on affected action rows; activation does not depend on it. |
 | Runtime value | None |
 

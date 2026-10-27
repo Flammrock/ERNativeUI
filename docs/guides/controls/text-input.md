@@ -1,5 +1,16 @@
 # TextInput
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#text-input"><code>text_input</code></a>
+    </td>
+  </tr>
+</table>
+
 A `TextInput` adds an editable text row to an `erui::Page`. Confirm opens
 Elden Ring's native text editor. The row shows either the last confirmed value
 or a placeholder while its value is empty.
@@ -151,15 +162,15 @@ units, exactly like `std::wstring_view::size()` on Windows. It does not count
 bytes, and one user-perceived character can occupy more than one code unit.
 The placeholder does not consume any part of the limit.
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check host support.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.1 |
-| Capability | `erui::Capability::text_input` / `ERUI_CAP_TEXT_INPUT` |
+| Required capability | `erui::Capability::text_input` / `ERUI_CAP_TEXT_INPUT` |
 | GFX presentation | With runtime patching enabled, ERNativeUI completes the native brackets and red empty-state presentation |
 | Enabled option | Not exposed; omit the `add_text_input` call when the row should not exist |
 | Runtime value | Copied UTF-16 text |

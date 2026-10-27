@@ -59,7 +59,8 @@ void Page::ensure_mutable() const {
 
 Page& Page::identify_last_row(
     ERUI_ProviderHandle provider,
-    ERUI_RowHandle row) {
+    ERUI_RowHandle row,
+    bool visibility_editable) {
     ensure_mutable();
     if (rows_.empty() || provider == ERUI_INVALID_PROVIDER ||
         row == ERUI_INVALID_ROW) {
@@ -72,6 +73,7 @@ Page& Page::identify_last_row(
     }
     latest.provider = provider;
     latest.row = row;
+    latest.visibility_editable = visibility_editable;
     return *this;
 }
 

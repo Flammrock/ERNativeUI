@@ -22,6 +22,9 @@ The suite covers:
 - C ABI layout and immutable API 1.0, 1.1, 1.2, and 1.3 release fixtures,
   including the additive TextInput, ColorPicker, BuiltinPage, InputBindings,
   Storage, slider, custom-tab, and title-screen-text blocks;
+- the current pre-release API 1.4 layout and negotiation contract, typed C++
+  row references, atomic update descriptors, styled text, row availability,
+  row visibility, and visibility-state publication/rollback behavior;
 - localization-setting grammar and traversal rejection, Steam language-token
   classification, transient/terminal readiness settlement, guarded Steam
   initialization, bounded fail-open behavior, and unknown-locale preservation;
@@ -59,7 +62,8 @@ The current-host smoke clients resolve only the public `ERUI_GetApi` export,
 negotiate API 1.3, then register title-screen text, a custom tab, and an
 ordinary row before committing. They do not depend on a test-only export.
 Together with the retained API 1.0, 1.1, and 1.2 clients, this is the mandatory
-compatibility matrix before API 1.4 changes the public headers or host table.
+backward-compatibility matrix for the current API 1.4 development host and a
+required gate before the API 1.4 contract can be frozen and published.
 
 ## Cross-toolchain client validation
 

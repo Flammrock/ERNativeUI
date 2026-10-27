@@ -10,9 +10,10 @@ use the [documented ERNativeUI features](../features.md) through the public
 [C ABI](https://github.com/Flammrock/ERNativeUI/blob/main/include/ernativeui/erui.h) or
 [C++17 wrapper](https://github.com/Flammrock/ERNativeUI/blob/main/include/ernativeui/ERNativeUI.hpp).
 
-ERUI API 1.3 is the current source contract. API and package releases are
-versioned separately; use the headers shipped with a release when targeting a
-published host. A research item tagged for a later API is exploratory: it is
+ERUI API 1.4 is the current pre-release source contract; API 1.3 remains the
+latest published contract until 1.4 is frozen and released. API and package
+releases are versioned separately; use the headers shipped with a release when
+targeting a published host. A research item tagged for a later API is exploratory: it is
 neither a release promise nor permission to depend on an unfinished native
 boundary.
 

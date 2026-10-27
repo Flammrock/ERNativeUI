@@ -1,5 +1,16 @@
 # Native dialogs
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="capabilities.md#alert"><code>alert</code></a>
+    </td>
+  </tr>
+</table>
+
 `erui::Registration::alert()` displays a message through Elden Ring's native
 dialog system. The game owns the visual presentation, button captions, focus,
 and Back behavior; the client mod owns and supplies the message.

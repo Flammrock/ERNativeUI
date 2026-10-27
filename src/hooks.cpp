@@ -7,6 +7,7 @@
 #include "native_popup_choice.hpp"
 #include "native_slider_presentation.hpp"
 #include "native_row_presentation.hpp"
+#include "native_row_visibility.hpp"
 #include "native_text_input.hpp"
 #include "native_text_result.hpp"
 #include "native_title_bridge.hpp"
@@ -15,6 +16,7 @@
 #include "runtime_requirements.hpp"
 #include "runtime_state.hpp"
 #include "row_presentation_state.hpp"
+#include "row_update_state.hpp"
 #include "root_button_text_override.hpp"
 #include "submenu_navigation.hpp"
 #include "submenu_runtime.hpp"
@@ -533,6 +535,7 @@ bool cached_identity_is_globally_unique(
 
 void clear_retired_page_references(void* panel) noexcept {
     if (!panel) return;
+    retire_native_row_visibility_page(panel);
     retire_native_row_presentation_page(panel, g_addresses);
     void* expected = panel;
     const bool dialog_cleared = g_dialog_input_page.compare_exchange_strong(
@@ -550,7 +553,7 @@ void clear_retired_page_references(void* panel) noexcept {
         g_submenu_navigation.pending_route().valid();
     if (pending_subpage) g_submenu_navigation.cancel_request();
     reset_color_picker_page_widgets(
-        panel, ColorPickerWidgetHost::subpage);
+        panel, ColorPickerWidgetHost::graphics);
     erui::detail::logf(erui::LogLevel::trace,
         "Native-tab Graphics carrier cleared retiring page references panel=%p dialog=%d root=%d pendingSubpageCancelled=%d",
         panel, dialog_cleared ? 1 : 0, root_cleared ? 1 : 0,
@@ -1761,6 +1764,10 @@ void __fastcall game_options_handler_detour(
         return;
     }
 
+    if (previous_page && previous_page != page) {
+        retire_native_row_visibility_page(
+            const_cast<void*>(previous_page));
+    }
     g_last_page.store(page, std::memory_order_relaxed);
     g_last_injection_tick.store(now, std::memory_order_relaxed);
 
@@ -1922,12 +1929,13 @@ void __fastcall sub_handler_detour(
         g_sub_injection_count.fetch_add(1, std::memory_order_relaxed) + 1;
     const RowInjectionOutcome outcome = inject_page_route(page, route, g_addresses);
     const erui::detail::ResolvedPagePresentation presentation =
-        runtime.menu->resolve_presentation(route);
+        runtime.menu->resolve_presentation(route, outcome.slice_count);
     const wchar_t* const outer_title = runtime.menu->texts.lookup(
         static_cast<int>(presentation.outer_title_id));
     const wchar_t* const page_title = runtime.menu->texts.lookup(
         static_cast<int>(presentation.page_title_id));
     apply_physical_page_titles(captured_title, outer_title, page_title);
+    bind_native_row_visibility_title_target(page, captured_title);
     const std::uint32_t log_limit = runtime.options.enable_diagnostics ? 192u : 8u;
     if (injection <= log_limit || outcome.faulted != 0) {
         erui::detail::logf(
@@ -1959,8 +1967,20 @@ void __fastcall page_frame_gate_detour(
     // frame boundary, including while a native alert owns page input.
     synchronize_pending_text_inputs();
     synchronize_color_picker_previews(page);
-    erui::detail::synchronize_pending_row_presentations();
+
+    std::uint8_t visibility_suppressed_input{};
+    const bool visibility_rebuild_pending =
+        prepare_native_row_visibility_page_frame(
+            page,
+            input_enabled && *input_enabled != 0,
+            g_addresses);
+    // A visibility batch racing the prepare call remains wholly queued; an
+    // ordinary presentation-only batch can still publish on this frame.
+    (void)erui::detail::synchronize_pending_row_updates_if_visibility_idle();
     apply_native_row_availability_pre_frame(page, g_addresses);
+    std::uint8_t* const effective_input = visibility_rebuild_pending
+        ? &visibility_suppressed_input
+        : input_enabled;
 
     PageFrameFn original = g_original_page_frame.load(std::memory_order_acquire);
     if (!original) return;
@@ -1968,16 +1988,21 @@ void __fastcall page_frame_gate_detour(
         page == g_dialog_input_page.load(std::memory_order_acquire)) {
         // The native page frame is intentionally paused while the dialog owns
         // input, so there is no native presentation pass to overwrite us.
-        apply_native_row_presentations(page, g_addresses);
+        (void)apply_native_row_presentations(page, g_addresses);
         return;
     }
-    original(page, frame_value, input_enabled);
+    original(page, frame_value, effective_input);
 
     // Action controllers republish their cached caption during the native
     // frame pass. Apply client presentation afterward so Button/Submenu-style
     // rows cannot immediately overwrite an accepted label edit. Every target
     // is identity-validated again inside the bridge before it is touched.
-    apply_native_row_presentations(page, g_addresses);
+    const SelectedHelpRefreshTicket selected_help =
+        apply_native_row_presentations(page, g_addresses);
+    observe_native_row_visibility_page_frame(page, g_addresses);
+    if (!visibility_rebuild_pending) {
+        publish_native_selected_help(selected_help, g_addresses);
+    }
 }
 
 bool install_page_frame_gate(const GameAddresses& addresses) noexcept {
@@ -2030,6 +2055,9 @@ void __fastcall dialog_back_gate_detour(
     void* const restored_parent = action == kNativeBackAction
         ? g_submenu_navigation.parent_page(page)
         : nullptr;
+    if (restored_parent) {
+        retire_native_row_visibility_page(page);
+    }
     original(page, action);
     if (restored_parent) {
         g_submenu_navigation.unbind_native_page(page);
@@ -2662,6 +2690,7 @@ void reset_hooks() noexcept {
     }
 #endif
     remove_native_slider_presentation();
+    reset_native_row_visibility();
     reset_native_row_presentations(g_addresses);
     set_color_picker_widget_path_bridge_available(false);
     {
@@ -2825,6 +2854,58 @@ bool native_tab_graphics_carrier_installed() noexcept {
 #else
     return false;
 #endif
+}
+
+bool validate_native_row_visibility_tab_carrier(
+    void* page,
+    std::size_t logical_page_index) noexcept {
+#if defined(ER_NATIVE_UI_CUSTOM_TABS_BACKEND)
+    if (!page || !g_tab_carrier.committed ||
+        g_tab_carrier.logical_page_index != logical_page_index ||
+        g_tab_carrier.panel != page) {
+        return false;
+    }
+    const TabCarrierIdentity current = inspect_tab_carrier(
+        page, 8, logical_page_index);
+    return current.valid &&
+        current.panel == g_tab_carrier.panel &&
+        current.wrapper == g_tab_carrier.wrapper &&
+        current.payload == g_tab_carrier.payload;
+#else
+    (void)page;
+    (void)logical_page_index;
+    return false;
+#endif
+}
+
+void reapply_native_row_visibility_page_title(
+    void* page,
+    const CapturedTitleTarget& captured,
+    const erui::detail::PageRoute& route,
+    std::size_t slice_count) noexcept {
+    erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
+    if (!captured.owned_by(page) || captured.route != route ||
+        !runtime.menu || slice_count == 0 ||
+        !g_addresses.scaleform_text_setter) {
+        return;
+    }
+    const erui::detail::ResolvedPagePresentation presentation =
+        runtime.menu->resolve_presentation(route, slice_count);
+    const wchar_t* const page_title = runtime.menu->texts.lookup(
+        static_cast<int>(presentation.page_title_id));
+    if (!page_title || !*page_title) return;
+
+    // The outer title is invariant across visible slice counts. Reusing only
+    // the exact page-owned persistent result avoids retaining or dereferencing
+    // the construction-time movie context after the handler returns.
+    unsigned long exception_code = 0;
+    if (!invoke_scaleform_text_setter(
+            g_addresses.scaleform_text_setter,
+            captured.text_value(),
+            page_title,
+            exception_code)) {
+        log_title_fault("visibility page-title assignment", exception_code);
+    }
 }
 
 bool native_scaleform_path_bridge_installed_at(
@@ -3055,7 +3136,8 @@ void request_navigate_page(
 
 HookInstallStatus install_native_menu_hooks(
     const GameAddresses& addresses,
-    const PreservedSharedMenuAddresses* preserved_shared) noexcept {
+    const PreservedSharedMenuAddresses* preserved_shared,
+    bool enable_row_presentations) noexcept {
     g_addresses = addresses;
     g_last_page.store(nullptr, std::memory_order_release);
     g_dialog_input_page.store(nullptr, std::memory_order_release);
@@ -3253,6 +3335,7 @@ HookInstallStatus install_native_menu_hooks(
     // of the optional native-alert transport, which merely shares it as an
     // input gate when available.
     const bool require_row_presentations =
+        enable_row_presentations &&
         erui::detail::editable_row_presentation_count() != 0;
     bool require_page_frame = enable_text_inputs || require_row_presentations;
     if (require_row_presentations &&

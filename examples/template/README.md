@@ -139,8 +139,8 @@ When Solid Uncapper is installed, place it before the host as described in the
 - The host copies all text/options and owns toggle, slider, inline-choice, and
   popup-choice bytes, TextInput strings, and ColorPicker RGB values. Choice
   indices and callbacks are always zero-based.
-- The current C++ wrapper requests the exact API 1.3 table. A host exposing
-  only API 1.0, 1.1, or 1.2 is rejected with a clear connection error instead
+- The current C++ wrapper requests the exact API 1.4 table. A host exposing
+  only API 1.0 through 1.3 is rejected with a clear connection error instead
   of silently reducing the features available to a newly built client.
 - Gate TextInput's builder with
   `menu.supports(erui::Capability::text_input)` to document the row's feature

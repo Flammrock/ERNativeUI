@@ -89,6 +89,7 @@ enum class Capability : ERUI_Capabilities {
     title_screen_text = ERUI_CAP_TITLE_SCREEN_TEXT,
     updates = ERUI_CAP_UPDATES,
     row_availability = ERUI_CAP_ROW_AVAILABILITY,
+    row_visibility = ERUI_CAP_ROW_VISIBILITY,
 };
 
 enum class AvailabilityAppearance : ERUI_AvailabilityAppearance {
@@ -547,7 +548,7 @@ struct TabOptions {
     // Lower values sort first. This is a hint rather than a physical slot;
     // ERNativeUI.ini may provide a player override.
     std::int32_t preferred_order{100};
-    // Empty selects ERNativeUI's fallback glyph.
+    // Empty selects ERNativeUI's default triangle icon.
     TabIconView icon{};
 };
 
@@ -1406,7 +1407,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_CUSTOM_TABS |
                     ERUI_CAP_TITLE_SCREEN_TEXT |
                     ERUI_CAP_UPDATES |
-                    ERUI_CAP_ROW_AVAILABILITY)) == 0;
+                    ERUI_CAP_ROW_AVAILABILITY |
+                    ERUI_CAP_ROW_VISIBILITY)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -1431,7 +1433,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_CUSTOM_TABS |
                     ERUI_CAP_TITLE_SCREEN_TEXT |
                     ERUI_CAP_UPDATES |
-                    ERUI_CAP_ROW_AVAILABILITY)) == 0;
+                    ERUI_CAP_ROW_AVAILABILITY |
+                    ERUI_CAP_ROW_VISIBILITY)) == 0;
     }
     if (version == ERUI_API_VERSION_1_2) {
         return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
@@ -1459,7 +1462,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_CUSTOM_TABS) == 0 &&
             (api.capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0 &&
             (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
-            (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0;
+            (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
+            (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0;
     }
     if (version == ERUI_API_VERSION_1_3) {
         return api.size == ERUI_API_V1_3_SIZE && api.add_text_input &&
@@ -1486,7 +1490,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
             (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
             (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
-            (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0;
+            (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
+            (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0;
     }
     if (version == ERUI_API_VERSION_1_4) {
         return api.size == ERUI_API_V1_4_SIZE && api.add_text_input &&
@@ -1513,6 +1518,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
             (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
             ((api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 ||
+             (api.capabilities & ERUI_CAP_UPDATES) != 0) &&
+            ((api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 ||
              (api.capabilities & ERUI_CAP_UPDATES) != 0);
     }
     return false;
@@ -2172,6 +2179,16 @@ public:
         return std::move(derived());
     }
 
+    Derived& visible(bool value) & noexcept {
+        set_visible(value);
+        return derived();
+    }
+
+    Derived&& visible(bool value) && noexcept {
+        set_visible(value);
+        return std::move(derived());
+    }
+
     [[nodiscard]] ERUI_Result commit() noexcept {
         if (committed_) return ERUI_ALREADY_COMMITTED;
         committed_ = true;
@@ -2192,6 +2209,10 @@ public:
         if ((fields_ & availability_fields) != 0 &&
             (context_->api.capabilities &
                 ERUI_CAP_ROW_AVAILABILITY) == 0) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if ((fields_ & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0 &&
+            (context_->api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0) {
             return ERUI_NOT_SUPPORTED;
         }
 
@@ -2215,6 +2236,9 @@ public:
                 ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0) {
             row_update.availability_appearance =
                 static_cast<ERUI_AvailabilityAppearance>(appearance_);
+        }
+        if ((fields_ & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0) {
+            row_update.visible = visible_ ? 1u : 0u;
         }
 
         ERUI_UpdateDesc update{};
@@ -2270,6 +2294,12 @@ protected:
             error_ = ERUI_INVALID_ARGUMENT;
             return;
         }
+    }
+
+    void set_visible(bool value) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        visible_ = value;
+        fields_ |= ERUI_ROW_UPDATE_FIELD_VISIBLE;
     }
 
 private:
@@ -2370,6 +2400,7 @@ private:
     ERUI_Result error_{ERUI_OK};
     bool committed_{};
     bool interactive_{};
+    bool visible_{};
     AvailabilityAppearance appearance_{
         AvailabilityAppearance::follow_interactivity};
     StyledText label_{};

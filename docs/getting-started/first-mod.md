@@ -4,9 +4,8 @@ This walkthrough starts with an empty directory and produces a Windows x64
 client DLL. When its row is activated in Elden Ring, it opens a native dialog
 saying **Hello, Tarnished!**
 
-Complete [Install the SDK](setup.md) first. The commands below assume the
-ERNativeUI 1.3.0 Windows SDK, the first release exposing API 1.3, was extracted
-and its directory renamed to:
+Complete [Install the SDK](setup.md) first. The commands below assume a
+matching current SDK was extracted and its directory renamed to:
 
 ```text
 C:\SDK\ERNativeUI-current
@@ -32,7 +31,7 @@ cmake_minimum_required(VERSION 3.24)
 project(HelloTarnished LANGUAGES CXX)
 
 # Package releases and ERUI APIs are independent. Resolve an SDK that exposes
-# the current API 1.3 declarations; its headers select the runtime contract.
+# the current API 1.4 declarations; its headers select the runtime contract.
 find_package(ERNativeUI CONFIG REQUIRED)
 
 add_library(HelloTarnished MODULE src/hello_tarnished.cpp)

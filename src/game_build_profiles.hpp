@@ -185,6 +185,46 @@ struct MenuRuntimeAddressProfile {
     std::uintptr_t popup_choice_presentation_vtable_rva{};
 };
 
+// The selected-row help presenter is deliberately kept out of the ordinary
+// menu-runtime profile. API 1.4 calls this routine directly after replacing a
+// row's non-owning help source, so every ownership edge in that path is
+// admitted only for the two executable images proved live. Older profiles do
+// not inherit this capability from a plausible signature or a zero RVA.
+struct SelectedHelpPresenterAddressProfile {
+    EldenRingBuild build{};
+    std::size_t image_size{};
+    std::uintptr_t presenter_rva{};
+    std::uintptr_t clone_wrapper_rva{};
+    std::uintptr_t inner_clone_rva{};
+    std::uintptr_t two_owned_string_cleanup_rva{};
+    std::uintptr_t owned_string_clone_rva{};
+    std::uintptr_t help_thunk_rva{};
+};
+
+inline constexpr std::array<SelectedHelpPresenterAddressProfile, 2>
+    kSelectedHelpPresenterAddressProfiles{{
+        {
+            EldenRingBuild::v2_7_1_0,
+            0x5E0DA00,
+            0x977BE0,
+            0x93D300,
+            0x78EB60,
+            0x7373A0,
+            0x117910,
+            0x7469C0,
+        },
+        {
+            EldenRingBuild::v2_7_2_0,
+            0x5DFD600,
+            0x978090,
+            0x93D7B0,
+            0x78F010,
+            0x737850,
+            0x117910,
+            0x746E70,
+        },
+    }};
+
 inline constexpr std::array<MenuRuntimeAddressProfile, 3>
     kMenuRuntimeAddressProfiles{{
         {
@@ -434,6 +474,12 @@ find_text_input_address_profile(EldenRingBuild build) noexcept {
 [[nodiscard]] constexpr const MenuRuntimeAddressProfile*
 find_menu_runtime_address_profile(EldenRingBuild build) noexcept {
     return find_address_profile(kMenuRuntimeAddressProfiles, build);
+}
+
+[[nodiscard]] constexpr const SelectedHelpPresenterAddressProfile*
+find_selected_help_presenter_address_profile(
+    EldenRingBuild build) noexcept {
+    return find_address_profile(kSelectedHelpPresenterAddressProfiles, build);
 }
 
 [[nodiscard]] constexpr const CoreUiAddressProfile*

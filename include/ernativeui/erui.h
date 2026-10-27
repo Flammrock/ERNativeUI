@@ -125,7 +125,8 @@ enum {
     ERUI_CAP_CUSTOM_TABS = UINT64_C(1) << 18,
     ERUI_CAP_TITLE_SCREEN_TEXT = UINT64_C(1) << 19,
     ERUI_CAP_UPDATES = UINT64_C(1) << 20,
-    ERUI_CAP_ROW_AVAILABILITY = UINT64_C(1) << 21
+    ERUI_CAP_ROW_AVAILABILITY = UINT64_C(1) << 21,
+    ERUI_CAP_ROW_VISIBILITY = UINT64_C(1) << 22
 };
 
 /*
@@ -811,7 +812,9 @@ enum {
     /* Changes whether the row can receive focus or activation. */
     ERUI_ROW_UPDATE_FIELD_INTERACTIVE = 1u << 3,
     /* Selects the row's visual availability independently of interaction. */
-    ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE = 1u << 4
+    ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE = 1u << 4,
+    /* Includes or excludes the row from layout and pagination. */
+    ERUI_ROW_UPDATE_FIELD_VISIBLE = 1u << 5
 };
 
 /*
@@ -839,17 +842,25 @@ typedef struct ERUI_RowUpdateDesc {
     ERUI_StyledTextView help;
     ERUI_StyledTextView caption;
     ERUI_AvailabilityAppearance availability_appearance;
-    uint32_t reserved;
+    uint32_t visible;
 } ERUI_RowUpdateDesc;
 
 /*
  * When its field bit is present, interactive must be exactly 0 or 1 and
- * availability_appearance must name a declared value. When the corresponding
- * bit is absent, each scalar must be zero. Availability fields additionally
- * require ERUI_CAP_ROW_AVAILABILITY and a materialized Button, Toggle,
+ * availability_appearance must name a declared value, and visible must be
+ * exactly 0 or 1. When the corresponding bit is absent, each scalar must be
+ * zero. Availability fields additionally require ERUI_CAP_ROW_AVAILABILITY
+ * and a materialized Button, Toggle,
  * Slider, NumericSlider, CustomSlider, InlineChoice, PopupChoice, TextInput,
  * or ColorPicker row. Submenu rows are unsupported; a construction-disabled
  * Button or ColorPicker is omitted by the host and therefore also rejected.
+ * Visibility additionally requires ERUI_CAP_ROW_VISIBILITY and is supported
+ * for materialized Button, Toggle, Slider, NumericSlider, CustomSlider,
+ * InlineChoice, PopupChoice, TextInput, and ColorPicker rows. Submenu rows
+ * remain unsupported until their navigation and page-stack lifecycle is
+ * validated separately. Construction-disabled Button and ColorPicker rows
+ * are omitted by the host and therefore rejected. A batch is also rejected
+ * if its final projection would leave any logical page empty.
  */
 
 typedef struct ERUI_UpdateDesc {
@@ -1157,8 +1168,8 @@ typedef struct ERUI_ProviderDesc {
  * units. preferred_order is a sorting hint, not a physical slot number: lower
  * values appear first, with stable provider_id/tab_id tie-breaking. A player's
  * ERNativeUI.ini ordering may override it. icon may be NULL to request the
- * host fallback glyph. Otherwise the descriptor and all referenced pixel
- * bytes are copied synchronously before add_tab returns.
+ * host's default triangle icon. Otherwise the descriptor and all referenced
+ * pixel bytes are copied synchronously before add_tab returns.
  *
  * The returned page is an ordinary provider-owned page. It accepts the same
  * add_* row and presentation functions as built-in and submenu pages and
@@ -1790,7 +1801,8 @@ typedef struct ERUI_Api {
      * This entry is present in every valid 1.4 table; test ERUI_CAP_UPDATES
      * before calling it because an unvalidated game build may return
      * ERUI_NOT_SUPPORTED. Availability fields additionally require
-     * ERUI_CAP_ROW_AVAILABILITY.
+     * ERUI_CAP_ROW_AVAILABILITY. Visibility additionally requires
+     * ERUI_CAP_ROW_VISIBILITY.
      */
     ERUI_Result (ERUI_CALL* commit_updates)(
         ERUI_ProviderHandle provider,

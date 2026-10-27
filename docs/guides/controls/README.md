@@ -59,8 +59,8 @@ Use a button when the row performs work but does not itself own a setting.
 
 ## Shared control concepts
 
-- [Availability and capabilities](../availability.md) explains the Availability
-  table found on every control page and how to check host support.
+- [Capabilities](../capabilities.md) explains the **Capability requirements**
+  section found on every control page and how to check host support.
 - [Enabled controls](options/enabled.md) explains which controls can be disabled, why
   some remain visible while others are omitted, and why the state is fixed at
   registration time.

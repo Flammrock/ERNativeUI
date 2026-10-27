@@ -1,5 +1,16 @@
 # Numeric Slider
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#numeric-slider"><code>numeric_slider</code></a>
+    </td>
+  </tr>
+</table>
+
 A Numeric Slider uses Elden Ring's native slider row for signed or decimal
 settings. It can also place fixed text before or after the number, so values
 such as `x0.6`, `-0.5`, and `3.0s` remain native left/right controls.
@@ -196,17 +207,17 @@ player-change callback.
 raw handle and calling `Registration::get_numeric_slider_value` or
 `Registration::set_numeric_slider_value`.
 
-## Availability
+## Capability requirements
 
 | Property | Value |
 |---|---|
 | First public API | 1.2 |
-| Capability | `erui::Capability::numeric_slider` / `ERUI_CAP_NUMERIC_SLIDER` |
+| Required capability | `erui::Capability::numeric_slider` / `ERUI_CAP_NUMERIC_SLIDER` |
 | GFX presentation | Uses the stock native slider widget |
 | Positions | 2 through 256 |
 | Decimal precision | 0 through 9 places |
 
-See [Availability and capabilities](../availability.md) before using a
+See [the `numeric_slider` capability](../capabilities.md#numeric-slider) before using a
 feature that may be absent from the connected host.
 
 ## Common mistakes

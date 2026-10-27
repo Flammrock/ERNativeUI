@@ -3,8 +3,10 @@
 `ShowcaseScreenshotHelper.dll` creates one small, predictable view for taking
 ERNativeUI documentation screenshots. It can isolate one control, register
 one example custom tab, or place deterministic example text around the title
-screen. It is also a compact example of reading a client-specific INI through
-ERNativeUI's host-owned Storage service.
+screen. With API 1.4, it can also stage one compact scene for each row-update
+presentation concept: text and style, visibility, and availability. It is a
+compact example of reading a client-specific INI through ERNativeUI's
+host-owned Storage service.
 
 The helper is intentionally English-only. It never queries the game language
 and all client-provided labels are fixed English strings. Set Elden Ring to
@@ -41,6 +43,10 @@ The accepted values are:
 | `popup-choice` | **Quality Preset**, with four named values |
 | `text-input` | Empty **Player Name** with **Enter a name** placeholder |
 | `color-picker` | **Accent Color**, initially RGB `(171, 125, 99)` |
+| `row-text-and-styles` | **Showcase Intensity**, whose percentage updates in its colored label and focused help from red at 0% to green at 100% |
+| `row-text-and-styles-2` | A colorful Button plus value-dependent Numeric Slider and Toggle labels using discrete native, red, green, and gold states |
+| `row-visibility` | **Show advanced setting**, one conditional Slider, and one stable row for a clean layout-rebuild capture |
+| `row-availability` | **Enable online setting**, a visible dimmed/skipped Slider, and one always-available row |
 | `custom-tab` | Top-level **My Mod Settings** tab with a generated `rgb(107, 100, 80)` triangle icon and one toggle |
 | `title-screen-text` | One labeled line in each title-screen corner: one native color and three subdued custom RGB colors |
 
@@ -50,12 +56,18 @@ the current page. For the control modes, open **System -> Game Options ->
 _Control_ Showcase** to see the selected control by itself. For `custom-tab`,
 open **System** and select the top-level **My Mod Settings** tab. For
 `title-screen-text`, remain on the title screen after startup; this mode does
-not add a System-menu page.
+not add a System-menu page. For each `row-*` mode, open **System -> Game
+Options** and select its page: **Text & Style Updates**, **Text & Style
+Updates 2**, **Row Visibility**, or **Row Availability**.
 
-This build uses the current API 1.3 headers, so every mode requires a host
-exposing API 1.3. The `custom-tab` mode additionally requires the optional
-custom-tab capability on a supported game executable.
-The `title-screen-text` mode requires the title-screen-text capability.
+The helper DLL is compiled with the exact-version API 1.4 wrapper, so every
+mode requires a host exposing API 1.4. Both `row-text-and-styles*` modes
+additionally require Updates, and the second also requires Numeric Slider.
+`row-visibility` requires Updates and Row Visibility; `row-availability`
+requires Updates and Row Availability.
+The `custom-tab` mode additionally
+requires the custom-tab capability on a supported game executable. The
+`title-screen-text` mode requires the title-screen-text capability.
 For matching before/after screenshots, press Right once on **Camera
 Distance** to change `x0.6` to `x0.7`. Press Left once on **Impossible
 Values** to change **hello** to `1s`.
@@ -63,6 +75,58 @@ Values** to change **hello** to `1s`.
 An absent or unreadable mode safely falls back to `button`. If the INI or its
 `mode` key is missing, the example attempts to create the default entry. An
 unknown value is left untouched so a spelling mistake remains visible.
+
+## Capture the four row-update images
+
+For all four captures, use English, 2560x1440, default UI scale, default
+runtime GFX patching, and no other client DLL. Hide the mouse cursor, wait two
+seconds after the last interaction, and capture the complete game frame.
+
+### Text and style
+
+Set `mode=row-text-and-styles`, restart, and open **Text & Style Updates**.
+Keep **Showcase Intensity (50%)** selected so its focused help is visible.
+Move through the range first to verify that `0%` is red, `100%` is green, and
+both the label and help update. Return to `50` and save:
+
+```text
+docs/assets/images/row-updates/colors-1.gif
+```
+
+### Text and style across controls
+
+Set `mode=row-text-and-styles-2`, restart, and open **Text & Style Updates 2**.
+Confirm that **Enemy Damage** is red below `x1.0`, native-colored at `x1.0`,
+and green above it. Its semantic default is deliberately away from the visual
+midpoint. Confirm that **Optional Effect** is gold while Off and native-colored
+while On. Return them to `x0.8` and Off, select **Colorful Action** so its
+styled help is visible, and save:
+
+```text
+docs/assets/images/row-updates/colors-2.gif
+```
+
+### Visibility
+
+Set `mode=row-visibility`, restart, and open **Row Visibility**. Change
+**Show advanced setting** from On to Off. Confirm **Advanced strength**
+disappears and **Always visible** moves up without a page transition. Keep the
+controlling toggle selected and save:
+
+```text
+docs/assets/images/row-updates/visibility.gif
+```
+
+### Availability
+
+Set `mode=row-availability`, restart, and open **Row Availability**. Leave
+**Enable online setting** Off. Confirm **Online strength** is dimmed and that
+Down skips it in favor of **Always available**, then return focus to the
+controlling toggle and save:
+
+```text
+docs/assets/images/row-updates/availability.gif
+```
 
 ## Capture the title-screen text image
 
@@ -177,4 +241,6 @@ that movie unchanged and the controls use their documented fallback appearance.
 Return to the [examples overview](../README.md) or the
 [control documentation](../../docs/guides/controls/README.md). For the
 `custom-tab` mode, continue with the
-[Custom Configuration tabs guide](../../docs/guides/custom-tabs.md).
+[Custom Configuration tabs guide](../../docs/guides/custom-tabs.md). For the
+API 1.4 scenes, continue with the
+[row-updates guides](../../docs/guides/row-updates/README.md).

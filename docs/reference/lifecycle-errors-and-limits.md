@@ -1,6 +1,6 @@
 # Lifecycle, errors, and limits
 
-This page defines the common contract every current ERUI API 1.3 client needs,
+This page defines the common contract every current ERUI API 1.4 client needs,
 regardless of which controls it uses. ERUI API versions and ERNativeUI package
 versions are independent; use a package release that explicitly includes the
 API selected by the client headers.
@@ -14,7 +14,7 @@ placing C++ objects across the DLL boundary.
 ```text
 client DllMain
     -> capture HMODULE and start a worker
-        -> connect to exact API 1.3
+        -> connect to exact API 1.4
             -> register a private provider draft
                 -> add pages, rows, tabs, bindings, and optional storage
                     -> commit and wait for final native installation
@@ -42,10 +42,10 @@ const erui::LanguageInfo language = connected.value().game_language();
 
 The default overload waits for at most 30 seconds. The duration overload can
 choose another bounded timeout. It polls for the already-loaded canonical
-`ERNativeUI.dll`; it does not call `LoadLibrary`. It requests API 1.3 exactly,
+`ERNativeUI.dll`; it does not call `LoadLibrary`. It requests API 1.4 exactly,
 does not downgrade to an older API, and returns immediately when the host is ready.
 
-A successful API 1.3 handshake guarantees that process-wide language selection
+A successful API 1.4 handshake guarantees that process-wide language selection
 has settled. With `Language = auto`, lookup can still return
 `ERUI_NOT_SUPPORTED` when Steam is definitively unavailable; this does not
 disable the menu API. An explicit host language is immediately available.
@@ -56,8 +56,8 @@ A strict-C client performs the same sequence explicitly:
 
 1. Call `GetModuleHandleW(L"ERNativeUI.dll")`; never load a private copy.
 2. Resolve `ERUI_GetApi` with `GetProcAddress`.
-3. Zero a fresh `ERUI_Api`, set `size = ERUI_API_V1_3_SIZE`, and request
-   `ERUI_API_VERSION_1_3`.
+3. Zero a fresh `ERUI_Api`, set `size = ERUI_API_V1_4_SIZE`, and request
+   `ERUI_API_VERSION_1_4`.
 4. Retry only `ERUI_HOST_NOT_READY` from a worker. Reinitialize the table for
    each attempt instead of reusing a possibly partial result.
 5. On success, verify the exact returned version, required table size,
@@ -136,20 +136,23 @@ that table; they are not substitutes for checking an operation's
 
 | API | Capability groups |
 |---|---|
-| 1.0 prefix retained by API 1.1, 1.2, and 1.3 | Toggle, slider, button, submenu, pagination, host-owned row values, page presentation, alerts, inline choice, popup choice, game language |
+| 1.0 prefix retained by APIs 1.1 through 1.4 | Toggle, slider, button, submenu, pagination, host-owned row values, page presentation, alerts, inline choice, popup choice, game language |
 | Added in 1.1 | TextInput, ColorPicker, built-in pages, input bindings, provider storage |
 | Added in 1.2 | Numeric Slider and Custom Slider |
 | Added in 1.3 | Custom top-level Configuration tabs and title-screen text |
+| Added in 1.4 | Atomic row-update batches, typed C++ row references, runtime text/style updates, row availability, and row visibility/repagination |
 
 In C++, query `connection.supports(erui::Capability::text_input)` or
 `menu.supports(...)` before capability-scoped code. The corresponding raw-C
 test checks both the `ERUI_CAP_*` bit and its function-table pointer.
 
-The current C++ wrapper accepts API 1.3 only when `add_tab`,
+The current C++ wrapper accepts API 1.4 only when `commit_updates`, `add_tab`,
 `add_title_screen_text`, the complete Numeric Slider and Custom Slider blocks,
-and the retained API 1.1 surface are present. The custom-tab and title-screen
-text capabilities remain game-build-sensitive, so a valid API 1.3 connection
-can omit either capability. Title-screen text additionally requires
+and the retained API 1.1 surface are present. The custom-tab, title-screen-text,
+and game-build-sensitive row-update capabilities can be absent on a valid API
+1.4 connection. `ERUI_CAP_ROW_AVAILABILITY` and `ERUI_CAP_ROW_VISIBILITY`
+require `ERUI_CAP_UPDATES`; clients must test every capability needed by an
+operation. Title-screen text additionally requires
 `[GFX] EnableRuntimePatching = 1`; disabling it removes that capability while
 custom tabs remain independent. Checks near individual builders document
 their dependency and guard bad tables; they are not an automatic downgrade
@@ -209,74 +212,9 @@ must be released before it can trigger a later edge.
 
 ## Error handling
 
-### C++ result objects
-
-`erui::connect()` returns `ConnectionResult`; `Connection::register_menu`
-returns `RegistrationResult`. Test either result before calling `value()`.
-Failures expose an `Error` with a wrapper-level `code()`, the raw
-`native_result()`, and a human-readable `message()`. The message can be empty
-on an allocation-failure fallback, so do not make program logic depend on it.
-
-| `erui::ErrorCode` | Meaning |
-|---|---|
-| `none` | No wrapper error |
-| `host_not_loaded` | The canonical host DLL was not observed before the connection deadline |
-| `export_not_found` | A DLL with the canonical name lacks `ERUI_GetApi` |
-| `host_not_ready` | The host was observed but startup did not settle before the deadline |
-| `host_failed` | Host initialization or required native installation failed |
-| `incompatible_api` | Exact version negotiation or table validation failed |
-| `registration_failed` | Provider creation or final commit failed |
-| `builder_exception` | The client builder threw; its draft was aborted |
-| `operation_failed` | A builder operation failed, or a wrapper allocation/exception fell outside the more specific groups |
-
-Runtime methods such as `set_value`, `set_text`, `set_color`, binding methods,
-storage calls, and `alert` return `ERUI_Result` directly. Check it at the point
-where recovery or logging is still meaningful.
-
-### Raw `ERUI_Result` values
-
-| Result | Meaning |
-|---|---|
-| `ERUI_OK` | The operation completed according to its synchronous contract |
-| `ERUI_INVALID_ARGUMENT` | A pointer, descriptor, enum, reserved field, value, row type, or range is invalid |
-| `ERUI_HOST_NOT_READY` | Host startup or a required runtime subsystem is not ready |
-| `ERUI_HOST_FAILED` | The host entered a terminal failed state for this process |
-| `ERUI_UNSUPPORTED_VERSION` | The requested exact API contract is unavailable |
-| `ERUI_DUPLICATE_PROVIDER_ID` | Another provider already owns that process-wide ID |
-| `ERUI_INVALID_HANDLE` | A zero, stale, wrong-provider, or otherwise unknown handle was used |
-| `ERUI_ALREADY_COMMITTED` | A draft-only operation targeted a committed provider, or an abort targeted it |
-| `ERUI_REGISTRATION_CLOSED` | The startup topology window has closed |
-| `ERUI_OUT_OF_MEMORY` | A bounded allocation failed or a declared object limit was reached |
-| `ERUI_CALLBACK_REJECTED` | Callback ownership validation or module pinning failed |
-| `ERUI_INTERNAL_ERROR` | The host detected an unexpected internal state or invalid returned data |
-| `ERUI_QUEUE_FULL` | The bounded global alert queue cannot accept another request |
-| `ERUI_NOT_SUPPORTED` | The selected API/provider/game path cannot provide this optional operation |
-| `ERUI_BUFFER_TOO_SMALL` | A copy-out buffer or fixed structure is smaller than required |
-| `ERUI_DUPLICATE_ACTION_ID` | An input action repeats an ID already used by its provider |
-| `ERUI_NOT_FOUND` | A requested storage key is absent |
-| `ERUI_STORAGE_NOT_LOADED` | A storage read, mutation, or save was attempted before `load()` |
-| `ERUI_STORAGE_ALREADY_LOADED` | `load()` was called more than once for the same document |
-| `ERUI_STORAGE_IO_ERROR` | Reading, writing, replacing, or resolving storage failed |
-| `ERUI_STORAGE_FORMAT_ERROR` | Stored or serialized input is malformed |
-| `ERUI_DUPLICATE_TAB_ID` | A custom tab repeats an ID already used by its provider |
-| `ERUI_TAB_LIMIT_REACHED` | Committing or staging custom tabs would exceed the 1,024-tab process limit |
-| `ERUI_TITLE_SCREEN_TEXT_LIMIT_REACHED` | Committing or staging title-screen text would exceed the 16-line process limit |
-
-`ERUI_OK` has operation-specific timing. In particular, `alert()` returning
-`ERUI_OK` means the request entered the FIFO, not that the player dismissed
-it. Its callback reports eventual completion. Likewise, programmatic row
-writes update canonical state synchronously but marshal native presentation to
-a safe later UI boundary.
-
-An alert callback reports `ERUI_OK` plus its `primary`, `secondary`, or
-`dismissed` response after normal completion. If an accepted alert later fails
-to present or complete safely, its callback receives a non-OK result and the
-`none` response.
-
-Retry `ERUI_HOST_NOT_READY` only as part of the documented connection/startup
-path. Treat `ERUI_HOST_FAILED` and `ERUI_REGISTRATION_CLOSED` as terminal for
-the current process. `ERUI_QUEUE_FULL` is a transient alert-backpressure result;
-do not discard client state merely because a dialog was not queued.
+The complete result model, result-code table, retry policy, logging pattern,
+and distinction between synchronous acceptance and later native presentation
+are centralized in [Error handling](error-handling.md).
 
 ## Value-update semantics
 
@@ -342,7 +280,7 @@ creates only an in-memory handle:
   disk write; and
 - nothing is saved automatically at process exit.
 
-## Important API 1.3 limits
+## Important API 1.4 limits
 
 These limits are enforced by the public contract or by the bounded host
 service behind it.
@@ -356,7 +294,7 @@ service behind it.
 | Committed custom tabs | 1,024 process-wide |
 | Custom-tab ID | 1..255 ASCII bytes, provider-local and using the machine-ID grammar |
 | Custom-tab title | 1..95 valid UTF-16 code units |
-| Custom-tab icon | Exact 32x32 row-major RGBA8, 4,096 bytes, or no icon for the fallback glyph |
+| Custom-tab icon | Exact 32x32 row-major RGBA8, 4,096 bytes, or no icon for the default triangle icon |
 | Committed title-screen text | 16 lines process-wide |
 | One title-screen line | 1..255 valid UTF-16 code units; CR, LF, U+0085, U+2028, and U+2029 are rejected |
 | Input sections | 4,096 per provider and 4,096 process-wide |
@@ -381,6 +319,9 @@ service behind it.
 | API 1.1 function-table prefix on Windows x64 | `ERUI_API_V1_1_SIZE`, 320 bytes |
 | API 1.2 function-table prefix on Windows x64 | `ERUI_API_V1_2_SIZE`, 368 bytes |
 | API 1.3 function-table prefix on Windows x64 | `ERUI_API_V1_3_SIZE`, 384 bytes |
+| API 1.4 function-table prefix on Windows x64 | `ERUI_API_V1_4_SIZE`, 392 bytes |
+| Updates in one atomic batch | `ERUI_UPDATE_MAX_COUNT`, 4,096 |
+| Styled-text spans in one field | 256 |
 | Numeric or Custom Slider logical positions | 2 through 256 per row |
 | Numeric Slider decimal places | 0 through 9 |
 | Custom Slider display value | 64 valid UTF-16 code units per position |
@@ -427,8 +368,9 @@ the effective unchanged movie.
 
 ### Pinned Windows x64 layouts
 
-The ABI uses natural Windows x64 alignment and no packing pragma. Its released
-prefixes have strict MSVC and MinGW-w64 layout coverage. These sizes are useful
+The ABI uses natural Windows x64 alignment and no packing pragma. Its published
+prefixes and current pre-release tail have strict MSVC and MinGW-w64 layout
+coverage. These sizes are useful
 when reviewing a foreign-function binding or diagnosing an unexpected compiler
 layout; application code should still write `sizeof(Type)` rather than a
 numeric literal. Layout and isolated cross-toolchain fixtures do not replace
@@ -468,14 +410,20 @@ the separate in-game runtime qualification recorded in `VALIDATION.md`.
 | `ERUI_TabIconDesc` | 32 |
 | `ERUI_TabDesc` | 64 |
 | `ERUI_TitleScreenTextDesc` | 40 |
+| `ERUI_TextStyleSpan` | 24 |
+| `ERUI_StyledTextView` | 48 |
+| `ERUI_RowUpdateDesc` | 176 |
+| `ERUI_UpdateDesc` | 24 |
+| `ERUI_UpdateBatchDesc` | 32 |
 | API 1.0 function-table prefix | 128 |
 | API 1.1 function-table prefix | 320 |
 | API 1.2 function-table prefix | 368 |
 | API 1.3 function-table prefix | 384 |
+| API 1.4 function-table prefix | 392 |
 
 The complete offset and guard-page assertions live in
 [`tests/abi/current/c_layout_test.c`](https://github.com/Flammrock/ERNativeUI/blob/main/tests/abi/current/c_layout_test.c).
-Frozen API 1.0, 1.1, and 1.2 headers and clients are kept separately under
+Frozen API 1.0, 1.1, 1.2, and 1.3 headers and clients are kept separately under
 [`tests/abi/releases`](https://github.com/Flammrock/ERNativeUI/tree/main/tests/abi/releases).
 
 ## Earlier-API binary compatibility
@@ -484,16 +432,17 @@ Compatibility is directional:
 
 | Client binary | Loaded host | Result |
 |---|---|---|
-| Built with released API 1.0 headers | Host exposing API 1.3 | Supported through the unchanged 128-byte API 1.0 prefix and original lifecycle |
-| Built with released API 1.1 headers | Host exposing API 1.3 | Supported through the unchanged API 1.1 prefix and explicit connection lifecycle |
-| Built with released API 1.2 headers | Host exposing API 1.3 | Supported through the unchanged API 1.2 prefix and explicit connection lifecycle |
-| Compiled with current API 1.3 headers | Host exposing API 1.3 | Supported through explicit connection |
-| Compiled with current API 1.3 headers | Host exposing only API 1.0, 1.1, or 1.2 | Rejected; there is no silent downgrade |
+| Built with released API 1.0 headers | Host exposing API 1.4 | Supported through the unchanged 128-byte API 1.0 prefix and original lifecycle |
+| Built with released API 1.1 headers | Host exposing API 1.4 | Supported through the unchanged API 1.1 prefix and explicit connection lifecycle |
+| Built with released API 1.2 headers | Host exposing API 1.4 | Supported through the unchanged API 1.2 prefix and explicit connection lifecycle |
+| Built with released API 1.3 headers | Host exposing API 1.4 | Supported through the unchanged API 1.3 prefix and explicit connection lifecycle |
+| Compiled with current API 1.4 source headers | Host exposing API 1.4 | Supported through explicit connection |
+| Compiled with current API 1.4 source headers | Host exposing only API 1.0 through 1.3 | Rejected; there is no silent downgrade |
 | Requests an unknown API version | Current host | `ERUI_UNSUPPORTED_VERSION` |
 
 An earlier client DLL embeds its selected header-only wrapper and does not need
 to be recompiled merely because a player installs a host release that also
-supports API 1.3. Source intentionally rebuilt with the API 1.3 header requests
+supports API 1.4. Source intentionally rebuilt with the API 1.4 header requests
 the new contract through `connect()`.
 
 Every 1.x host retains each API 1.x contract introduced by it or an earlier
@@ -503,8 +452,10 @@ unless its release documentation explicitly retains them. See
 
 The API 1.0 prefix remains byte-for-byte frozen at 128 bytes. API 1.1 remains
 frozen at its published prefix size. API 1.2 appends its entries after API 1.1,
-and API 1.3 appends `add_tab` and `add_title_screen_text` after the frozen API
-1.2 prefix; no earlier field is reordered.
+API 1.3 appends `add_tab` and `add_title_screen_text` after the frozen API 1.2
+prefix, and API 1.4 appends `commit_updates` after the frozen API 1.3 prefix;
+no earlier field is reordered. API 1.4 remains a pre-release contract until
+its public fixtures are frozen for publication.
 The host writes only the selected supported prefix within the caller-declared
 table size. Fixed-width integers, size-prefixed POD structures, `ERUI_CALL`
 (`__cdecl`), and opaque handles define one compiler-neutral C boundary. API
@@ -513,7 +464,7 @@ runtime qualification remains a separate release-validation gate.
 
 This is runtime API compatibility, not release-package selection. CMake's
 `find_package(ERNativeUI <release>)` checks an ERNativeUI project release at
-build time; `ERUI_GetApi(ERUI_API_VERSION_1_3, ...)` negotiates the ERUI
+build time; `ERUI_GetApi(ERUI_API_VERSION_1_4, ...)` negotiates the current ERUI
 contract in the game process. See [Versioning](../versioning.md) and the permanent
 [adjacent migration guides](../migrations/README.md).
 

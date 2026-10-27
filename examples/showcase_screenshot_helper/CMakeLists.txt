@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(ShowcaseScreenshotHelper LANGUAGES CXX)
     # Package releases and runtime APIs are independent. This source uses the
-    # API 1.3 custom-tab and title-screen-text declarations, so let the
-    # imported headers prove that surface at compile time instead of naming an
-    # unrelated package version.
+    # current custom-tab, title-screen-text, and API 1.4 row-update
+    # declarations, so let the imported headers prove that surface at compile
+    # time instead of naming an unrelated package version.
     find_package(ERNativeUI CONFIG REQUIRED)
     set(ERNATIVEUI_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy" CACHE PATH
         "Directory in which the example DLL is staged")

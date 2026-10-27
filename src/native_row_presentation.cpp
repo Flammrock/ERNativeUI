@@ -2,6 +2,7 @@
 
 #include "addresses.hpp"
 #include "game_build.hpp"
+#include "game_build_profiles.hpp"
 #include "module.hpp"
 #include "native_title_bridge.hpp"
 #include "row_presentation_state.hpp"
@@ -28,6 +29,8 @@ constexpr std::size_t kPropertyRowOwnedHelpOffset = 0x48;
 constexpr std::size_t kPropertyControllerOffset = 0x78;
 constexpr std::size_t kPropertyEnabledOffset = 0x80;
 constexpr std::size_t kPropertyCountOffset = 0x1AF0;
+constexpr std::size_t kSelectedRowCountOffset = 0xB08;
+constexpr std::size_t kSelectedRowIndexOffset = 0xB0C;
 constexpr std::size_t kMaximumPropertyRows = 16;
 constexpr std::size_t kControllerMovieContextOffset = 0x10;
 constexpr std::size_t kControllerCaptionAccessorSlot = 6;
@@ -312,6 +315,7 @@ struct PageBinding {
     std::uint64_t use_serial{};
     std::array<PhysicalBinding, kMaximumPropertyRows> rows{};
     std::size_t row_count{};
+    SelectedHelpRefreshTicket pending_help{};
     bool active{};
 };
 
@@ -324,6 +328,7 @@ std::array<SliderTransformRegistryEntry, kSliderTransformRegistryCapacity>
 std::uint64_t g_slider_transform_generation{};
 std::uint64_t g_slider_transform_use_serial{};
 std::atomic<std::uint32_t> g_fault_logs{};
+thread_local bool g_selected_help_presenter_active{};
 
 struct TextReadbackSlot {
     alignas(16) std::array<std::byte, kScaleformMemberResultSize> storage{};
@@ -553,6 +558,78 @@ bool read_page_identity(
             sizeof(out_count));
         return out_vtable == addresses.option_setting_dialog_vtable &&
             out_count <= kMaximumPropertyRows;
+#if defined(_MSC_VER)
+    } __except (out_seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+#endif
+}
+
+bool read_selected_row(
+    void* page,
+    std::uint32_t& out_count,
+    std::uint32_t& out_index,
+    unsigned long& out_seh) noexcept {
+    out_count = 0;
+    out_index = 0;
+    out_seh = 0;
+    if (!page) return false;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        std::memcpy(
+            &out_count,
+            static_cast<const std::byte*>(page) + kSelectedRowCountOffset,
+            sizeof(out_count));
+        std::memcpy(
+            &out_index,
+            static_cast<const std::byte*>(page) + kSelectedRowIndexOffset,
+            sizeof(out_index));
+        return out_count != 0 && out_count <= kMaximumPropertyRows &&
+            out_index < out_count;
+#if defined(_MSC_VER)
+    } __except (out_seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+#endif
+}
+
+bool direct_help_source_matches(
+    const PhysicalBinding& binding,
+    const wchar_t* expected,
+    unsigned long& out_seh) noexcept {
+    out_seh = 0;
+    if (!binding.native_row || !binding.row_vtable || !expected) return false;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        void* row_vtable{};
+        const wchar_t* source{};
+        std::memcpy(&row_vtable, binding.native_row, sizeof(row_vtable));
+        std::memcpy(
+            &source,
+            static_cast<const std::byte*>(binding.native_row) +
+                kPropertyRowHelpDirectOffset,
+            sizeof(source));
+        return row_vtable == binding.row_vtable && source == expected;
+#if defined(_MSC_VER)
+    } __except (out_seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+#endif
+}
+
+bool call_selected_help_presenter(
+    SelectedHelpPresenterFn presenter,
+    void* page,
+    unsigned long& out_seh) noexcept {
+    out_seh = 0;
+    if (!presenter || !page) return false;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        presenter(page);
+        return true;
 #if defined(_MSC_VER)
     } __except (out_seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -3100,24 +3177,27 @@ void apply_binding_appearance(
     binding.appearance_failures = 0;
 }
 
-void apply_binding(
+bool apply_binding(
     void* page,
     const GameAddresses& addresses,
     PhysicalBinding& binding) noexcept {
+    bool help_changed = false;
     const detail::RowPresentationView view =
         detail::row_presentation_view(binding.presentation_slot);
-    if (view && binding.help_revision != view.revision &&
+    if (view && view.help_revision != 0 &&
+        binding.help_revision != view.help_revision &&
         !binding.help_conflict &&
-        !(binding.help_failed_revision == view.revision &&
+        !(binding.help_failed_revision == view.help_revision &&
           binding.help_failures >= 4u)) {
-        if (binding.help_failed_revision != view.revision) {
-            binding.help_failed_revision = view.revision;
+        if (binding.help_failed_revision != view.help_revision) {
+            binding.help_failed_revision = view.help_revision;
             binding.help_failures = 0;
         }
         unsigned long seh{};
         if (assign_help(binding, view.help, seh)) {
-            binding.help_revision = view.revision;
+            binding.help_revision = view.help_revision;
             binding.help_failures = 0;
+            help_changed = true;
         } else if (!binding.help_conflict) {
             ++binding.help_failures;
             log_fault("help-source publication", page,
@@ -3193,6 +3273,7 @@ void apply_binding(
         addresses,
         binding,
         availability);
+    return help_changed;
 }
 
 void initialize_slider_value_candidate(
@@ -3399,9 +3480,10 @@ bool native_row_presentation_build_supported(
     const ModuleView& game) noexcept {
     const EldenRingBuildIdentity* const identity = find_elden_ring_build(
         game.timestamp(), game.image_size());
-    return identity &&
-        (identity->build == EldenRingBuild::v2_7_1_0 ||
-         identity->build == EldenRingBuild::v2_7_2_0);
+    if (!identity) return false;
+    const SelectedHelpPresenterAddressProfile* const profile =
+        find_selected_help_presenter_address_profile(identity->build);
+    return profile && profile->image_size == game.image_size();
 }
 
 bool native_row_availability_build_supported(
@@ -3581,6 +3663,11 @@ void complete_native_row_presentation_materialization(
                     detach_seh);
             }
         }
+        if (binding->pending_help.armed &&
+            binding->pending_help.physical_index ==
+                captured.physical_index) {
+            binding->pending_help = {};
+        }
         *existing = captured;
     }
 }
@@ -3633,22 +3720,25 @@ void apply_native_row_availability_pre_frame(
     }
 }
 
-void apply_native_row_presentations(
+SelectedHelpRefreshTicket apply_native_row_presentations(
     void* page,
     const GameAddresses& addresses) noexcept {
     void* page_vtable{};
     std::size_t count{};
     unsigned long seh{};
-    if (!read_page_identity(page, addresses, page_vtable, count, seh)) return;
+    if (!read_page_identity(page, addresses, page_vtable, count, seh)) {
+        return {};
+    }
 
     std::lock_guard lock(g_mutex);
     PageBinding* binding = find_page(page);
-    if (!binding || binding->page_vtable != page_vtable) return;
+    if (!binding || binding->page_vtable != page_vtable) return {};
     binding->use_serial = ++g_use_serial;
     // Observe every materializer-authorized SliderCtrl after the native frame
     // and reject transient in-page Text_0 aliases before any value transform
     // is captured or written. Two identical observations are required.
     prepare_slider_bindings(page, addresses, *binding, count);
+    std::uint32_t changed_help_rows{};
     for (std::size_t index = 0; index < binding->row_count; ++index) {
         PhysicalBinding& row = binding->rows[index];
         if (row.physical_index >= count ||
@@ -3657,7 +3747,139 @@ void apply_native_row_presentations(
                 row.physical_index * kPropertyRowStride) {
             continue;
         }
-        apply_binding(page, addresses, row);
+        if (apply_binding(page, addresses, row) &&
+            row.physical_index < 32u) {
+            changed_help_rows |= std::uint32_t{1} << row.physical_index;
+        }
+    }
+    if (changed_help_rows != 0) {
+        std::uint32_t selected_count{};
+        std::uint32_t selected_index{};
+        seh = 0;
+        if (read_selected_row(
+                page, selected_count, selected_index, seh) &&
+            (changed_help_rows &
+                (std::uint32_t{1} << selected_index)) != 0) {
+            const auto selected = std::find_if(
+                binding->rows.begin(),
+                binding->rows.begin() + binding->row_count,
+                [selected_index](const PhysicalBinding& row) {
+                    return row.physical_index == selected_index;
+                });
+            if (selected != binding->rows.begin() + binding->row_count &&
+                selected->installed_help && selected->help_revision != 0) {
+                binding->pending_help = {
+                    .page = page,
+                    .native_row = selected->native_row,
+                    .source = selected->installed_help,
+                    .physical_index = selected->physical_index,
+                    .presentation_slot = selected->presentation_slot,
+                    .page_epoch = binding->epoch,
+                    .help_revision = selected->help_revision,
+                    .armed = true,
+                };
+            }
+        }
+    }
+    return binding->pending_help;
+}
+
+void publish_native_selected_help(
+    SelectedHelpRefreshTicket ticket,
+    const GameAddresses& addresses) noexcept {
+    if (!ticket.armed || !addresses.selected_help_presenter ||
+        g_selected_help_presenter_active) {
+        return;
+    }
+
+    void* page_vtable{};
+    std::size_t physical_count{};
+    unsigned long seh{};
+    if (!read_page_identity(
+            ticket.page,
+            addresses,
+            page_vtable,
+            physical_count,
+            seh)) {
+        return;
+    }
+    std::uint32_t selected_count{};
+    std::uint32_t selected_index{};
+    const bool selected_valid = read_selected_row(
+        ticket.page, selected_count, selected_index, seh);
+
+    bool call_presenter = false;
+    {
+        std::lock_guard lock(g_mutex);
+        PageBinding* const binding = find_page(ticket.page);
+        if (!binding || binding->page_vtable != page_vtable ||
+            !binding->pending_help.armed ||
+            binding->pending_help.page_epoch != ticket.page_epoch ||
+            binding->pending_help.help_revision != ticket.help_revision ||
+            binding->pending_help.physical_index != ticket.physical_index ||
+            binding->pending_help.presentation_slot !=
+                ticket.presentation_slot ||
+            binding->pending_help.native_row != ticket.native_row ||
+            binding->pending_help.source != ticket.source) {
+            return;
+        }
+
+        const SelectedHelpRefreshDecision decision =
+            select_help_refresh_decision(
+                ticket,
+                false,
+                binding->epoch,
+                selected_valid ? selected_count : 0u,
+                selected_valid ? selected_index : 0u,
+                kMaximumPropertyRows);
+        if (decision == SelectedHelpRefreshDecision::defer ||
+            decision == SelectedHelpRefreshDecision::none) {
+            return;
+        }
+        if (decision == SelectedHelpRefreshDecision::discard ||
+            ticket.physical_index >= physical_count) {
+            binding->pending_help = {};
+            return;
+        }
+
+        const auto row = std::find_if(
+            binding->rows.begin(),
+            binding->rows.begin() + binding->row_count,
+            [&](const PhysicalBinding& candidate) {
+                return candidate.physical_index == ticket.physical_index &&
+                    candidate.presentation_slot == ticket.presentation_slot &&
+                    candidate.native_row == ticket.native_row &&
+                    candidate.help_revision == ticket.help_revision &&
+                    candidate.installed_help == ticket.source;
+            });
+        seh = 0;
+        if (row == binding->rows.begin() + binding->row_count ||
+            row->native_row != static_cast<std::byte*>(ticket.page) +
+                kPropertyCollectionOffset +
+                ticket.physical_index * kPropertyRowStride ||
+            !direct_help_source_matches(*row, ticket.source, seh)) {
+            binding->pending_help = {};
+            return;
+        }
+
+        // Consume before entering native code. The presenter synchronously
+        // clones the selected row source and may re-enter other UI helpers.
+        binding->pending_help = {};
+        call_presenter = true;
+    }
+
+    if (!call_presenter) return;
+    g_selected_help_presenter_active = true;
+    seh = 0;
+    const bool called = call_selected_help_presenter(
+        addresses.selected_help_presenter, ticket.page, seh);
+    g_selected_help_presenter_active = false;
+    if (!called) {
+        log_fault(
+            "selected-help presenter",
+            ticket.page,
+            ticket.physical_index,
+            seh);
     }
 }
 

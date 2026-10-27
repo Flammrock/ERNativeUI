@@ -76,8 +76,11 @@ int main(int argc, char** argv) {
         host.module, "ERUI_TestConfigureConnection");
     const auto get_snapshot = resolve<ERUI_TestGetConnectionSnapshotFn>(
         host.module, "ERUI_TestGetConnectionSnapshot");
+    const auto get_row_update = resolve<ERUI_TestGetRowUpdateObservationFn>(
+        host.module, "ERUI_TestGetRowUpdateObservation");
     CHECK(configure != nullptr);
     CHECK(get_snapshot != nullptr);
+    CHECK(get_row_update != nullptr);
 
     {
         ERUI_Api capability_gated{};
@@ -97,7 +100,8 @@ int main(int argc, char** argv) {
         CHECK(host.get_api(ERUI_API_VERSION_1_4, &capability_gated) == ERUI_OK);
         CHECK(capability_gated.commit_updates != nullptr);
         capability_gated.capabilities &=
-            ~(ERUI_CAP_UPDATES | ERUI_CAP_ROW_AVAILABILITY);
+            ~(ERUI_CAP_UPDATES | ERUI_CAP_ROW_AVAILABILITY |
+                ERUI_CAP_ROW_VISIBILITY);
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities |= ERUI_CAP_ROW_AVAILABILITY;
@@ -107,6 +111,39 @@ int main(int argc, char** argv) {
         capability_gated.capabilities &= ~ERUI_CAP_ROW_AVAILABILITY;
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities &= ~ERUI_CAP_UPDATES;
+        capability_gated.capabilities |= ERUI_CAP_ROW_VISIBILITY;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_UPDATES;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+    }
+
+    {
+        const auto config = configuration(0, ERUI_OK, ERUI_OK,
+            ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY);
+        CHECK(configure(&config) == ERUI_OK);
+        auto connected = erui::connect(0ms);
+        CHECK(connected.success());
+        CHECK(connected.value().supports(erui::Capability::updates));
+        CHECK(!connected.value().supports(
+            erui::Capability::row_visibility));
+
+        erui::ToggleRow toggle{};
+        erui::ProviderOptions provider{};
+        provider.provider_id = "tests.row-visibility-capability-absent";
+        provider.display_name = L"Row visibility capability absent";
+        provider.owner_module = GetModuleHandleW(nullptr);
+        const auto registered = connected.value().register_menu(
+            provider,
+            [&](erui::Menu& menu) noexcept {
+                toggle = menu.root().add_toggle(
+                    L"Toggle", L"Visibility must be capability gated", 1u);
+            });
+        CHECK(registered.success());
+        CHECK(toggle.valid());
+        CHECK(toggle.edit().visible(false).commit() == ERUI_NOT_SUPPORTED);
     }
 
     {
@@ -190,6 +227,8 @@ int main(int argc, char** argv) {
         CHECK(connected.value().supports(erui::Capability::updates));
         CHECK(connected.value().supports(
             erui::Capability::row_availability));
+        CHECK(connected.value().supports(
+            erui::Capability::row_visibility));
 
         auto observed = snapshot(get_snapshot);
         CHECK(observed.get_api_calls == 3);
@@ -271,7 +310,19 @@ int main(int argc, char** argv) {
         CHECK(mutable_row.edit()
             .label(L"Updated row")
             .help(L"Updated help")
+            .visible(false)
             .commit() == ERUI_OK);
+        CHECK(mutable_row.edit().visible(true).commit() == ERUI_OK);
+
+        ERUI_TestRowUpdateObservation visibility_only{};
+        visibility_only.size = sizeof(visibility_only);
+        CHECK(get_row_update(1u, &visibility_only) == ERUI_OK);
+        CHECK(visibility_only.descriptor_size == sizeof(ERUI_RowUpdateDesc));
+        CHECK(visibility_only.row == mutable_row.handle());
+        CHECK(visibility_only.fields == ERUI_ROW_UPDATE_FIELD_VISIBLE);
+        CHECK(visibility_only.visible == 1u);
+        CHECK(visibility_only.reserved[0] == 0u);
+        CHECK(visibility_only.reserved[1] == 0u);
 
         observed = snapshot(get_snapshot);
         CHECK(observed.get_api_calls == 3);

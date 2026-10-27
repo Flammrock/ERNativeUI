@@ -1,6 +1,8 @@
 #include "host_registry.hpp"
 #include "menu_compiler.hpp"
 #include "row_presentation_state.hpp"
+#include "row_update_state.hpp"
+#include "row_visibility_state.hpp"
 #include "steam_language.hpp"
 
 #include <Windows.h>
@@ -2637,6 +2639,541 @@ void verify_api_1_4_row_availability_contract() {
     erui::detail::reset_row_presentation_state();
 }
 
+void verify_api_1_4_row_visibility_admission_edges() {
+    const auto submit_visibility = [](
+        erui::host::Registry& registry,
+        ERUI_ProviderHandle provider,
+        ERUI_RowHandle row,
+        bool visible) {
+        ERUI_RowUpdateDesc row_update{};
+        row_update.size = sizeof(row_update);
+        row_update.row = row;
+        row_update.fields = ERUI_ROW_UPDATE_FIELD_VISIBLE;
+        row_update.visible = visible ? 1u : 0u;
+        ERUI_UpdateDesc update{};
+        update.size = sizeof(update);
+        update.kind = ERUI_UPDATE_KIND_ROW;
+        update.payload = &row_update;
+        ERUI_UpdateBatchDesc batch{};
+        batch.size = sizeof(batch);
+        batch.updates = &update;
+        batch.update_count = 1u;
+        batch.update_stride = sizeof(update);
+        return registry.commit_updates(provider, &batch);
+    };
+
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_row_visibility_state();
+
+    // Root and built-in pages merge independently registered providers. The
+    // zero-page guard must evaluate that merged logical page rather than each
+    // provider contribution in isolation.
+    {
+        erui::host::Registry registry{};
+        ERUI_TEST_CHECK(registry.enable_updates_backend());
+        ERUI_TEST_CHECK(registry.enable_row_visibility_backend());
+        registry.open_registration();
+
+        const auto register_provider = [&](const char* id,
+                                           ERUI_ProviderHandle& handle,
+                                           ERUI_PageHandle& root) {
+            ERUI_ProviderDesc provider{};
+            provider.size = sizeof(provider);
+            provider.api_version = ERUI_API_VERSION_1_4;
+            provider.owner_module = GetModuleHandleW(nullptr);
+            provider.provider_id = ascii(id);
+            provider.display_name = utf16(L"Merged visibility provider");
+            ERUI_TEST_CHECK(registry.register_provider(
+                ERUI_API_VERSION_1_4, &provider, &handle, &root) == ERUI_OK);
+        };
+        const auto add_toggle = [&](ERUI_ProviderHandle provider,
+                                    ERUI_PageHandle page,
+                                    const wchar_t* label,
+                                    ERUI_RowHandle& row) {
+            ERUI_ToggleDesc toggle{};
+            toggle.size = sizeof(toggle);
+            toggle.label = utf16(label);
+            toggle.help = utf16(L"Merged-page sentinel");
+            toggle.enabled = 1u;
+            ERUI_TEST_CHECK(registry.add_toggle(
+                provider, page, &toggle, &row) == ERUI_OK);
+        };
+
+        ERUI_ProviderHandle first_provider{};
+        ERUI_PageHandle first_root{};
+        register_provider(
+            "visibility.merged.first", first_provider, first_root);
+        ERUI_ProviderHandle second_provider{};
+        ERUI_PageHandle second_root{};
+        register_provider(
+            "visibility.merged.second", second_provider, second_root);
+
+        ERUI_PageHandle first_sound{};
+        ERUI_PageHandle second_sound{};
+        ERUI_TEST_CHECK(registry.get_builtin_page(
+            first_provider, ERUI_BUILTIN_PAGE_SOUND, &first_sound) == ERUI_OK);
+        ERUI_TEST_CHECK(registry.get_builtin_page(
+            second_provider, ERUI_BUILTIN_PAGE_SOUND, &second_sound) ==
+            ERUI_OK);
+
+        ERUI_RowHandle first_root_row{};
+        ERUI_RowHandle second_root_row{};
+        ERUI_RowHandle first_sound_row{};
+        ERUI_RowHandle second_sound_row{};
+        add_toggle(first_provider, first_root, L"First root", first_root_row);
+        add_toggle(
+            second_provider, second_root, L"Second root", second_root_row);
+        add_toggle(
+            first_provider, first_sound, L"First sound", first_sound_row);
+        add_toggle(
+            second_provider, second_sound, L"Second sound", second_sound_row);
+        ERUI_TEST_CHECK(registry.commit_provider(first_provider) == ERUI_OK);
+        ERUI_TEST_CHECK(registry.commit_provider(second_provider) == ERUI_OK);
+
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, first_provider, first_root_row, false) == ERUI_OK);
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, second_provider, second_root_row, false) ==
+            ERUI_INVALID_ARGUMENT);
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, first_provider, first_sound_row, false) == ERUI_OK);
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, second_provider, second_sound_row, false) ==
+            ERUI_INVALID_ARGUMENT);
+    }
+
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_row_visibility_state();
+
+    // Construction-disabled Button and ColorPicker rows are absent from the
+    // compiled identity table. Disabled Toggles and Sliders retain a native
+    // row and therefore remain valid visibility targets. Submenu visibility
+    // is rejected independently of its construction-time state.
+    {
+        erui::host::Registry registry{};
+        ERUI_TEST_CHECK(registry.enable_updates_backend());
+        ERUI_TEST_CHECK(registry.enable_row_visibility_backend());
+        registry.open_registration();
+
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_4;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii("visibility.construction-disabled");
+        provider.display_name = utf16(L"Construction-disabled visibility");
+        ERUI_ProviderHandle provider_handle{};
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_4, &provider, &provider_handle, &root) ==
+            ERUI_OK);
+
+        ERUI_ToggleDesc toggle{};
+        toggle.size = sizeof(toggle);
+        toggle.label = utf16(L"Sentinel");
+        toggle.help = utf16(L"Keeps the page nonempty");
+        toggle.enabled = 1u;
+        ERUI_RowHandle sentinel{};
+        ERUI_TEST_CHECK(registry.add_toggle(
+            provider_handle, root, &toggle, &sentinel) == ERUI_OK);
+        toggle.label = utf16(L"Disabled toggle");
+        toggle.enabled = 0u;
+        ERUI_RowHandle disabled_toggle{};
+        ERUI_TEST_CHECK(registry.add_toggle(
+            provider_handle, root, &toggle, &disabled_toggle) == ERUI_OK);
+
+        ERUI_SliderDesc slider{};
+        slider.size = sizeof(slider);
+        slider.label = utf16(L"Disabled slider");
+        slider.help = utf16(L"Still materialized");
+        slider.minimum = 0u;
+        slider.maximum = 10u;
+        slider.step = 1u;
+        slider.enabled = 0u;
+        ERUI_RowHandle disabled_slider{};
+        ERUI_TEST_CHECK(registry.add_slider(
+            provider_handle, root, &slider, &disabled_slider) == ERUI_OK);
+
+        ERUI_ButtonDesc button{};
+        button.size = sizeof(button);
+        button.label = utf16(L"Disabled button");
+        button.help = utf16(L"Omitted");
+        button.callback = &pressed;
+        button.enabled = 0u;
+        ERUI_RowHandle disabled_button{};
+        ERUI_TEST_CHECK(registry.add_button(
+            provider_handle, root, &button, &disabled_button) == ERUI_OK);
+
+        ERUI_ColorPickerDesc color{};
+        color.size = sizeof(color);
+        color.label = utf16(L"Disabled color picker");
+        color.help = utf16(L"Omitted");
+        color.initial_value = ERUI_Color{64u, 96u, 128u, 0u};
+        color.enabled = 0u;
+        ERUI_RowHandle disabled_color{};
+        ERUI_TEST_CHECK(registry.add_color_picker(
+            provider_handle, root, &color, &disabled_color) == ERUI_OK);
+
+        ERUI_SubmenuDesc submenu{};
+        submenu.size = sizeof(submenu);
+        submenu.label = utf16(L"Disabled submenu");
+        submenu.help = utf16(L"Omitted");
+        submenu.page_title = utf16(L"Unreachable child");
+        submenu.enabled = 0u;
+        ERUI_PageHandle disabled_child{};
+        ERUI_RowHandle disabled_submenu{};
+        ERUI_TEST_CHECK(registry.add_submenu(
+            provider_handle, root, &submenu,
+            &disabled_child, &disabled_submenu) == ERUI_OK);
+        ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
+
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, provider_handle, disabled_button, false) ==
+            ERUI_INVALID_ARGUMENT);
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, provider_handle, disabled_color, false) ==
+            ERUI_INVALID_ARGUMENT);
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, provider_handle, disabled_submenu, false) ==
+            ERUI_INVALID_ARGUMENT);
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, provider_handle, disabled_toggle, false) == ERUI_OK);
+        ERUI_TEST_CHECK(submit_visibility(
+            registry, provider_handle, disabled_slider, false) == ERUI_OK);
+    }
+
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_row_visibility_state();
+}
+
+void verify_api_1_4_row_visibility_contract() {
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_row_visibility_state();
+
+    // Visibility has a narrower exact-build lifecycle than ordinary text
+    // updates and therefore remains independently capability-gated.
+    erui::host::Registry unavailable{};
+    ERUI_TEST_CHECK(unavailable.enable_updates_backend());
+    unavailable.open_registration();
+    ERUI_ProviderDesc unavailable_provider{};
+    unavailable_provider.size = sizeof(unavailable_provider);
+    unavailable_provider.api_version = ERUI_API_VERSION_1_4;
+    unavailable_provider.owner_module = GetModuleHandleW(nullptr);
+    unavailable_provider.provider_id = ascii("visibility.unavailable");
+    unavailable_provider.display_name = utf16(L"Visibility unavailable");
+    ERUI_ProviderHandle unavailable_handle{};
+    ERUI_PageHandle unavailable_root{};
+    ERUI_TEST_CHECK(unavailable.register_provider(
+        ERUI_API_VERSION_1_4, &unavailable_provider,
+        &unavailable_handle, &unavailable_root) == ERUI_OK);
+    ERUI_ToggleDesc unavailable_toggle{};
+    unavailable_toggle.size = sizeof(unavailable_toggle);
+    unavailable_toggle.label = utf16(L"Target");
+    unavailable_toggle.help = utf16(L"Help");
+    unavailable_toggle.enabled = 1u;
+    ERUI_RowHandle unavailable_row{};
+    ERUI_TEST_CHECK(unavailable.add_toggle(
+        unavailable_handle, unavailable_root, &unavailable_toggle,
+        &unavailable_row) == ERUI_OK);
+    ERUI_TEST_CHECK(unavailable.commit_provider(unavailable_handle) == ERUI_OK);
+    ERUI_RowUpdateDesc unavailable_visibility{};
+    unavailable_visibility.size = sizeof(unavailable_visibility);
+    unavailable_visibility.row = unavailable_row;
+    unavailable_visibility.fields = ERUI_ROW_UPDATE_FIELD_VISIBLE;
+    unavailable_visibility.visible = 0u;
+    ERUI_UpdateDesc unavailable_update{};
+    unavailable_update.size = sizeof(unavailable_update);
+    unavailable_update.kind = ERUI_UPDATE_KIND_ROW;
+    unavailable_update.payload = &unavailable_visibility;
+    ERUI_UpdateBatchDesc unavailable_batch{};
+    unavailable_batch.size = sizeof(unavailable_batch);
+    unavailable_batch.updates = &unavailable_update;
+    unavailable_batch.update_count = 1u;
+    unavailable_batch.update_stride = sizeof(unavailable_update);
+    ERUI_TEST_CHECK(unavailable.commit_updates(
+        unavailable_handle, &unavailable_batch) == ERUI_NOT_SUPPORTED);
+
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(!registry.enable_row_visibility_backend());
+    ERUI_TEST_CHECK(registry.enable_updates_backend());
+    ERUI_TEST_CHECK(registry.enable_row_visibility_backend());
+    ERUI_TEST_CHECK(registry.enable_custom_tabs_backend());
+    registry.open_registration();
+
+    ERUI_ProviderDesc provider{};
+    provider.size = sizeof(provider);
+    provider.api_version = ERUI_API_VERSION_1_4;
+    provider.owner_module = GetModuleHandleW(nullptr);
+    provider.provider_id = ascii("visibility.contract");
+    provider.display_name = utf16(L"Visibility contract");
+    ERUI_ProviderHandle provider_handle{};
+    ERUI_PageHandle root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4, &provider, &provider_handle, &root) == ERUI_OK);
+
+    ERUI_ToggleDesc toggle{};
+    toggle.size = sizeof(toggle);
+    toggle.label = utf16(L"Root toggle");
+    toggle.help = utf16(L"Root original help");
+    toggle.enabled = 1u;
+    ERUI_RowHandle root_toggle{};
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, root, &toggle, &root_toggle) == ERUI_OK);
+
+    ERUI_SubmenuDesc submenu{};
+    submenu.size = sizeof(submenu);
+    submenu.label = utf16(L"Child row");
+    submenu.help = utf16(L"Open child");
+    submenu.page_title = utf16(L"Child page");
+    submenu.enabled = 1u;
+    ERUI_PageHandle child_page{};
+    ERUI_RowHandle submenu_row{};
+    ERUI_TEST_CHECK(registry.add_submenu(
+        provider_handle, root, &submenu, &child_page, &submenu_row) ==
+        ERUI_OK);
+
+    unsigned presses{};
+    ERUI_ButtonDesc button{};
+    button.size = sizeof(button);
+    button.label = utf16(L"Child first");
+    button.help = utf16(L"First help");
+    button.callback = &pressed;
+    button.user_data = &presses;
+    button.enabled = 1u;
+    ERUI_RowHandle child_first{};
+    ERUI_TEST_CHECK(registry.add_button(
+        provider_handle, child_page, &button, &child_first) == ERUI_OK);
+    button.label = utf16(L"Child second");
+    button.help = utf16(L"Second original help");
+    ERUI_RowHandle child_second{};
+    ERUI_TEST_CHECK(registry.add_button(
+        provider_handle, child_page, &button, &child_second) == ERUI_OK);
+
+    button.label = utf16(L"Omitted button");
+    button.help = utf16(L"Construction-disabled");
+    button.enabled = 0u;
+    ERUI_RowHandle omitted_button{};
+    ERUI_TEST_CHECK(registry.add_button(
+        provider_handle, root, &button, &omitted_button) == ERUI_OK);
+
+    ERUI_TabDesc tab{};
+    tab.size = sizeof(tab);
+    tab.tab_id = ascii("reactive");
+    tab.title = utf16(L"Reactive tab");
+    ERUI_PageHandle tab_page{};
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_handle, &tab, &tab_page) == ERUI_OK);
+    toggle.label = utf16(L"Tab first");
+    ERUI_RowHandle tab_first{};
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, tab_page, &toggle, &tab_first) == ERUI_OK);
+    toggle.label = utf16(L"Tab sentinel");
+    ERUI_RowHandle tab_second{};
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, tab_page, &toggle, &tab_second) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
+
+    ERUI_UpdateDesc update{};
+    update.size = sizeof(update);
+    update.kind = ERUI_UPDATE_KIND_ROW;
+    ERUI_UpdateBatchDesc batch{};
+    batch.size = sizeof(batch);
+    batch.updates = &update;
+    batch.update_count = 1u;
+    batch.update_stride = sizeof(update);
+
+    ERUI_RowUpdateDesc malformed{};
+    malformed.size = sizeof(malformed);
+    malformed.row = root_toggle;
+    malformed.fields = ERUI_ROW_UPDATE_FIELD_HELP;
+    malformed.help = styled_text(L"Canonical check");
+    malformed.visible = 1u;
+    update.payload = &malformed;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+    malformed = {};
+    malformed.size = sizeof(malformed);
+    malformed.row = root_toggle;
+    malformed.fields = ERUI_ROW_UPDATE_FIELD_VISIBLE;
+    malformed.visible = 2u;
+    update.payload = &malformed;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    ERUI_RowUpdateDesc omitted{};
+    omitted.size = sizeof(omitted);
+    omitted.row = omitted_button;
+    omitted.fields = ERUI_ROW_UPDATE_FIELD_VISIBLE;
+    omitted.visible = 0u;
+    update.payload = &omitted;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    const auto visibility_update = [](ERUI_RowHandle row, bool visible) {
+        ERUI_RowUpdateDesc result{};
+        result.size = sizeof(result);
+        result.row = row;
+        result.fields = ERUI_ROW_UPDATE_FIELD_VISIBLE;
+        result.visible = visible ? 1u : 0u;
+        return result;
+    };
+
+    ERUI_RowUpdateDesc hide_root = visibility_update(root_toggle, false);
+    ERUI_RowUpdateDesc hide_child = visibility_update(child_first, false);
+    ERUI_RowUpdateDesc hide_tab = visibility_update(tab_first, false);
+    std::array<ERUI_UpdateDesc, 3> initial_updates{};
+    const std::array<ERUI_RowUpdateDesc*, 3> initial_payloads{
+        &hide_root, &hide_child, &hide_tab};
+    for (std::size_t index = 0; index < initial_updates.size(); ++index) {
+        initial_updates[index].size = sizeof(ERUI_UpdateDesc);
+        initial_updates[index].kind = ERUI_UPDATE_KIND_ROW;
+        initial_updates[index].payload = initial_payloads[index];
+    }
+    batch.updates = initial_updates.data();
+    batch.update_count = static_cast<std::uint32_t>(initial_updates.size());
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_OK);
+
+    // Hiding the remaining row in any logical page is rejected atomically.
+    // Pair one attempt with a valid help edit to prove that the companion
+    // presentation snapshot is not published either.
+    ERUI_RowUpdateDesc rejected_help{};
+    rejected_help.size = sizeof(rejected_help);
+    rejected_help.row = child_second;
+    rejected_help.fields = ERUI_ROW_UPDATE_FIELD_HELP;
+    rejected_help.help = styled_text(L"Must not publish");
+    ERUI_RowUpdateDesc hide_last_child =
+        visibility_update(child_second, false);
+    std::array<ERUI_UpdateDesc, 2> rejected_updates{};
+    rejected_updates[0] = {
+        sizeof(ERUI_UpdateDesc), ERUI_UPDATE_KIND_ROW,
+        &rejected_help, {0, 0}};
+    rejected_updates[1] = {
+        sizeof(ERUI_UpdateDesc), ERUI_UPDATE_KIND_ROW,
+        &hide_last_child, {0, 0}};
+    batch.updates = rejected_updates.data();
+    batch.update_count = static_cast<std::uint32_t>(rejected_updates.size());
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    ERUI_RowUpdateDesc hide_last_root =
+        visibility_update(submenu_row, false);
+    update.payload = &hide_last_root;
+    batch.updates = &update;
+    batch.update_count = 1u;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+    ERUI_RowUpdateDesc hide_last_tab = visibility_update(tab_second, false);
+    update.payload = &hide_last_tab;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+    ERUI_TEST_CHECK(erui::detail::configure_row_presentation_state(*compiled));
+    ERUI_TEST_CHECK(erui::detail::configure_row_visibility_state(*compiled));
+    erui::detail::synchronize_pending_row_updates();
+
+    const auto find_row = [&](ERUI_RowHandle handle)
+        -> std::pair<std::size_t, const erui::detail::CompiledRow*> {
+        for (std::size_t page_index = 0;
+             page_index < compiled->pages.size(); ++page_index) {
+            for (const erui::detail::CompiledRow& candidate :
+                 compiled->pages[page_index].rows) {
+                if (candidate.row == handle) {
+                    return {page_index, &candidate};
+                }
+            }
+        }
+        return {erui::detail::invalid_compiled_index, nullptr};
+    };
+    const auto [root_page_index, compiled_root] = find_row(root_toggle);
+    const auto [child_page_index, compiled_child] = find_row(child_second);
+    const auto [tab_page_index, compiled_tab] = find_row(tab_second);
+    ERUI_TEST_CHECK(compiled_root && compiled_child && compiled_tab);
+    ERUI_TEST_CHECK(
+        erui::detail::row_visibility_projection(root_page_index)
+            .visible_row_count == 1u);
+    ERUI_TEST_CHECK(
+        erui::detail::row_visibility_projection(child_page_index)
+            .visible_row_count == 1u);
+    ERUI_TEST_CHECK(
+        erui::detail::row_visibility_projection(tab_page_index)
+            .visible_row_count == 1u);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_child->help_id)) == L"Second original help");
+
+    // A successful mixed batch stays invisible to readers until the shared
+    // UI-boundary publication, then advances both stores together.
+    ERUI_RowUpdateDesc show_child = visibility_update(child_first, true);
+    ERUI_RowUpdateDesc change_help{};
+    change_help.size = sizeof(change_help);
+    change_help.row = child_second;
+    change_help.fields = ERUI_ROW_UPDATE_FIELD_HELP |
+        ERUI_ROW_UPDATE_FIELD_VISIBLE;
+    change_help.help = styled_text(L"Published together");
+    change_help.visible = 0u;
+    std::array<ERUI_UpdateDesc, 2> mixed_updates{};
+    mixed_updates[0] = {
+        sizeof(ERUI_UpdateDesc), ERUI_UPDATE_KIND_ROW,
+        &show_child, {0, 0}};
+    mixed_updates[1] = {
+        sizeof(ERUI_UpdateDesc), ERUI_UPDATE_KIND_ROW,
+        &change_help, {0, 0}};
+    batch.updates = mixed_updates.data();
+    batch.update_count = static_cast<std::uint32_t>(mixed_updates.size());
+    const auto before_projection =
+        erui::detail::row_visibility_projection(child_page_index);
+    const auto before_presentation = erui::detail::row_presentation_view(
+        compiled_child->presentation_slot);
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_OK);
+    ERUI_TEST_CHECK(
+        erui::detail::row_visibility_projection(child_page_index).revision ==
+        before_projection.revision);
+    ERUI_TEST_CHECK(erui::detail::row_presentation_view(
+        compiled_child->presentation_slot).revision ==
+        before_presentation.revision);
+    ERUI_TEST_CHECK(
+        !erui::detail::synchronize_pending_row_updates_if_visibility_idle());
+    ERUI_TEST_CHECK(
+        erui::detail::row_visibility_projection(child_page_index).revision ==
+        before_projection.revision);
+    ERUI_TEST_CHECK(erui::detail::row_presentation_view(
+        compiled_child->presentation_slot).revision ==
+        before_presentation.revision);
+    erui::detail::synchronize_pending_row_updates();
+    ERUI_TEST_CHECK(
+        erui::detail::row_visibility_projection(child_page_index)
+            .visible_row_count == 1u);
+    ERUI_TEST_CHECK(std::wstring(erui::detail::row_presentation_view(
+        compiled_child->presentation_slot).help) == L"Published together");
+
+    // Showing the ordinary root row makes the page nonempty independently,
+    // proving that an enabled Submenu is rejected because its navigation
+    // lifecycle is not admitted—not merely by the zero-row guard.
+    ERUI_RowUpdateDesc show_root = visibility_update(root_toggle, true);
+    update.payload = &show_root;
+    batch.updates = &update;
+    batch.update_count = 1u;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_OK);
+    erui::detail::synchronize_pending_row_updates();
+    ERUI_RowUpdateDesc hide_submenu = visibility_update(submenu_row, false);
+    update.payload = &hide_submenu;
+    ERUI_TEST_CHECK(registry.commit_updates(provider_handle, &batch) ==
+        ERUI_INVALID_ARGUMENT);
+    erui::detail::synchronize_pending_row_updates();
+    ERUI_TEST_CHECK(
+        erui::detail::row_visibility_projection(root_page_index)
+            .visible_row_count == 2u);
+
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_row_visibility_state();
+}
+
 } // namespace
 
 int main() {
@@ -2653,6 +3190,8 @@ int main() {
     verify_api_1_4_button_styled_update_before_freeze();
     verify_api_1_4_caption_update_contract();
     verify_api_1_4_row_availability_contract();
+    verify_api_1_4_row_visibility_admission_edges();
+    verify_api_1_4_row_visibility_contract();
 
     ERUI_Api early_v1{};
     early_v1.size = ERUI_API_V1_0_SIZE;
@@ -3420,6 +3959,9 @@ int main() {
     ERUI_TEST_CHECK(formatter_observation.provider == handle);
     ERUI_TEST_CHECK(formatter_observation.page == child);
     ERUI_TEST_CHECK(formatter_observation.base_title == L"Override Base");
+    // This fixture does not enable the row-visibility backend, so the frozen
+    // API 1.0-1.3 formatter contract remains exactly one call per physical
+    // slice in the original full-row plan.
     ERUI_TEST_CHECK(formatter_observation.calls == 2);
     const auto first_presentation = compiled->resolve_presentation(
         erui::detail::PageRoute::submenu(child_page_index, 0));
@@ -3432,6 +3974,17 @@ int main() {
     ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
         second_presentation.page_title_id)) ==
         L"Override Base (2/2)");
+    const auto collapsed_presentation = compiled->resolve_presentation(
+        erui::detail::PageRoute::submenu(child_page_index, 0), 1);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        collapsed_presentation.outer_title_id)) == L"Provider Outer");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        collapsed_presentation.page_title_id)) == L"Formatted 1/2");
+    const auto removed_continuation_presentation =
+        compiled->resolve_presentation(
+            erui::detail::PageRoute::submenu(child_page_index, 1), 1);
+    ERUI_TEST_CHECK(removed_continuation_presentation.outer_title_id == 0);
+    ERUI_TEST_CHECK(removed_continuation_presentation.page_title_id == 0);
     const auto default_outer_row = std::find_if(
         compiled->root_page().rows.begin(),
         compiled->root_page().rows.end(),

@@ -296,7 +296,7 @@ reports.
 |---|---|
 | Install ERNativeUI as a player | [Player installation](docs/getting-started/player-installation.md) |
 | Discover the latest features | [What's new in 1.3.0](docs/whats-new/1.3.0.md) · [Archive](docs/whats-new/README.md) · [API 1.3 migration](docs/migrations/1.2-to-1.3.md) |
-| Follow unreleased API development | [Development roadmap](docs/roadmap/README.md) · [API 1.4 plan](docs/roadmap/api-1.4.md) · [Alpha policy](docs/contributing/alpha-builds.md) |
+| Explore API 1.4 row updates | [Row-update guides](docs/guides/row-updates/README.md) · [Feature matrix](docs/features.md) |
 | Create my first client mod | [Getting started](docs/getting-started/README.md) |
 | Add menus, controls, dialogs, bindings, or localization | [Mod-author guides](docs/guides/README.md) |
 | Check supported features and exact API contracts | [Feature matrix](docs/features.md) · [API reference](docs/reference/README.md) |

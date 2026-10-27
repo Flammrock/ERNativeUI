@@ -13,9 +13,9 @@ contracts.
 
 | Label | Meaning |
 |---|---|
-| **Current API 1.3** | First shipped by ERNativeUI 1.3.0. It adds custom top-level Configuration tabs and title-screen status text. |
-| **Supported APIs 1.0, 1.1, and 1.2** | Frozen earlier contracts. Already-compiled clients remain supported by compatible 1.x hosts. |
-| **API 1.4 development roadmap** | Proposed work is publicly tracked in the [API 1.4 roadmap](roadmap/api-1.4.md). It is not an available contract and may change, move, or be rejected before release. |
+| **Current API 1.4 pre-release** | The feature scope is complete for release preparation. It adds typed row references plus runtime text/style, availability, visibility, and repagination updates. The contract is not frozen or published yet. |
+| **Latest published API 1.3** | First shipped by ERNativeUI 1.3.0. It adds custom top-level Configuration tabs and title-screen status text. |
+| **Frozen APIs 1.0 through 1.3** | Already-compiled clients remain supported by compatible 1.x hosts. |
 | **Future research** | Not implemented in the public API. Do not design a client around it yet. |
 
 ERNativeUI release versions and public API versions are independent. A package
@@ -23,10 +23,10 @@ version must not be inferred from the API number. See [Versioning](versioning.md
 and the permanent [API migration guides](migrations/README.md).
 
 The “minimum API” column names the C ABI version in which a feature first
-appears. The current `ERNativeUI.hpp` deliberately connects to API 1.3 exactly;
-wrappers shipped in the API 1.0, 1.1, and 1.2 SDKs continue to request their
-frozen tables. Choosing an older SDK is valid; a client does not silently
-upgrade its runtime API when the player installs a newer compatible host.
+appears. The API 1.4 `ERNativeUI.hpp` requests API 1.4 exactly; wrappers shipped
+in the API 1.0 through 1.3 SDKs continue to request their frozen tables.
+Choosing an older SDK is valid; a client does not silently upgrade its runtime
+API when the player installs a newer compatible host.
 
 ## Features introduced in API 1.0
 
@@ -83,6 +83,22 @@ is absent when its required native boundary has not been validated. Disabling
 runtime GFX patching additionally removes the title-screen-text capability but
 does not remove custom tabs.
 
+## Features introduced in API 1.4
+
+| Feature | What the player sees | Minimum API and capability | GFX presentation | Important limits and examples |
+|---|---|---|---|---|
+| Typed C++ row references | No visual change by itself; retained controls expose only the value and edit operations valid for their row type. | API 1.4 C++ wrapper; value methods retain their original capability requirements. | No. | Ordinary `Page::add_*` builders return typed references that remain implicitly convertible to the frozen raw `RowHandle`. Button has no canonical value; Submenu keeps its existing page-returning API. [Value guide](guides/row-updates/values.md). |
+| [Runtime row text and style](guides/row-updates/text-and-styles.md) | Labels, focused help, and supported Button/Popup Choice captions can change after registration, including mixed color and underline. | 1.4; `ERUI_CAP_UPDATES` | Uses validated text fields in the effective native movie; no additional GFX transformation. | Plain text is escaped. Structured text is limited to 4,096 UTF-16 code units and 256 spans. Bold/italic remain dependent on effective font faces. |
+| [Runtime row availability](guides/row-updates/availability.md) | A visible row can be skipped by focus and independently use its normal or disabled presentation. | 1.4; `ERUI_CAP_UPDATES` and `ERUI_CAP_ROW_AVAILABILITY` | No. | Supported for the nine ordinary materialized row families; Submenu and omitted construction-disabled rows are excluded. |
+| [Runtime row visibility and repagination](guides/row-updates/visibility.md) | Rows appear or disappear in place; page slices, navigation rows, titles, focus, and subpage scrollbars are rebuilt without closing the page. | 1.4; `ERUI_CAP_UPDATES` and `ERUI_CAP_ROW_VISIBILITY` | No. | Supported on built-in pages, custom-tab content, and subpages for the nine ordinary materialized row families. A committed projection cannot leave a logical page empty. This does not hide or show the custom tab itself. |
+
+The API 1.4 C table appends one provider-scoped `commit_updates` operation.
+Its array batch is validated, copied, and published atomically; a failed item
+leaves the previous logical generation intact. The C++ wrapper exposes
+one-row `row.edit()...commit()` drafts. A C++ multi-row collector, recursive
+Collapse controls, runtime custom-tab visibility, and runtime Submenu
+availability/visibility are not part of API 1.4.
+
 ## Runtime GFX completion
 
 With the default `[GFX] EnableRuntimePatching = 1`, ERNativeUI intercepts the
@@ -109,14 +125,9 @@ retain their functional fallbacks; title-screen text is not advertised. See
 
 ## Future API research, not currently supported
 
-The following are post-1.3 investigation targets, not delivery promises. A
+The following are investigation targets beyond API 1.4, not delivery promises. A
 feature that cannot yet satisfy ERNativeUI's lifetime, input, teardown,
 coexistence, and validation requirements may move to a later API.
-
-The separately maintained [API 1.4 development roadmap](roadmap/api-1.4.md)
-tracks reactive-menu proposals and their current evidence states. Roadmap
-entries remain unsupported until they are released and moved into the tables
-above.
 
 | Feature | Intended player experience | Current status |
 |---|---|---|
@@ -154,7 +165,7 @@ above.
 See [Game and mod compatibility](COMPATIBILITY.md) for tested combinations and
 the reporting checklist. The exact ownership and directional API 1.0
 client/new-host contract are in
-[Lifecycle, errors, and limits](reference/lifecycle-errors-and-limits.md#api-10-binary-compatibility).
+[Lifecycle, errors, and limits](reference/lifecycle-errors-and-limits.md#earlier-api-binary-compatibility).
 
 ## Choose an example
 
@@ -162,6 +173,6 @@ client/new-host contract are in
 |---|---|
 | Build a reusable client-mod skeleton | [Client-mod template](../examples/template/README.md) |
 | Learn connection, language fallback, and one alert | [Localized Greeting](../examples/localized_greeting/README.md) |
-| Exercise the broad API 1.0–1.2 feature set in game | [Tarnished UI Showcase](../examples/tarnished_ui_showcase/README.md) |
+| Exercise the broad API 1.0 through 1.4 feature set in game | [Tarnished UI Showcase](../examples/tarnished_ui_showcase/README.md) |
 
 Return to the [documentation home](README.md).

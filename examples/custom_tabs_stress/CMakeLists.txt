@@ -2,9 +2,9 @@ cmake_minimum_required(VERSION 3.24)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(CustomTabsStress LANGUAGES CXX)
-    # The source itself requires the API 1.3 declarations. Omitting a package
-    # version here avoids confusing the SDK package release number with the
-    # independently negotiated runtime API version.
+    # This in-tree build uses the current API 1.4 wrapper while exercising the
+    # custom-tab surface introduced in API 1.3. Omitting a package version here
+    # avoids confusing the SDK release with the negotiated runtime API.
     find_package(ERNativeUI CONFIG REQUIRED)
     set(ERNATIVEUI_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy" CACHE PATH
         "Directory in which the example DLL is staged")

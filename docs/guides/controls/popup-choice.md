@@ -1,5 +1,17 @@
 # Popup Choice
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#popup-choice"><code>popup_choice</code></a> ·
+      <a href="../capabilities.md#host-owned-values"><code>host_owned_values</code></a>
+    </td>
+  </tr>
+</table>
+
 A Popup Choice adds a named setting to an `erui::Page`. Confirm opens Elden
 Ring's native selection list, allowing the player to see every label before
 choosing one.
@@ -169,15 +181,15 @@ Every label must be non-empty. Popup Choice has no public `enabled` member; if
 the row should not exist, conditionally omit its `add_popup_choice` call. See
 [Enabled controls](options/enabled.md).
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check host support.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.0 |
-| Capability | `erui::Capability::popup_choice` / `ERUI_CAP_POPUP_CHOICE` |
+| Required capability | `erui::Capability::popup_choice` / `ERUI_CAP_POPUP_CHOICE` |
 | GFX presentation | Runtime completion supplies the matching left label on affected action rows |
 | Enabled option | Not exposed |
 | Runtime value | Zero-based `std::uint8_t` option index |

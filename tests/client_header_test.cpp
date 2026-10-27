@@ -121,8 +121,10 @@ int main() {
     static_assert(ERUI_CAP_TITLE_SCREEN_TEXT == (UINT64_C(1) << 19));
     static_assert(ERUI_CAP_UPDATES == (UINT64_C(1) << 20));
     static_assert(ERUI_CAP_ROW_AVAILABILITY == (UINT64_C(1) << 21));
+    static_assert(ERUI_CAP_ROW_VISIBILITY == (UINT64_C(1) << 22));
     static_assert(ERUI_ROW_UPDATE_FIELD_INTERACTIVE == (1u << 3));
     static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4));
+    static_assert(ERUI_ROW_UPDATE_FIELD_VISIBLE == (1u << 5));
     static_assert(ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY == 0u);
     static_assert(ERUI_AVAILABILITY_APPEARANCE_NORMAL == 1u);
     static_assert(ERUI_AVAILABILITY_APPEARANCE_DISABLED == 2u);

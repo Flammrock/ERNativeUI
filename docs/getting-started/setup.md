@@ -152,16 +152,18 @@ and C++17 requirement to your target. `target_link_libraries` is standard
 CMake spelling for consuming a target; here that target is header-only. No
 `.lib` is linked and no copy of the host is built into your DLL.
 
-This walkthrough uses API 1.3, first packaged by ERNativeUI 1.3.0. A published
-mod can therefore state its minimum SDK explicitly:
+The current source walkthrough uses the API 1.4 pre-release headers. API
+1.4 is not frozen or published yet, so do not invent a permanent minimum
+package version for it. During development, resolve the matching installed SDK:
 
 ```cmake
-find_package(ERNativeUI 1.3.0 CONFIG REQUIRED)
+find_package(ERNativeUI CONFIG REQUIRED)
 ```
 
-That version is a package constraint, not a runtime API selector; avoid
-`EXACT` unless a reproducible build deliberately requires one precise SDK
-package.
+After API 1.4 is published, use its first release as the minimum package
+version. That version is a package constraint, not a runtime API selector;
+avoid `EXACT` unless a reproducible build deliberately requires one precise
+SDK package.
 
 A lower `find_package` minimum does not ask a newer SDK to expose its older
 header. If a mod intentionally targets API 1.0, make CMake resolve the actual
@@ -172,8 +174,8 @@ client may still run with a later compatible 1.x host; only its build headers
 are pinned.
 
 The headers then request their exact ERUI API contract from the loaded host at
-game runtime. The current source headers request API 1.3; frozen SDK headers
-continue to request their published 1.0, 1.1, or 1.2 contract. That is a
+game runtime. The current source headers request API 1.4; frozen SDK headers
+continue to request their published 1.0, 1.1, 1.2, or 1.3 contract. That is a
 separate check from CMake package selection. See
 [Versioning](../versioning.md) for the complete distinction.
 

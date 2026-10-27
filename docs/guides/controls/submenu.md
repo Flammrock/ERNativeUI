@@ -1,5 +1,16 @@
 # Submenu
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#submenu"><code>submenu</code></a>
+    </td>
+  </tr>
+</table>
+
 A `Submenu` adds a navigation row to an `erui::Page`. Confirming the row opens
 a new child `erui::Page` owned by the same mod. Unlike the other controls,
 `Page::add_submenu` returns that child page instead of an `erui::RowHandle`.
@@ -141,15 +152,15 @@ duration of that call.
 If ERNativeUI paginates the child, its default page titles use
 `page_title (n/t)`.
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check host support.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.0 |
-| Capability | `erui::Capability::submenu` / `ERUI_CAP_SUBMENU` |
+| Required capability | `erui::Capability::submenu` / `ERUI_CAP_SUBMENU` |
 | GFX presentation | Runtime completion supplies the matching left-label field on affected action rows; navigation does not depend on it |
 | Runtime value | None; the call returns a child `erui::Page` builder |
 

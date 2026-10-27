@@ -8,7 +8,9 @@
 #include "runtime_requirements.hpp"
 #include "runtime_state.hpp"
 #include "row_presentation_state.hpp"
+#include "row_visibility_state.hpp"
 #include "native_input_bindings.hpp"
+#include "native_row_visibility.hpp"
 #include "native_tab_catalogue.hpp"
 #include "native_tabs.hpp"
 #include "native_text_input.hpp"
@@ -56,6 +58,7 @@ InstallResult fail_install(InstallError error) noexcept {
     erui::native::remove_native_menu_hooks();
     erui::native::reset_native_text_inputs();
     detail::reset_row_presentation_state();
+    detail::reset_row_visibility_state();
     detail::runtime_state().tab_catalogue.reset();
     detail::runtime_state().menu.reset();
     detail::runtime_state().installed.store(false, std::memory_order_release);
@@ -218,7 +221,9 @@ InstallResult install_impl(
     RuntimeOptions options,
     const native::GameAddresses* resolved_addresses,
     const native::PreservedSharedMenuAddresses* preserved_shared_addresses,
-    const detail::TabConfiguration* tab_configuration) noexcept {
+    const detail::TabConfiguration* tab_configuration,
+    bool updates_backend_available,
+    bool row_visibility_backend_available) noexcept {
     const ScopedRuntimeLifecycleLock lifecycle_lock;
     detail::RuntimeState& runtime = detail::runtime_state();
     bool expected = false;
@@ -269,6 +274,12 @@ InstallResult install_impl(
         detail::logf(
             LogLevel::error,
             "Runtime row-presentation state could not index the compiled menu");
+        return fail_install(InstallError::menu_compile_failed);
+    }
+    if (!detail::configure_row_visibility_state(*runtime.menu)) {
+        detail::logf(
+            LogLevel::error,
+            "Runtime row-visibility state could not index the compiled menu");
         return fail_install(InstallError::menu_compile_failed);
     }
 
@@ -398,8 +409,11 @@ InstallResult install_impl(
         custom_tab_capacity_pagination;
     const bool require_text_inputs = options.enable_row_injection &&
         runtime.menu->modeled_text_input_count != 0;
-    const bool require_row_presentations = options.enable_row_injection &&
-        detail::editable_row_presentation_count() != 0;
+    const bool require_row_presentations =
+        detail::runtime_requires_row_presentations(
+            options.enable_row_injection,
+            updates_backend_available,
+            detail::editable_row_presentation_count());
     const bool require_input_bindings =
         runtime.menu->modeled_input_binding_count != 0;
     const bool require_formatted_sliders =
@@ -477,6 +491,28 @@ InstallResult install_impl(
         return fail_install(InstallError::address_resolution_failed);
     }
 
+    // The host freezes row-visibility capability publication before clients
+    // register. If it was withheld, retain the usable base/update host even
+    // when a third-party patch made this optional backend unavailable. Once
+    // advertised, revalidate the exact build and complete native aggregate
+    // immediately before hook installation and fail closed if either changed.
+    const bool expected_row_visibility_build =
+        erui::native::identify_elden_ring_build(
+            game.timestamp(), game.image_size()) ==
+        erui::native::EldenRingBuild::v2_7_2_0;
+    const bool row_visibility_interfaces_supported =
+        row_visibility_backend_available && expected_row_visibility_build &&
+        erui::native::native_row_visibility_supported(addresses);
+    if (!detail::runtime_row_visibility_backend_valid(
+            row_visibility_backend_available,
+            expected_row_visibility_build,
+            row_visibility_interfaces_supported)) {
+        detail::logf(
+            LogLevel::error,
+            "Runtime row-visibility interfaces changed after capability preflight");
+        return fail_install(InstallError::address_resolution_failed);
+    }
+
     if (require_text_inputs &&
         !erui::native::prepare_native_text_inputs(*runtime.menu, addresses)) {
         detail::logf(
@@ -504,7 +540,9 @@ InstallResult install_impl(
 
     const erui::native::HookInstallStatus hook_status =
         erui::native::install_native_menu_hooks(
-            addresses, preserved_shared_addresses);
+            addresses,
+            preserved_shared_addresses,
+            require_row_presentations);
     if (hook_status != erui::native::HookInstallStatus::success) {
         return fail_install(InstallError::hook_install_failed);
     }
@@ -535,40 +573,66 @@ InstallResult install_impl(
 }
 
 InstallResult install(Menu& menu, RuntimeOptions options) noexcept {
-    return install_impl(menu, options, nullptr, nullptr, nullptr);
+    return install_impl(
+        menu, options, nullptr, nullptr, nullptr, false, false);
 }
 
 InstallResult install_with_resolved_addresses(
     Menu& menu,
     RuntimeOptions options,
     const native::GameAddresses& addresses) noexcept {
-    return install_impl(menu, options, &addresses, nullptr, nullptr);
+    return install_impl(
+        menu, options, &addresses, nullptr, nullptr, false, false);
 }
 
 InstallResult install_with_tab_configuration(
     Menu& menu,
     RuntimeOptions options,
-    const detail::TabConfiguration& tab_configuration) noexcept {
+    const detail::TabConfiguration& tab_configuration,
+    bool updates_backend_available,
+    bool row_visibility_backend_available) noexcept {
     return install_impl(
-        menu, options, nullptr, nullptr, &tab_configuration);
+        menu,
+        options,
+        nullptr,
+        nullptr,
+        &tab_configuration,
+        updates_backend_available,
+        row_visibility_backend_available);
 }
 
 InstallResult install_with_resolved_addresses_and_tab_configuration(
     Menu& menu,
     RuntimeOptions options,
     const native::GameAddresses& addresses,
-    const detail::TabConfiguration& tab_configuration) noexcept {
+    const detail::TabConfiguration& tab_configuration,
+    bool updates_backend_available,
+    bool row_visibility_backend_available) noexcept {
     return install_impl(
-        menu, options, &addresses, nullptr, &tab_configuration);
+        menu,
+        options,
+        &addresses,
+        nullptr,
+        &tab_configuration,
+        updates_backend_available,
+        row_visibility_backend_available);
 }
 
 InstallResult install_with_preserved_shared_addresses_and_tab_configuration(
     Menu& menu,
     RuntimeOptions options,
     const native::PreservedSharedMenuAddresses& addresses,
-    const detail::TabConfiguration& tab_configuration) noexcept {
+    const detail::TabConfiguration& tab_configuration,
+    bool updates_backend_available,
+    bool row_visibility_backend_available) noexcept {
     return install_impl(
-        menu, options, nullptr, &addresses, &tab_configuration);
+        menu,
+        options,
+        nullptr,
+        &addresses,
+        &tab_configuration,
+        updates_backend_available,
+        row_visibility_backend_available);
 }
 
 void uninstall() noexcept {
@@ -594,6 +658,7 @@ void uninstall() noexcept {
     erui::native::remove_native_menu_hooks();
     erui::native::reset_native_text_inputs();
     detail::reset_row_presentation_state();
+    detail::reset_row_visibility_state();
     runtime.button_action_hits.store(0, std::memory_order_release);
     runtime.diagnostic_button_action_logs.store(0, std::memory_order_release);
     runtime.button_action_faults.store(0, std::memory_order_release);

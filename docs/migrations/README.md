@@ -16,9 +16,12 @@ version chain.
 |---|---|---|---|
 | 1.0 | 1.1 | Retained | [Migrate from API 1.0 to API 1.1](1.0-to-1.1.md) |
 | 1.1 | 1.2 | Retained | [Migrate from API 1.1 to API 1.2](1.1-to-1.2.md) |
-| 1.2 | 1.3 | Current | [Migrate from API 1.2 to API 1.3](1.2-to-1.3.md) |
+| 1.2 | 1.3 | Latest published | [Migrate from API 1.2 to API 1.3](1.2-to-1.3.md) |
 
-Future API versions add another guide instead of rewriting an earlier one.
+API 1.4 is the current pre-release source contract. Its 1.3-to-1.4 guide is
+added only after the public contract is frozen, so it cannot become stale
+during final validation. Future API versions add another guide instead of
+rewriting an earlier one.
 This directory therefore retains every earlier adjacent guide when the next
 transition is introduced.
 

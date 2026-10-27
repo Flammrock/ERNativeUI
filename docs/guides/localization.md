@@ -1,5 +1,16 @@
 # Game language and localization
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="capabilities.md#game-language"><code>game_language</code></a>
+    </td>
+  </tr>
+</table>
+
 ERNativeUI reports one process-wide effective language so a client mod can
 choose its own translated text. It follows Elden Ring's selected Steam game
 language by default, while an optional `ERNativeUI.ini` setting can select an

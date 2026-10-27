@@ -10,9 +10,10 @@ ERNativeUI has two parts:
   the host to create native UI.
 
 Your client never links an ERNativeUI `.lib`. The public interface is a stable
-C ABI with a header-only C++17 wrapper. API 1.3 passes strict MinGW-w64
-compilation and isolated MinGW-client/MSVC-host fixtures, but the 1.3.0 tested
-compatibility matrix does not claim full in-game MinGW-w64 runtime validation.
+C ABI with a header-only C++17 wrapper. Frozen API 1.3 passes strict MinGW-w64
+compilation and isolated MinGW-client/MSVC-host fixtures; the current API 1.4
+headers also pass strict compilation. Full in-game MinGW-w64 runtime
+qualification remains a separate release gate.
 
 ## Choose your path
 
@@ -44,6 +45,7 @@ directory or copy them into the project.
 - Read [Versioning](../versioning.md) before declaring the SDK and runtime
   requirement for a release.
 
-This documentation describes public API 1.3. API versions and ERNativeUI
-release versions are independent; use an SDK/host package that explicitly
-states it contains the API required by the client.
+This documentation describes the current API 1.4 source contract. API 1.4 is
+not frozen or published yet; the latest stable SDK remains API 1.3. API
+versions and ERNativeUI release versions are independent, so use a matching
+SDK/host package that explicitly contains the API required by the client.

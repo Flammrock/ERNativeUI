@@ -426,6 +426,8 @@ _Static_assert(ERUI_CAP_UPDATES == (UINT64_C(1) << 20),
     "updates capability bit drift");
 _Static_assert(ERUI_CAP_ROW_AVAILABILITY == (UINT64_C(1) << 21),
     "row-availability capability bit drift");
+_Static_assert(ERUI_CAP_ROW_VISIBILITY == (UINT64_C(1) << 22),
+    "row-visibility capability bit drift");
 _Static_assert(ERUI_UPDATE_KIND_ROW == 1u,
     "row update kind drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_LABEL == (1u << 0),
@@ -438,6 +440,8 @@ _Static_assert(ERUI_ROW_UPDATE_FIELD_INTERACTIVE == (1u << 3),
     "row-interactive field bit drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4),
     "row-availability-appearance field bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_VISIBLE == (1u << 5),
+    "row-visible field bit drift");
 _Static_assert(ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY == 0u,
     "follow-interactivity appearance value drift");
 _Static_assert(ERUI_AVAILABILITY_APPEARANCE_NORMAL == 1u,
@@ -498,8 +502,8 @@ _Static_assert(offsetof(ERUI_RowUpdateDesc, caption) == 120u,
     "row-update caption offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,
     "row-update availability-appearance offset drift");
-_Static_assert(offsetof(ERUI_RowUpdateDesc, reserved) == 172u,
-    "row-update reserved offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172u,
+    "row-update visible offset drift");
 _Static_assert(sizeof(ERUI_UpdateDesc) == 24u,
     "update-envelope descriptor size drift");
 _Static_assert(offsetof(ERUI_UpdateDesc, payload) == 8u,

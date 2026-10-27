@@ -3,9 +3,12 @@
 #include "native_dialog.hpp"
 #include "native_slider_presentation.hpp"
 #include "native_row_presentation.hpp"
+#include "native_row_visibility.hpp"
 #include "runtime_log.hpp"
 #include "runtime_state.hpp"
 #include "row_presentation_state.hpp"
+#include "row_update_state.hpp"
+#include "row_visibility_state.hpp"
 #include "root_button_text_override.hpp"
 #include "submenu_runtime.hpp"
 #include "native_text_input.hpp"
@@ -961,30 +964,72 @@ bool is_tab_route(erui::detail::PageRouteKind kind) noexcept {
         kind == erui::detail::PageRouteKind::tab_continuation;
 }
 
-ColorPickerWidgetHost widget_host_for_route(
-    const erui::detail::PageRoute& route) noexcept {
-    if (route.kind == erui::detail::PageRouteKind::root_main) {
-        return ColorPickerWidgetHost::game_options;
+bool resolve_visible_route_slice(
+    const erui::detail::CompiledMenu& menu,
+    erui::detail::PageRoute route,
+    erui::detail::PageSlice& output,
+    std::uint64_t& projection_revision) noexcept {
+    output = {};
+    projection_revision = 0;
+    if (!route.valid() || route.logical_page_index >= menu.pages.size() ||
+        !menu.page_reachable(route.logical_page_index)) {
+        return false;
     }
-    if (route.kind != erui::detail::PageRouteKind::builtin_main) {
-        return ColorPickerWidgetHost::subpage;
+
+    std::size_t first_capacity{};
+    switch (route.kind) {
+    case erui::detail::PageRouteKind::root_main:
+    case erui::detail::PageRouteKind::root_continuation:
+        if (route.logical_page_index != menu.root_page_index) return false;
+        first_capacity = menu.root_plan(route.root_capacity).custom_capacity;
+        break;
+    case erui::detail::PageRouteKind::builtin_main:
+    case erui::detail::PageRouteKind::builtin_continuation:
+        if (route.builtin_category ==
+                erui::detail::invalid_builtin_category ||
+            menu.builtin_page_index(route.builtin_category) !=
+                route.logical_page_index) {
+            return false;
+        }
+        first_capacity = route.root_capacity;
+        break;
+    case erui::detail::PageRouteKind::tab_main:
+    case erui::detail::PageRouteKind::tab_continuation: {
+        const erui::detail::CompiledPage& page =
+            menu.pages[route.logical_page_index];
+        if (page.kind != erui::PageKind::tab) return false;
+        first_capacity = route.root_capacity;
+        break;
     }
-    switch (route.builtin_category) {
-    case 1:
-        return ColorPickerWidgetHost::camera_options;
-    case 2:
-        return ColorPickerWidgetHost::display;
-    case 3:
-        return ColorPickerWidgetHost::sound;
-    case 5:
-        return ColorPickerWidgetHost::network;
-    case 7:
-        return ColorPickerWidgetHost::keyboard_mouse;
-    case 8:
-        return ColorPickerWidgetHost::graphics;
-    default:
-        return ColorPickerWidgetHost::subpage;
+    case erui::detail::PageRouteKind::submenu:
+        first_capacity = erui::detail::native_subpage_capacity;
+        break;
     }
+    if (first_capacity == 0 ||
+        first_capacity > erui::detail::builtin_page_max_first_capacity) {
+        return false;
+    }
+
+    const bool main_kind =
+        route.kind == erui::detail::PageRouteKind::root_main ||
+        route.kind == erui::detail::PageRouteKind::builtin_main ||
+        route.kind == erui::detail::PageRouteKind::tab_main;
+    const bool continuation_kind =
+        route.kind == erui::detail::PageRouteKind::root_continuation ||
+        route.kind == erui::detail::PageRouteKind::builtin_continuation ||
+        route.kind == erui::detail::PageRouteKind::tab_continuation;
+    if ((main_kind && route.slice_index != 0) ||
+        (continuation_kind && route.slice_index == 0)) {
+        return false;
+    }
+
+    return erui::detail::resolve_visible_paginated_slice(
+        route.logical_page_index,
+        first_capacity,
+        erui::detail::native_subpage_capacity,
+        route.slice_index,
+        output,
+        projection_revision);
 }
 
 bool route_uses_game_options_text_style(
@@ -1000,42 +1045,27 @@ bool resolve_page_route_slice(
     const erui::detail::CompiledMenu& menu,
     erui::detail::PageRoute route,
     erui::detail::PageSlice& output) noexcept {
-    output = {};
-    if (!route.valid() || route.logical_page_index >= menu.pages.size() ||
-        !menu.page_reachable(route.logical_page_index)) {
+    std::uint64_t projection_revision{};
+    if (resolve_visible_route_slice(
+            menu, route, output, projection_revision)) {
+        return true;
+    }
+
+    // Visibility is configured with the compiled menu during installation.
+    // Retain the immutable-plan path only for unit-level construction and
+    // fail-safe startup paths which intentionally do not configure it.
+    if (erui::detail::row_visibility_projection(
+            route.logical_page_index)) {
         return false;
     }
-    if (is_builtin_route(route.kind)) {
-        return route.builtin_category !=
-                erui::detail::invalid_builtin_category &&
-            erui::detail::resolve_paginated_slice(
-                route.logical_page_index,
-                menu.pages[route.logical_page_index].rows.size(),
-                route.root_capacity,
-                erui::detail::native_subpage_capacity,
-                route.slice_index,
-                output);
-    }
-    if (is_tab_route(route.kind)) {
-        const erui::detail::CompiledPage& page =
-            menu.pages[route.logical_page_index];
-        const bool kind_matches_slice =
-            (route.kind == erui::detail::PageRouteKind::tab_main &&
-                route.slice_index == 0) ||
-            (route.kind ==
-                    erui::detail::PageRouteKind::tab_continuation &&
-                route.slice_index != 0);
-        return page.kind == erui::PageKind::tab && kind_matches_slice &&
-            route.root_capacity != 0 &&
-            route.root_capacity <=
-                erui::detail::builtin_page_max_first_capacity &&
-            erui::detail::resolve_paginated_slice(
-                route.logical_page_index,
-                page.rows.size(),
-                route.root_capacity,
-                erui::detail::native_subpage_capacity,
-                route.slice_index,
-                output);
+    if (is_builtin_route(route.kind) || is_tab_route(route.kind)) {
+        return erui::detail::resolve_paginated_slice(
+            route.logical_page_index,
+            menu.pages[route.logical_page_index].rows.size(),
+            route.root_capacity,
+            erui::detail::native_subpage_capacity,
+            route.slice_index,
+            output);
     }
     const erui::detail::PageSlice* const resolved = menu.resolve_slice(route);
     if (!resolved) return false;
@@ -1125,8 +1155,32 @@ RowInjectionOutcome inject_page_route(
         return outcome;
     }
 
+    const bool internal_rebuild =
+        native_row_visibility_internal_materialization(page);
+    if (!internal_rebuild) {
+        // A page first materialized after a client update is already a safe
+        // reconstruction boundary, including when System was closed. Publish
+        // the newest complete projection before resolving its physical slice.
+        if (route.slice_index == 0) {
+            erui::detail::synchronize_pending_row_updates();
+        } else {
+            // A queued visibility generation may remove this continuation.
+            // Keep both halves of the batch pending until a main-page
+            // boundary can rebuild without rewriting Elden Ring's native Back
+            // stack.
+            (void)erui::detail::
+                synchronize_pending_row_updates_if_visibility_idle();
+        }
+    }
+    // A destructive internal rebuild has already captured target_revision.
+    // Never publish a newer queued batch here: doing so after old rows were
+    // retired would materialize a different graph inside the transaction.
     erui::detail::PageSlice resolved_slice{};
-    if (!resolve_page_route_slice(*runtime.menu, route, resolved_slice)) {
+    std::uint64_t projection_revision{};
+    const bool projected = resolve_visible_route_slice(
+        *runtime.menu, route, resolved_slice, projection_revision);
+    if (!projected &&
+        !resolve_page_route_slice(*runtime.menu, route, resolved_slice)) {
         erui::detail::logf(
             erui::LogLevel::error,
             "physical page route could not be resolved kind=%u logicalPage=%zu slice=%zu capacity=%u",
@@ -1137,17 +1191,21 @@ RowInjectionOutcome inject_page_route(
         return outcome;
     }
     const erui::detail::PageSlice* const slice = &resolved_slice;
+    const RowVisibilityMaterializationTicket visibility_ticket =
+        begin_native_row_visibility_materialization(
+            page, route, addresses);
 
     // Publish queued model generations before the page starts constructing
     // rows, then retire any prior binding epoch for this physical address.
     // This ensures edits accepted while System was closed are visible on the
     // first rendered frame without retaining stale native pointers.
-    erui::detail::synchronize_pending_row_presentations();
+    // The combined row-update barrier above already published presentation
+    // and visibility as one generation.
     begin_native_row_presentation_page(page, addresses);
 
     reset_color_picker_page_widgets(
         page,
-        widget_host_for_route(route));
+        color_picker_widget_host_for_route(route));
 
     outcome.slice_index = slice->slice_index;
     outcome.slice_count = slice->slice_count;
@@ -1157,7 +1215,8 @@ RowInjectionOutcome inject_page_route(
     const erui::detail::CompiledPage& compiled_page =
         runtime.menu->pages[route.logical_page_index];
     const bool root_text_style = route_uses_game_options_text_style(route);
-    const ColorPickerWidgetHost widget_host = widget_host_for_route(route);
+    const ColorPickerWidgetHost widget_host =
+        color_picker_widget_host_for_route(route);
 
     if (slice->has_previous) {
         erui::detail::PageRoute target{};
@@ -1201,12 +1260,32 @@ RowInjectionOutcome inject_page_route(
 
     const std::size_t end = slice->first_row + slice->row_count;
     for (std::size_t row_index = slice->first_row;
-         row_index < end && row_index < compiled_page.rows.size();
+         row_index < end;
          ++row_index) {
+        std::size_t source_row = row_index;
+        if (projected &&
+            !erui::detail::map_projected_row_to_source(
+                route.logical_page_index,
+                projection_revision,
+                row_index,
+                source_row)) {
+            ++outcome.skipped;
+            erui::detail::logf(
+                erui::LogLevel::error,
+                "row visibility projection changed during materialization logicalPage=%zu revision=%llu projectedRow=%zu",
+                route.logical_page_index,
+                static_cast<unsigned long long>(projection_revision),
+                row_index);
+            break;
+        }
+        if (source_row >= compiled_page.rows.size()) {
+            ++outcome.skipped;
+            break;
+        }
         inject_logical_row(
             page,
             addresses,
-            compiled_page.rows[row_index],
+            compiled_page.rows[source_row],
             root_text_style,
             widget_host,
             outcome);
@@ -1251,6 +1330,8 @@ RowInjectionOutcome inject_page_route(
         }
     }
 
+    complete_native_row_visibility_materialization(
+        addresses, visibility_ticket, outcome);
     return outcome;
 }
 

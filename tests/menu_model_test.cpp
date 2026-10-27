@@ -24,6 +24,23 @@ void binding_assignments_changed(
     ERUI_InputDevices,
     void*) noexcept {}
 
+struct DynamicTitleObservation {
+    std::size_t calls{};
+};
+
+bool format_dynamic_page_title(
+    const erui::PageTitleFormatRequest& request,
+    std::wstring& output,
+    void* user_data) noexcept {
+    auto& observation = *static_cast<DynamicTitleObservation*>(user_data);
+    ++observation.calls;
+    output = L"Dynamic ";
+    output.append(std::to_wstring(request.page_number));
+    output.push_back(L'/');
+    output.append(std::to_wstring(request.page_count));
+    return true;
+}
+
 ERUI_ActionInputs all_unbound_inputs() noexcept {
     ERUI_ActionInputs result{};
     result.size = sizeof(result);
@@ -78,6 +95,7 @@ int main() {
     erui::Page& child = menu.root().add_submenu(
         L"Advanced",
         L"Submenu help");
+    menu.root().identify_last_row(101u, 1001u, true);
     child.add_button(
         L"Action",
         L"Button help",
@@ -282,6 +300,22 @@ int main() {
     ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
         vanilla_titles[1])) ==
         L"Demo (2/2)");
+    const auto dynamic_root_second = compiled->resolve_presentation(
+        erui::detail::PageRoute::root_continuation(
+            compiled->root_page_index,
+            erui::detail::game_options_vanilla_capacity,
+            1),
+        2u);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        dynamic_root_second.page_title_id)) == L"Demo (2/2)");
+    const auto collapsed_root_continuation = compiled->resolve_presentation(
+        erui::detail::PageRoute::root_continuation(
+            compiled->root_page_index,
+            erui::detail::game_options_vanilla_capacity,
+            1),
+        1u);
+    ERUI_TEST_CHECK(collapsed_root_continuation.outer_title_id == 0);
+    ERUI_TEST_CHECK(collapsed_root_continuation.page_title_id == 0);
     const auto* physical_binding = compiled->text_binding(
         vanilla_titles[0]);
     ERUI_TEST_CHECK(physical_binding != nullptr);
@@ -498,6 +532,7 @@ int main() {
             L"Graphics help",
             {.callback = &pressed});
     }
+    graphics.identify_last_row(102u, 1002u, true);
     auto builtin_pagination_compiled =
         erui::detail::MenuCompiler::compile(builtin_pagination);
     const std::size_t graphics_index =
@@ -525,6 +560,23 @@ int main() {
         graphics_second.page_title_id)) == L"ERNativeUI (2/3)");
     ERUI_TEST_CHECK(std::wstring(builtin_pagination_compiled->texts.lookup(
         graphics_third.page_title_id)) == L"ERNativeUI (3/3)");
+
+    // Hiding rows can reduce the same live-capacity page from three physical
+    // slices to two without recompiling or formatting on the UI thread.
+    const auto graphics_dynamic_second =
+        builtin_pagination_compiled->resolve_presentation(
+            erui::detail::PageRoute::builtin_continuation(
+                graphics_index, 8u, 3u, 1u),
+            2u);
+    ERUI_TEST_CHECK(std::wstring(builtin_pagination_compiled->texts.lookup(
+        graphics_dynamic_second.page_title_id)) == L"ERNativeUI (2/2)");
+    const auto graphics_collapsed_continuation =
+        builtin_pagination_compiled->resolve_presentation(
+            erui::detail::PageRoute::builtin_continuation(
+                graphics_index, 8u, 3u, 1u),
+            1u);
+    ERUI_TEST_CHECK(graphics_collapsed_continuation.outer_title_id == 0);
+    ERUI_TEST_CHECK(graphics_collapsed_continuation.page_title_id == 0);
 
     const auto presentation_fails_closed = [&](erui::detail::PageRoute route) {
         const auto presentation =
@@ -566,6 +618,7 @@ int main() {
             L"Tab row help",
             {.callback = &pressed});
     }
+    capacity_tab.identify_last_row(103u, 1003u, true);
     auto tab_pagination_compiled =
         erui::detail::MenuCompiler::compile(tab_pagination);
     ERUI_TEST_CHECK(tab_pagination_compiled->tab_page_indices.size() == 1);
@@ -606,6 +659,19 @@ int main() {
     ERUI_TEST_CHECK(std::wstring(tab_pagination_compiled->texts.lookup(
         capacity_tab_third_presentation.page_title_id)) ==
         L"Capacity Tab (3/3)");
+    const auto capacity_tab_dynamic_second =
+        tab_pagination_compiled->resolve_presentation(
+            capacity_tab_second,
+            2u);
+    ERUI_TEST_CHECK(std::wstring(tab_pagination_compiled->texts.lookup(
+        capacity_tab_dynamic_second.page_title_id)) ==
+        L"Capacity Tab (2/2)");
+    const auto capacity_tab_collapsed_continuation =
+        tab_pagination_compiled->resolve_presentation(
+            capacity_tab_second,
+            1u);
+    ERUI_TEST_CHECK(capacity_tab_collapsed_continuation.outer_title_id == 0);
+    ERUI_TEST_CHECK(capacity_tab_collapsed_continuation.page_title_id == 0);
 
     const auto tab_presentation_fails_closed =
         [&](erui::detail::PageRoute route) {
@@ -629,5 +695,48 @@ int main() {
     tab_presentation_fails_closed(
         erui::detail::PageRoute::tab_continuation(
             tab_pagination_compiled->root_page_index, 2u, 1u));
+
+    // API 1.4 visibility-editable pages precompile a title for every slice
+    // count that their visible projection can produce. This is deliberately
+    // separate from legacy-only pages, whose formatter call count remains
+    // frozen to the original full-row pagination plan.
+    erui::Menu dynamic_title_menu(L"Dynamic Titles");
+    erui::Page& dynamic_title_page = dynamic_title_menu.root().add_submenu(
+        L"Dynamic Child",
+        L"Dynamic child help");
+    for (int index = 0; index < 20; ++index) {
+        dynamic_title_page.add_button(
+            L"Dynamic row " + std::to_wstring(index),
+            L"Dynamic row help",
+            {.callback = &pressed});
+    }
+    dynamic_title_page.identify_last_row(104u, 1004u, true);
+    DynamicTitleObservation dynamic_title_observation{};
+    dynamic_title_page.set_presentation({
+        .page_title = L"Dynamic Child",
+        .formatter = &format_dynamic_page_title,
+        .user_data = &dynamic_title_observation,
+    });
+    auto dynamic_title_compiled =
+        erui::detail::MenuCompiler::compile(dynamic_title_menu);
+    const auto dynamic_title_submenu = std::find_if(
+        dynamic_title_compiled->root_page().rows.begin(),
+        dynamic_title_compiled->root_page().rows.end(),
+        [](const erui::detail::CompiledRow& row) {
+            return row.kind == erui::RowKind::submenu;
+        });
+    ERUI_TEST_CHECK(
+        dynamic_title_submenu != dynamic_title_compiled->root_page().rows.end());
+    const std::size_t dynamic_title_page_index =
+        dynamic_title_submenu->target_page_index;
+    ERUI_TEST_CHECK(
+        dynamic_title_page_index < dynamic_title_compiled->pages.size());
+    ERUI_TEST_CHECK(dynamic_title_observation.calls == 3);
+    const auto dynamic_single_page_presentation =
+        dynamic_title_compiled->resolve_presentation(
+            erui::detail::PageRoute::submenu(dynamic_title_page_index, 0u),
+            1u);
+    ERUI_TEST_CHECK(std::wstring(dynamic_title_compiled->texts.lookup(
+        dynamic_single_page_presentation.page_title_id)) == L"Dynamic 1/1");
     return 0;
 }

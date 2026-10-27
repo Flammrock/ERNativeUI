@@ -1,6 +1,8 @@
 # Custom Tabs Stress
 
-`CustomTabsStress.dll` is a focused API 1.3 integration example. It registers:
+`CustomTabsStress.dll` is a focused custom-tab integration example. Custom
+tabs were introduced in API 1.3; the in-tree build uses the current exact API
+1.4 wrapper. It registers:
 
 - exactly 50 custom tabs as a stable stress workload;
 - one deterministic numbered 32x32 RGBA8 icon with a fully
@@ -71,9 +73,10 @@ build\deploy\Release\examples\CustomTabsStress.dll
 
 The standalone project intentionally uses `find_package(ERNativeUI CONFIG
 REQUIRED)` without a package-version constraint. The SDK package release and
-the negotiated runtime API are separate versions; compilation requires the API
-1.3 declarations, and the C++ wrapper rejects a host that cannot negotiate the
-complete API 1.3 table.
+the negotiated runtime API are separate versions. Compilation requires at
+least the API 1.3 custom-tab declarations, while the selected SDK's C++ wrapper
+requests its own exact API. The current source SDK therefore requests API 1.4;
+an intentionally selected API 1.3 SDK continues to request API 1.3.
 
 ```bat
 cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=C:\sdk\ERNativeUI

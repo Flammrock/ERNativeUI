@@ -14,10 +14,13 @@ reference.
 | I want to... | Read... |
 |---|---|
 | Add rows, submenus, built-in destinations, or paginated pages | [Menus, pages, and pagination](menus-and-pages.md) |
+| Change a row's text, value, availability, or visibility at runtime | [Row updates](row-updates/README.md) |
 | Give my mod a top-level Configuration tab and custom icon | [Custom Configuration tabs](custom-tabs.md) |
 | Add version or status text to a title-screen corner | [Title-screen text](title-screen-text.md) |
 | Choose and configure a settings control | [Settings controls](controls/README.md) |
-| Check whether the connected host supports a feature | [Availability and capabilities](availability.md) |
+| Check whether the connected host supports a feature | [Capabilities](capabilities.md) |
+| Commit updates to several rows atomically | [Atomic row-update batching](row-updates/batching.md) |
+| Handle connection, registration, or runtime-operation failures | [Error handling](../reference/error-handling.md) |
 | Show a native message or confirmation dialog | [Native dialogs](native-dialogs.md) |
 | Translate client text using the selected or configured language | [Game language and localization](localization.md) |
 | Declare controller, keyboard, or mouse actions | [Native input bindings](input-bindings.md) |
@@ -31,6 +34,8 @@ threading, and error rules, use the [reference](../reference/README.md). The
 established; it is not an additional public API.
 
 API versions and ERNativeUI releases are independent. Each feature guide names
-the first API that exposes its surface; the current header negotiates API 1.3.
-Source being migrated from an earlier API should follow each permanent
+the first API that exposes its surface. API 1.4 is the current source contract
+and is feature-complete for release preparation, but it is not frozen or
+published yet. The stable SDK remains API 1.3. Source being migrated from an
+earlier API should follow each permanent
 [adjacent migration guide](../migrations/README.md) in order.

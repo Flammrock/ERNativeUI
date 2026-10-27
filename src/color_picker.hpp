@@ -2,6 +2,7 @@
 
 #include "color_picker_state.hpp"
 #include "module.hpp"
+#include "pagination.hpp"
 
 #include <ernativeui/erui.h>
 
@@ -38,6 +39,37 @@ enum class ColorPickerWidgetHost : unsigned char {
     keyboard_mouse,
     graphics,
 };
+
+// Keep every ColorPicker lifecycle path on the same physical Scaleform host.
+// A custom tab's first page reuses Elden Ring's Graphics panel (PCGraphic),
+// while its overflow pages and every other continuation use the ordinary
+// subpage panel (GraphicOption).
+[[nodiscard]] constexpr ColorPickerWidgetHost
+color_picker_widget_host_for_route(
+    const detail::PageRoute& route) noexcept {
+    switch (route.kind) {
+    case detail::PageRouteKind::root_main:
+        return ColorPickerWidgetHost::game_options;
+    case detail::PageRouteKind::tab_main:
+        return ColorPickerWidgetHost::graphics;
+    case detail::PageRouteKind::builtin_main:
+        switch (route.builtin_category) {
+        case 1: return ColorPickerWidgetHost::camera_options;
+        case 2: return ColorPickerWidgetHost::display;
+        case 3: return ColorPickerWidgetHost::sound;
+        case 5: return ColorPickerWidgetHost::network;
+        case 7: return ColorPickerWidgetHost::keyboard_mouse;
+        case 8: return ColorPickerWidgetHost::graphics;
+        default: return ColorPickerWidgetHost::subpage;
+        }
+    case detail::PageRouteKind::submenu:
+    case detail::PageRouteKind::root_continuation:
+    case detail::PageRouteKind::builtin_continuation:
+    case detail::PageRouteKind::tab_continuation:
+        return ColorPickerWidgetHost::subpage;
+    }
+    return ColorPickerWidgetHost::subpage;
+}
 
 // The ordinary Game Options action controller remains responsible for focus
 // and mouse/controller activation. This narrow scope marks the one native

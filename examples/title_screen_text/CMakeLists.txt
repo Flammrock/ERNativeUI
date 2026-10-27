@@ -3,7 +3,8 @@ cmake_minimum_required(VERSION 3.24)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(TitleScreenTextExample LANGUAGES CXX)
     # Runtime API negotiation is independent from the SDK package's release
-    # version. The source requires the API 1.3 declarations in the headers.
+    # version. This in-tree build uses the current API 1.4 wrapper while the
+    # example demonstrates title-screen text introduced in API 1.3.
     find_package(ERNativeUI CONFIG REQUIRED)
     set(ERNATIVEUI_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy" CACHE PATH
         "Directory in which the example DLL is staged")

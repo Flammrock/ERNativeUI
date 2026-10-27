@@ -1,11 +1,25 @@
 # Menus, pages, and pagination
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="capabilities.md#built-in-pages"><code>builtin_pages</code></a> ·
+      <a href="capabilities.md#submenu"><code>submenu</code></a> ·
+      <a href="capabilities.md#pagination"><code>pagination</code></a> ·
+      <a href="capabilities.md#page-presentation"><code>page_presentation</code></a>
+    </td>
+  </tr>
+</table>
+
 An ERNativeUI client declares a logical menu during startup. The shared host
 copies that declaration, merges it with every other provider, and presents it
 through Elden Ring's native Configuration UI. Client mods never receive a game
 page pointer and do not create their own hooks.
 
-This guide uses the current API 1.3 C++17 wrapper. Begin with the
+This guide uses the current API 1.4 C++17 wrapper. Begin with the
 [setup guide](../getting-started/setup.md) and
 [first client mod](../getting-started/first-mod.md) if the connection and
 registration lifecycle is not yet familiar.

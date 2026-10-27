@@ -60,6 +60,7 @@ struct CompiledRow {
     RowKind kind{RowKind::toggle};
     ERUI_ProviderHandle provider{ERUI_INVALID_PROVIDER};
     ERUI_RowHandle row{ERUI_INVALID_ROW};
+    bool visibility_editable{};
     std::size_t presentation_slot{invalid_compiled_index};
     TextId label_id{};
     TextId help_id{};
@@ -82,6 +83,23 @@ struct CompiledRow {
 struct BuiltinPhysicalTitleVariant {
     std::size_t slice_count{};
     std::vector<TextId> title_ids{};
+};
+
+// Runtime row visibility can change a logical page's physical slice count
+// without recompiling the menu. Keep every reachable count in immutable
+// compiler-owned storage so the UI thread only performs indexed reads and
+// never invokes a client formatter or allocates a replacement title.
+struct PhysicalTitleVariants {
+    [[nodiscard]] const std::vector<TextId>* titles_for(
+        std::size_t slice_count) const noexcept {
+        if (slice_count == 0 || slice_count >= by_slice_count.size() ||
+            by_slice_count[slice_count].size() != slice_count) {
+            return nullptr;
+        }
+        return &by_slice_count[slice_count];
+    }
+
+    std::vector<std::vector<TextId>> by_slice_count{};
 };
 
 // The number of built-in physical slices depends on live free capacity, which
@@ -129,6 +147,7 @@ struct CompiledPage {
     TextId help_id{};
     TextId outer_title_id{};
     std::vector<TextId> physical_title_ids{};
+    PhysicalTitleVariants physical_title_variants{};
     std::unique_ptr<BuiltinPhysicalTitlePlan> builtin_physical_title_plan{};
     std::unique_ptr<BuiltinPhysicalTitlePlan> tab_physical_title_plan{};
     std::vector<CompiledRow> rows{};
@@ -384,6 +403,81 @@ struct CompiledMenu {
         return {
             .outer_title_id = title_id,
             .page_title_id = titles[route.slice_index],
+        };
+    }
+
+    // Resolves presentation for a page plan rebuilt from the currently
+    // visible rows. applied_slice_count must be the count produced by that
+    // exact plan. Unlike the legacy overload, this intentionally does not
+    // infer the count from the immutable full-row pagination plan.
+    [[nodiscard]] ResolvedPagePresentation resolve_presentation(
+        const PageRoute& route,
+        std::size_t applied_slice_count) const noexcept {
+        if (route.kind == PageRouteKind::root_main ||
+            route.kind == PageRouteKind::builtin_main ||
+            route.kind == PageRouteKind::tab_main) {
+            return {};
+        }
+        if (!route.valid() || applied_slice_count == 0 ||
+            route.logical_page_index >= pages.size() ||
+            !page_reachable(route.logical_page_index) ||
+            route.slice_index >= applied_slice_count) {
+            return {};
+        }
+
+        const CompiledPage& page = pages[route.logical_page_index];
+        if (page.physical_title_variants.by_slice_count.empty()) {
+            // A legacy-only page cannot change topology. Preserve its frozen
+            // API 1.0-1.3 title plan and formatter call count instead of
+            // compiling unreachable API 1.4 variants.
+            return resolve_presentation(route);
+        }
+        switch (route.kind) {
+        case PageRouteKind::submenu:
+            if (page.kind != PageKind::submenu ||
+                is_builtin_page_index(route.logical_page_index)) {
+                return {};
+            }
+            break;
+        case PageRouteKind::root_continuation:
+            if (route.logical_page_index != root_page_index ||
+                route.slice_index == 0 || applied_slice_count <= 1) {
+                return {};
+            }
+            break;
+        case PageRouteKind::builtin_continuation:
+            if (route.slice_index == 0 || applied_slice_count <= 1 ||
+                route.builtin_category ==
+                    native_category_id(BuiltinPage::game_options) ||
+                route.root_capacity == 0 ||
+                route.root_capacity > builtin_page_max_first_capacity ||
+                builtin_page_index(route.builtin_category) !=
+                    route.logical_page_index) {
+                return {};
+            }
+            break;
+        case PageRouteKind::tab_continuation:
+            if (route.slice_index == 0 || applied_slice_count <= 1 ||
+                route.root_capacity == 0 ||
+                route.root_capacity > builtin_page_max_first_capacity ||
+                page.kind != PageKind::tab) {
+                return {};
+            }
+            break;
+        case PageRouteKind::root_main:
+        case PageRouteKind::builtin_main:
+        case PageRouteKind::tab_main:
+            return {};
+        }
+
+        const std::vector<TextId>* const titles =
+            page.physical_title_variants.titles_for(applied_slice_count);
+        if (!titles || route.slice_index >= titles->size()) return {};
+        return {
+            .outer_title_id = route.kind == PageRouteKind::root_continuation
+                ? title_id
+                : page.outer_title_id,
+            .page_title_id = (*titles)[route.slice_index],
         };
     }
 };

@@ -65,6 +65,8 @@ option(ERNATIVEUI_BUILD_TAB_CAPACITY_RESEARCH_PROBE
     "Build the observation-only live Configuration-tab capacity probe" OFF)
 option(ERNATIVEUI_BUILD_TAB_SLOT_APPEND_RESEARCH_PROBE
     "Build the isolated native Configuration-tab slot-append proof" OFF)
+option(ERNATIVEUI_BUILD_SCROLLBAR_STATE_RESEARCH_PROBE
+    "Observe the native subpage scrollbar across an in-place row rebuild" OFF)
 option(ERNATIVEUI_ENABLE_TAB_SLOT_APPEND_RESEARCH_MUTATION
     "Allow the isolated tab-slot probe to append native records up to the research target" OFF)
 option(ERNATIVEUI_BUILD_GFX_TAB_GROWTH_RESEARCH_HOST
@@ -81,6 +83,12 @@ if(ERNATIVEUI_BUILD_GFX_TAB_GROWTH_RESEARCH_HOST AND
         NOT ERNATIVEUI_BUILD_HOST)
     message(FATAL_ERROR
         "ERNATIVEUI_BUILD_GFX_TAB_GROWTH_RESEARCH_HOST requires "
+        "ERNATIVEUI_BUILD_HOST=ON.")
+endif()
+if(ERNATIVEUI_BUILD_SCROLLBAR_STATE_RESEARCH_PROBE AND
+        NOT ERNATIVEUI_BUILD_HOST)
+    message(FATAL_ERROR
+        "ERNATIVEUI_BUILD_SCROLLBAR_STATE_RESEARCH_PROBE requires "
         "ERNATIVEUI_BUILD_HOST=ON.")
 endif()
 if(ERNATIVEUI_ENABLE_TAB_SLOT_APPEND_RESEARCH_MUTATION AND
@@ -461,6 +469,7 @@ if(_ernativeui_need_native_core)
         src/native_menu.cpp
         src/native_popup_choice.cpp
         src/native_row_presentation.cpp
+        src/native_row_visibility.cpp
         src/native_slider_presentation.cpp
         src/native_text_input.cpp
         src/native_text_result.cpp
@@ -469,6 +478,8 @@ if(_ernativeui_need_native_core)
         src/runtime_log.cpp
         src/runtime_state.cpp
         src/row_presentation_state.cpp
+        src/row_update_state.cpp
+        src/row_visibility_state.cpp
         src/scaleform_html.cpp
         src/steam_dlc.cpp
         src/storage_document.cpp
@@ -495,6 +506,10 @@ if(_ernativeui_need_native_core)
     if(ERNATIVEUI_BUILD_TAB_CONTENT_RESEARCH_PROBE)
         target_compile_definitions(ERNativeUICore PRIVATE
             ER_NATIVE_UI_TAB_CONTENT_RESEARCH_PROBE=1)
+    endif()
+    if(ERNATIVEUI_BUILD_SCROLLBAR_STATE_RESEARCH_PROBE)
+        target_compile_definitions(ERNativeUICore PRIVATE
+            ER_NATIVE_UI_SCROLLBAR_STATE_RESEARCH_PROBE=1)
     endif()
     if(_ernativeui_msvc_abi)
         target_compile_options(ERNativeUICore PRIVATE
@@ -901,6 +916,29 @@ if(_ernativeui_enable_tests)
         cxx_std_20)
     add_test(NAME ERNativeUI.RowPresentationState
         COMMAND ERNativeUIRowPresentationStateTests)
+
+    add_executable(ERNativeUISelectedHelpRefreshStateTests
+        tests/selected_help_refresh_state_test.cpp)
+    target_include_directories(ERNativeUISelectedHelpRefreshStateTests PRIVATE
+        src include tests)
+    target_compile_features(ERNativeUISelectedHelpRefreshStateTests PRIVATE
+        cxx_std_20)
+    add_test(NAME ERNativeUI.SelectedHelpRefreshState
+        COMMAND ERNativeUISelectedHelpRefreshStateTests)
+
+    add_executable(ERNativeUIRowVisibilityStateTests
+        tests/row_visibility_state_test.cpp
+        src/menu.cpp
+        src/menu_compiler.cpp
+        src/pagination.cpp
+        src/row_visibility_state.cpp
+        src/text_registry.cpp)
+    target_include_directories(ERNativeUIRowVisibilityStateTests PRIVATE
+        src include)
+    target_compile_features(ERNativeUIRowVisibilityStateTests PRIVATE
+        cxx_std_20)
+    add_test(NAME ERNativeUI.RowVisibilityState
+        COMMAND ERNativeUIRowVisibilityStateTests)
 
     add_executable(ERNativeUIScaleformHtmlTests
         tests/scaleform_html_test.cpp

@@ -2,8 +2,9 @@ cmake_minimum_required(VERSION 3.24)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(ERNativeUIExamples LANGUAGES CXX)
-    # The example set includes API 1.3 source. Package-release numbers are
-    # independent from API versions; the imported headers enforce the surface.
+    # The in-tree examples use the current API 1.4 wrapper and also demonstrate
+    # features introduced by earlier APIs. Package-release numbers are
+    # independent from API versions; the imported headers select the surface.
     find_package(ERNativeUI CONFIG REQUIRED)
     set(ERNATIVEUI_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy" CACHE PATH
         "Directory in which example DLLs are staged")

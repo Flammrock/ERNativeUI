@@ -9,6 +9,7 @@
 
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
 #include "addresses.hpp"
+#include "default_tab_icon.hpp"
 #include "hooks.hpp"
 #include "native_tab_catalogue.hpp"
 #include "native_tabs.hpp"
@@ -878,19 +879,30 @@ struct Rgba8Pixel {
         return {0xFFU, 0x00U, 0xFFU, 0xFFU};
     }
     const auto custom = g_native_tab_catalogue->custom_entries();
-    if (icon >= custom.size() ||
-        custom[icon].icon.source == erui::TabIconSource::fallback ||
-        custom[icon].icon.rgba8_pixels.size() !=
-            ERUI_TAB_ICON_RGBA8_BYTE_COUNT) {
+    if (icon >= custom.size()) {
+        return {0xFFU, 0x00U, 0xFFU, 0xFFU};
+    }
+    const auto& specification = custom[icon].icon;
+    const std::uint8_t* pixels{};
+    if (specification.source == erui::TabIconSource::fallback) {
+        if (!specification.rgba8_pixels.empty()) {
+            return {0xFFU, 0x00U, 0xFFU, 0xFFU};
+        }
+        pixels = erui::native::default_custom_tab_icon_rgba8.data();
+    } else if (specification.source == erui::TabIconSource::rgba8 &&
+               specification.rgba8_pixels.size() ==
+                   ERUI_TAB_ICON_RGBA8_BYTE_COUNT) {
+        pixels = specification.rgba8_pixels.data();
+    } else {
         return {0xFFU, 0x00U, 0xFFU, 0xFFU};
     }
     const std::size_t offset =
         (static_cast<std::size_t>(y) * ERUI_TAB_ICON_WIDTH + x) * 4U;
     Rgba8Pixel pixel{
-        custom[icon].icon.rgba8_pixels[offset + 0U],
-        custom[icon].icon.rgba8_pixels[offset + 1U],
-        custom[icon].icon.rgba8_pixels[offset + 2U],
-        custom[icon].icon.rgba8_pixels[offset + 3U],
+        pixels[offset + 0U],
+        pixels[offset + 1U],
+        pixels[offset + 2U],
+        pixels[offset + 3U],
     };
     // Scaleform's RawImage path consumes premultiplied colour. Keep that
     // conversion private so clients always submit ordinary RGBA bytes.
@@ -16660,6 +16672,8 @@ bool install_native_tabs(
         const auto& icon = custom[index].icon;
         if (icon.source == TabIconSource::fallback) {
             if (!icon.rgba8_pixels.empty()) return false;
+            icon_runtime.raster_requested =
+                erui::native::custom_tab_icon_requests_raster(icon.source);
             continue;
         }
         if (icon.source != TabIconSource::rgba8 ||
@@ -16667,7 +16681,8 @@ bool install_native_tabs(
                 ERUI_TAB_ICON_RGBA8_BYTE_COUNT) {
             return false;
         }
-        icon_runtime.raster_requested = true;
+        icon_runtime.raster_requested =
+            erui::native::custom_tab_icon_requests_raster(icon.source);
     }
     g_native_tab_catalogue = &catalogue;
     g_native_tab_runtime = std::move(runtime_candidate);

@@ -9,6 +9,7 @@
 #include "native_gfx_loader.hpp"
 #include "native_input_bindings.hpp"
 #include "native_row_presentation.hpp"
+#include "native_row_visibility.hpp"
 #include "native_tabs.hpp"
 #include "color_picker.hpp"
 #include "runtime_log.hpp"
@@ -1172,6 +1173,22 @@ DWORD run_host() noexcept {
                     erui::LogLevel::warning,
                     "Runtime row-availability backend is unavailable for this game executable; API 1.4 remains negotiable without ERUI_CAP_ROW_AVAILABILITY");
             }
+            if (erui::native::native_row_visibility_build_supported(
+                    row_update_game)) {
+                if (!registry().enable_row_visibility_backend()) {
+                    log::write(
+                        erui::LogLevel::fatal,
+                        "Runtime row-visibility backend passed preflight but its API 1.4 capability could not be published before registration opened");
+                    set_api_state(ApiState::failed);
+                    return 1;
+                }
+                log::write(
+                    "Runtime row-visibility backend preflight passed; API 1.4 live layout and pagination updates are available");
+            } else {
+                log::write(
+                    erui::LogLevel::warning,
+                    "Runtime row-visibility backend is unavailable for this game executable; API 1.4 remains negotiable without ERUI_CAP_ROW_VISIBILITY");
+            }
         } else {
             log::write(
                 erui::LogLevel::warning,
@@ -1481,6 +1498,10 @@ DWORD run_host() noexcept {
         options.game_options_visual_capacity = 6;
         options.injection_cooldown_ms = cooldown;
         options.log_sink = logging_ready ? &runtime_log_sink : nullptr;
+        const bool updates_backend_available =
+            registry().updates_backend_available();
+        const bool row_visibility_backend_available =
+            registry().row_visibility_backend_available();
         HMODULE const solid_uncapper_before_native_install =
             GetModuleHandleW(L"Solid Uncapper.dll");
         if (solid_uncapper_before_native_install != solid_uncapper_module) {
@@ -1506,9 +1527,15 @@ DWORD run_host() noexcept {
                     *g_menu,
                     options,
                     preserved_shared_addresses,
-                    tab_configuration)
+                    tab_configuration,
+                    updates_backend_available,
+                    row_visibility_backend_available)
             : erui::install_with_tab_configuration(
-                *g_menu, options, tab_configuration);
+                 *g_menu,
+                 options,
+                 tab_configuration,
+                 updates_backend_available,
+                 row_visibility_backend_available);
         if (!installed.success()) {
             log::write(
                 erui::LogLevel::fatal,

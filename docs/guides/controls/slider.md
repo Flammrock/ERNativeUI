@@ -1,5 +1,17 @@
 # Slider
 
+<table>
+  <tr>
+    <td align="center" valign="middle">
+      <a href="../capabilities.md#what-a-capability-is"><img src="../../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
+    </td>
+    <td valign="middle">
+      <a href="../capabilities.md#slider"><code>slider</code></a> ·
+      <a href="../capabilities.md#host-owned-values"><code>host_owned_values</code></a>
+    </td>
+  </tr>
+</table>
+
 A Slider adds a native left/right control to an `erui::Page`. Use it for a
 bounded whole-number setting stored as one unsigned byte, such as effect
 strength or volume. API 1.2 adds [Numeric Slider](numeric-slider.md) for signed
@@ -177,15 +189,15 @@ to the last value not greater than `maximum`.
 All options are copied while the menu is being built. Changing the local
 `SliderOptions` object afterward does not reconfigure the committed row.
 
-## Availability
+## Capability requirements
 
-[Availability and capabilities](../availability.md) explains how to read this
-table and check host support.
+[Reading capability requirements](../capabilities.md#reading-capability-requirements)
+explains this table and how to check host support.
 
 | Property | Value |
 |---|---|
 | First public API | 1.0 |
-| Capability | `erui::Capability::slider` / `ERUI_CAP_SLIDER` |
+| Required capability | `erui::Capability::slider` / `ERUI_CAP_SLIDER` |
 | GFX presentation | Uses the stock native slider widget |
 | Disabled behavior | Remains visible and uses Elden Ring's native disabled state |
 | Runtime value | `std::uint8_t` inside the declared range |

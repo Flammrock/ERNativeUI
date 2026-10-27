@@ -5,6 +5,8 @@
 #include "native_dialog.hpp"
 #include "native_dialog_presentation.hpp"
 #include "row_presentation_state.hpp"
+#include "row_update_state.hpp"
+#include "row_visibility_state.hpp"
 #include "runtime_log.hpp"
 
 #include <algorithm>
@@ -634,6 +636,18 @@ bool Registry::row_availability_backend_available() const noexcept {
     return row_availability_backend_available_;
 }
 
+bool Registry::enable_row_visibility_backend() noexcept {
+    std::lock_guard lock(mutex_);
+    if (open_ || frozen_ || !updates_backend_available_) return false;
+    row_visibility_backend_available_ = true;
+    return true;
+}
+
+bool Registry::row_visibility_backend_available() const noexcept {
+    std::lock_guard lock(mutex_);
+    return row_visibility_backend_available_;
+}
+
 void Registry::open_registration() noexcept {
     std::lock_guard lock(mutex_);
     open_ = true;
@@ -701,6 +715,7 @@ Registry::Row& Registry::create_row_locked(Provider& provider, Page& page) {
     auto row = std::make_unique<Row>();
     row->handle = next_handle_++;
     row->provider = provider.handle;
+    row->page = page.handle;
     Row* result = row.get();
     provider.rows.push_back(std::move(row));
     try {
@@ -2712,6 +2727,7 @@ ERUI_Result Registry::commit_updates(
         bool interactive{};
         ERUI_AvailabilityAppearance availability_appearance{
             ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
+        bool visible{true};
         erui::detail::ScaleformStyledText label{};
         erui::detail::ScaleformStyledText help{};
         erui::detail::ScaleformStyledText caption{};
@@ -2728,6 +2744,8 @@ ERUI_Result Registry::commit_updates(
         bool interactive{};
         ERUI_AvailabilityAppearance availability_appearance{
             ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
+        bool visible{true};
+        bool visibility_changed{};
         bool materialized{};
     };
 
@@ -2740,7 +2758,8 @@ ERUI_Result Registry::commit_updates(
             ERUI_ROW_UPDATE_FIELD_LABEL | ERUI_ROW_UPDATE_FIELD_HELP |
             ERUI_ROW_UPDATE_FIELD_CAPTION |
             ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
-            ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE;
+            ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE |
+            ERUI_ROW_UPDATE_FIELD_VISIBLE;
 
         for (std::uint32_t index = 0;
              index < description->update_count;
@@ -2772,8 +2791,7 @@ ERUI_Result Registry::commit_updates(
             if (row_update.flags != 0 ||
                 row_update.row == ERUI_INVALID_ROW ||
                 row_update.fields == 0 ||
-                (row_update.fields & ~kKnownRowFields) != 0 ||
-                row_update.reserved != 0) {
+                (row_update.fields & ~kKnownRowFields) != 0) {
                 return ERUI_INVALID_ARGUMENT;
             }
 
@@ -2795,6 +2813,8 @@ ERUI_Result Registry::commit_updates(
             const bool changes_appearance =
                 (row_update.fields &
                     ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
+            const bool changes_visible =
+                (row_update.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
             if ((!changes_label && !canonical_zero_view(row_update.label)) ||
                 (!changes_help && !canonical_zero_view(row_update.help)) ||
                 (!changes_caption &&
@@ -2810,7 +2830,9 @@ ERUI_Result Registry::commit_updates(
                     row_update.availability_appearance !=
                         ERUI_AVAILABILITY_APPEARANCE_NORMAL &&
                     row_update.availability_appearance !=
-                        ERUI_AVAILABILITY_APPEARANCE_DISABLED)) {
+                        ERUI_AVAILABILITY_APPEARANCE_DISABLED) ||
+                (!changes_visible && row_update.visible != 0) ||
+                (changes_visible && row_update.visible > 1)) {
                 return ERUI_INVALID_ARGUMENT;
             }
 
@@ -2820,6 +2842,7 @@ ERUI_Result Registry::commit_updates(
             parsed_update.interactive = row_update.interactive != 0;
             parsed_update.availability_appearance =
                 row_update.availability_appearance;
+            parsed_update.visible = row_update.visible != 0;
             if (changes_label) {
                 const ERUI_Result parsed_label =
                     erui::detail::parse_scaleform_styled_text(
@@ -2868,6 +2891,23 @@ ERUI_Result Registry::commit_updates(
             }
             return false;
         };
+        const auto supports_runtime_visibility = [](RowKind kind) noexcept {
+            switch (kind) {
+            case RowKind::button:
+            case RowKind::toggle:
+            case RowKind::slider:
+            case RowKind::numeric_slider:
+            case RowKind::custom_slider:
+            case RowKind::inline_choice:
+            case RowKind::popup_choice:
+            case RowKind::text_input:
+            case RowKind::color_picker:
+                return true;
+            case RowKind::submenu:
+                return false;
+            }
+            return false;
+        };
         const auto materializes_when_construction_disabled =
             [](RowKind kind) noexcept {
                 switch (kind) {
@@ -2889,6 +2929,10 @@ ERUI_Result Registry::commit_updates(
 
         std::unordered_set<ERUI_RowHandle> unique_rows{};
         unique_rows.reserve(parsed.size());
+        std::unordered_map<const Row*, bool> visibility_overrides{};
+        visibility_overrides.reserve(parsed.size());
+        std::unordered_set<ERUI_PageHandle> visibility_pages{};
+        visibility_pages.reserve(parsed.size());
         std::vector<PendingRowMutation> mutations{};
         mutations.reserve(parsed.size());
         for (ParsedRowUpdate& update : parsed) {
@@ -2904,14 +2948,25 @@ ERUI_Result Registry::commit_updates(
                 (update.fields &
                     (ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
                      ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE)) != 0;
+            const bool changes_visibility =
+                (update.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
             if (changes_availability &&
                 !row_availability_backend_available_) {
                 return ERUI_NOT_SUPPORTED;
             }
+            if (changes_visibility &&
+                !row_visibility_backend_available_) {
+                return ERUI_NOT_SUPPORTED;
+            }
+            const bool materialized = row.enabled ||
+                materializes_when_construction_disabled(row.kind);
             if (changes_availability &&
                 (!supports_runtime_availability(row.kind) ||
-                 (!row.enabled &&
-                  !materializes_when_construction_disabled(row.kind)))) {
+                 !materialized)) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            if (changes_visibility &&
+                (!supports_runtime_visibility(row.kind) || !materialized)) {
                 return ERUI_INVALID_ARGUMENT;
             }
             const bool changes_caption =
@@ -2949,6 +3004,10 @@ ERUI_Result Registry::commit_updates(
                     ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0
                 ? update.availability_appearance
                 : row.availability_appearance;
+            mutation.visible = changes_visibility
+                ? update.visible
+                : row.visible;
+            mutation.visibility_changed = changes_visibility;
             if (changes_caption) {
                 mutation.caption = std::move(update.caption);
             } else if (row.caption_overridden) {
@@ -2959,8 +3018,7 @@ ERUI_Result Registry::commit_updates(
             }
             // These action-row families have no native disabled state and
             // are deliberately omitted by MenuCompiler while disabled.
-            mutation.materialized = row.enabled ||
-                materializes_when_construction_disabled(row.kind);
+            mutation.materialized = materialized;
             const ERUI_Result label_encoded =
                 erui::detail::encode_scaleform_html(
                     mutation.label, mutation.label_html);
@@ -2975,11 +3033,74 @@ ERUI_Result Registry::commit_updates(
                         mutation.caption, mutation.caption_html);
                 if (caption_encoded != ERUI_OK) return caption_encoded;
             }
+            if (changes_visibility) {
+                visibility_overrides.emplace(&row, update.visible);
+                visibility_pages.insert(row.page);
+            }
             mutations.push_back(std::move(mutation));
+        }
+
+        // The live rebuild matrix deliberately rejected a zero-row logical
+        // projection for every page family. Preserve that proven boundary
+        // until an explicit zero-row lifecycle probe establishes otherwise.
+        // Root and built-in pages merge rows from all committed providers, so
+        // validate the final merged logical page rather than only this
+        // provider's contribution.
+        const auto count_visible_rows = [&](const Page& candidate_page) {
+            std::size_t count{};
+            for (const Row* candidate : candidate_page.rows) {
+                if (!candidate ||
+                    (!candidate->enabled &&
+                     !materializes_when_construction_disabled(
+                         candidate->kind))) {
+                    continue;
+                }
+                const auto override_it = visibility_overrides.find(candidate);
+                const bool visible = override_it != visibility_overrides.end()
+                    ? override_it->second
+                    : candidate->visible;
+                if (visible) ++count;
+            }
+            return count;
+        };
+        for (const ERUI_PageHandle page_handle : visibility_pages) {
+            const auto page_it = provider.page_lookup.find(page_handle);
+            if (page_it == provider.page_lookup.end()) {
+                return ERUI_INVALID_HANDLE;
+            }
+            const Page& page = *page_it->second;
+            std::size_t visible_count{};
+            if (page.handle == provider.root_page) {
+                for (const auto& item : providers_) {
+                    const Provider& candidate_provider = *item.second;
+                    if (!candidate_provider.committed) continue;
+                    const auto root_it = candidate_provider.page_lookup.find(
+                        candidate_provider.root_page);
+                    if (root_it != candidate_provider.page_lookup.end()) {
+                        visible_count += count_visible_rows(*root_it->second);
+                    }
+                }
+            } else if (erui::detail::valid_builtin_page(page.builtin_page)) {
+                for (const auto& item : providers_) {
+                    const Provider& candidate_provider = *item.second;
+                    if (!candidate_provider.committed) continue;
+                    for (const auto& page_record : candidate_provider.pages) {
+                        if (page_record->builtin_page == page.builtin_page) {
+                            visible_count += count_visible_rows(*page_record);
+                            break;
+                        }
+                    }
+                }
+            } else {
+                visible_count = count_visible_rows(page);
+            }
+            if (visible_count == 0) return ERUI_INVALID_ARGUMENT;
         }
 
         std::vector<erui::detail::RowPresentationUpdate> snapshots{};
         snapshots.reserve(mutations.size());
+        std::vector<erui::detail::RowVisibilityUpdate> visibility_updates{};
+        visibility_updates.reserve(visibility_overrides.size());
         for (const PendingRowMutation& mutation : mutations) {
             if (!mutation.materialized) continue;
             erui::detail::RowPresentationUpdate snapshot{
@@ -2995,12 +3116,37 @@ ERUI_Result Registry::commit_updates(
                 snapshot.caption = mutation.caption_html;
             }
             snapshots.push_back(std::move(snapshot));
+            if (mutation.visibility_changed) {
+                visibility_updates.push_back({
+                    .provider = provider_handle,
+                    .row = mutation.row->handle,
+                    .visible = mutation.visible,
+                });
+            }
+        }
+
+        // Keep the layout projection and presentation snapshot in one
+        // publication epoch. Visibility preparation owns every remaining
+        // fallible allocation; after presentation succeeds, committing the
+        // prepared token cannot fail.
+        const erui::detail::RowUpdatePublicationLock publication_lock =
+            erui::detail::lock_row_update_publication();
+        erui::detail::PreparedRowVisibilityUpdates prepared_visibility{};
+        if (!visibility_updates.empty()) {
+            const ERUI_Result prepared =
+                erui::detail::prepare_row_visibility_updates(
+                    std::move(visibility_updates), prepared_visibility);
+            if (prepared != ERUI_OK) return prepared;
         }
         if (!snapshots.empty()) {
             const ERUI_Result published =
                 erui::detail::submit_row_presentation_updates(
                     std::move(snapshots));
             if (published != ERUI_OK) return published;
+        }
+        if (prepared_visibility) {
+            erui::detail::commit_prepared_row_visibility_updates(
+                std::move(prepared_visibility));
         }
 
         // Publication above is all-or-nothing. The remaining moves are
@@ -3017,6 +3163,7 @@ ERUI_Result Registry::commit_updates(
             mutation.row->interactive = mutation.interactive;
             mutation.row->availability_appearance =
                 mutation.availability_appearance;
+            mutation.row->visible = mutation.visible;
         }
         ++generation_;
         if (open_) note_activity_locked();
@@ -3420,7 +3567,11 @@ void Registry::append_page_locked(
         }
         if (provider.api_version >= ERUI_API_VERSION_1_4 &&
             updates_backend_available_) {
-            destination.identify_last_row(provider.handle, row->handle);
+            destination.identify_last_row(
+                provider.handle,
+                row->handle,
+                row_visibility_backend_available_ &&
+                    row->kind != RowKind::submenu);
         }
     }
 }

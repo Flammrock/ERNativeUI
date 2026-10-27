@@ -114,6 +114,37 @@ TextInputState g_extended_note{};
 TextInputState g_label_help_text{};
 TextInputState g_availability_matrix_text{};
 
+constexpr std::size_t kVisibilityFillerCount = 8;
+
+struct VisibilitySurface {
+    explicit VisibilitySurface(const wchar_t* name) noexcept
+        : debug_name(name) {}
+
+    const wchar_t* debug_name{};
+    std::atomic<std::uint8_t> layout{0};
+    std::atomic<std::uint8_t> toggle{1};
+    std::atomic<std::uint8_t> slider{5};
+    std::atomic<std::uint8_t> inline_choice{1};
+    std::atomic<std::uint8_t> popup_choice{1};
+    TextInputState text_input{};
+    ColorPickerState color_picker{};
+    erui::ButtonRow sentinel{};
+    erui::ButtonRow button{};
+    erui::ToggleRow toggle_row{};
+    erui::SliderRow slider_row{};
+    erui::NumericSliderRow numeric_slider{};
+    erui::CustomSliderRow custom_slider{};
+    erui::InlineChoiceRow inline_choice_row{};
+    erui::PopupChoiceRow popup_choice_row{};
+    erui::TextInputRow text_input_row{};
+    erui::ColorPickerRow color_picker_row{};
+    std::array<erui::ButtonRow, kVisibilityFillerCount> fillers{};
+};
+
+VisibilitySurface g_root_visibility{L"Game Options"};
+VisibilitySurface g_tab_visibility{L"Reactive Layout tab"};
+VisibilitySurface g_subpage_visibility{L"Reactive Layout subpage"};
+
 struct PopupVariant {
     std::wstring label{};
     std::wstring help{};
@@ -851,6 +882,192 @@ void restore_binding(
     }
 }
 
+void visibility_target_pressed() noexcept {
+    debug(L"A Reactive Layout target was activated.");
+}
+
+template <typename Row>
+void commit_row_visibility(
+    const Row& row,
+    bool visible,
+    ERUI_Result& first_failure) noexcept {
+    if (!row.valid()) return;
+    const ERUI_Result result = row.edit().visible(visible).commit();
+    if (first_failure == ERUI_OK && result != ERUI_OK) {
+        first_failure = result;
+    }
+}
+
+ERUI_Result commit_visibility_surface(
+    VisibilitySurface& surface,
+    std::uint8_t layout) noexcept {
+    if (layout > 2u) return ERUI_INVALID_ARGUMENT;
+
+    const bool full = layout == 0u;
+    const bool minimal = layout == 2u;
+    ERUI_Result first_failure = ERUI_OK;
+
+    // The controller and sentinel deliberately remain outside this list. They
+    // guarantee an escape/focus target even when Minimal hides every target.
+    commit_row_visibility(surface.button, full, first_failure);
+    commit_row_visibility(surface.toggle_row, !minimal, first_failure);
+    commit_row_visibility(surface.slider_row, !minimal, first_failure);
+    commit_row_visibility(surface.numeric_slider, !minimal, first_failure);
+    commit_row_visibility(surface.custom_slider, full, first_failure);
+    commit_row_visibility(surface.inline_choice_row, !minimal, first_failure);
+    commit_row_visibility(surface.popup_choice_row, full, first_failure);
+    commit_row_visibility(surface.text_input_row, full, first_failure);
+    commit_row_visibility(surface.color_picker_row, full, first_failure);
+    for (std::size_t index = 0; index < surface.fillers.size(); ++index) {
+        commit_row_visibility(
+            surface.fillers[index],
+            full || (!minimal && index < 3u),
+            first_failure);
+    }
+    return first_failure;
+}
+
+void ERUI_CALL visibility_layout_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    auto* const surface = static_cast<VisibilitySurface*>(context);
+    if (!surface) return;
+    surface->layout.store(value, std::memory_order_release);
+    const ERUI_Result result = commit_visibility_surface(*surface, value);
+    if (result != ERUI_OK) {
+        wchar_t message[192]{};
+        _snwprintf_s(
+            message,
+            std::size(message),
+            _TRUNCATE,
+            L"%ls visibility update failed: %ls.",
+            surface->debug_name,
+            result_name(result));
+        debug(message);
+    }
+}
+
+void build_visibility_surface(
+    erui::Page page,
+    VisibilitySurface& surface) noexcept {
+    erui::SliderOptions layout{};
+    layout.minimum = 0;
+    layout.maximum = 2;
+    layout.step = 1;
+    layout.initial_value = surface.layout.load(std::memory_order_acquire);
+    page.add_slider(
+        L"Layout configuration",
+        L"0 = Full, 1 = Compact, 2 = Minimal. The callback rebuilds this page immediately.",
+        layout,
+        &visibility_layout_changed,
+        &surface);
+
+    surface.sentinel = page.add_button<&visibility_target_pressed>(
+        L"Layout sentinel (always visible)",
+        L"This row remains present so every layout has a stable focus and Back path.");
+    surface.button = page.add_button<&visibility_target_pressed>(
+        L"Button target",
+        L"Visible only in the Full layout.");
+    surface.toggle_row = page.add_toggle(
+        L"Toggle target",
+        L"Visible in Full and Compact layouts.",
+        surface.toggle.load(std::memory_order_acquire),
+        &value_changed,
+        &surface.toggle);
+
+    erui::SliderOptions byte_slider{};
+    byte_slider.minimum = 0;
+    byte_slider.maximum = 10;
+    byte_slider.step = 1;
+    byte_slider.initial_value =
+        surface.slider.load(std::memory_order_acquire);
+    surface.slider_row = page.add_slider(
+        L"Byte Slider target",
+        L"Visible in Full and Compact layouts.",
+        byte_slider,
+        &value_changed,
+        &surface.slider);
+
+    erui::NumericSliderOptions numeric{};
+    numeric.minimum = -1.0;
+    numeric.maximum = 1.0;
+    numeric.step = 0.1;
+    numeric.initial_value = 0.0;
+    numeric.decimal_places = 1;
+    surface.numeric_slider = page.add_slider<&numeric_slider_changed>(
+        L"Numeric Slider target",
+        L"Visible in Full and Compact layouts.",
+        numeric);
+
+    static constexpr std::array<std::wstring_view, 3> custom_values{
+        L"Low", L"Medium", L"High"};
+    erui::CustomSliderOptions custom{};
+    custom.value_count = static_cast<std::uint32_t>(custom_values.size());
+    custom.initial_index = 1;
+    custom.format_value = [](std::uint32_t index, std::uint32_t) {
+        return index < custom_values.size()
+            ? std::wstring(custom_values[index])
+            : std::wstring{};
+    };
+    surface.custom_slider = page.add_custom_slider<&custom_slider_changed>(
+        L"Custom Slider target",
+        L"Visible only in the Full layout.",
+        custom);
+
+    static constexpr std::array<std::wstring_view, 3> choices{
+        L"First", L"Second", L"Third"};
+    erui::ChoiceOptions choice{};
+    choice.values = choices.data();
+    choice.count = static_cast<std::uint32_t>(choices.size());
+    choice.initial_index =
+        surface.inline_choice.load(std::memory_order_acquire);
+    surface.inline_choice_row = page.add_inline_choice(
+        L"Inline Choice target",
+        L"Visible in Full and Compact layouts.",
+        choice,
+        &value_changed,
+        &surface.inline_choice);
+    choice.initial_index =
+        surface.popup_choice.load(std::memory_order_acquire);
+    surface.popup_choice_row = page.add_popup_choice(
+        L"Popup Choice target",
+        L"Visible only in the Full layout.",
+        choice,
+        &value_changed,
+        &surface.popup_choice);
+
+    erui::TextInputOptions text_input{};
+    {
+        std::lock_guard<std::mutex> lock(surface.text_input.mutex);
+        text_input.initial_value = surface.text_input.value;
+    }
+    text_input.placeholder = L"Reactive text";
+    surface.text_input_row = page.add_text_input<&text_input_changed>(
+        L"TextInput target",
+        L"Visible only in the Full layout.",
+        text_input,
+        surface.text_input);
+
+    erui::ColorPickerOptions color{};
+    {
+        std::lock_guard<std::mutex> lock(surface.color_picker.mutex);
+        color.initial_value = surface.color_picker.value;
+    }
+    surface.color_picker_row = page.add_color_picker<&color_picker_changed>(
+        L"ColorPicker target",
+        L"Visible only in the Full layout.",
+        color,
+        surface.color_picker);
+
+    for (std::size_t index = 0; index < surface.fillers.size(); ++index) {
+        const std::wstring label = L"Pagination target " +
+            std::to_wstring(index + 1u);
+        surface.fillers[index] = page.add_button<&visibility_target_pressed>(
+            label,
+            L"These fillers make Full span two slices; Compact keeps only the first three.");
+    }
+}
+
 DWORD WINAPI initialize(void*) noexcept {
     const auto connection = erui::connect();
     if (!connection) {
@@ -868,6 +1085,12 @@ DWORD WINAPI initialize(void*) noexcept {
     initialize_popup_variants(*g_text);
     g_player_note.value = L"Tarnished";
     g_label_help_text.value = L"Editable";
+    g_root_visibility.text_input.value = L"Game Options";
+    g_tab_visibility.text_input.value = L"Custom tab";
+    g_subpage_visibility.text_input.value = L"Subpage";
+    g_root_visibility.color_picker.value = {218u, 185u, 98u};
+    g_tab_visibility.color_picker.value = {96u, 180u, 255u};
+    g_subpage_visibility.color_picker.value = {96u, 220u, 128u};
 
     erui::ProviderOptions options{};
     options.provider_id = "tarnished-showcase";
@@ -979,6 +1202,30 @@ DWORD WINAPI initialize(void*) noexcept {
             slider,
             &intensity_changed,
             &g_intensity);
+
+        if (menu.supports(erui::Capability::row_visibility)) {
+            // The same no-refresh visibility matrix runs on all three native
+            // page families. Full deliberately paginates; Compact and Minimal
+            // force an immediate topology rebuild from the slider callback.
+            build_visibility_surface(root, g_root_visibility);
+
+            auto visibility_subpage = root.add_submenu(
+                L"Reactive Layout subpage",
+                L"Exercises live row visibility on an ordinary logical subpage.",
+                L"Reactive Layout subpage",
+                L"Change Layout configuration; no separate refresh action is required.");
+            build_visibility_surface(
+                visibility_subpage, g_subpage_visibility);
+
+            if (menu.supports(erui::Capability::custom_tabs)) {
+                erui::TabOptions reactive_tab{};
+                reactive_tab.tab_id = "reactive-layout";
+                reactive_tab.title = L"Reactive Layout";
+                reactive_tab.preferred_order = 900;
+                auto tab = menu.add_tab(reactive_tab);
+                build_visibility_surface(tab, g_tab_visibility);
+            }
+        }
 
         if (menu.supports(erui::Capability::updates)) {
             // Keep one action-row test directly on Game Options. Its movie
@@ -1438,7 +1685,7 @@ DWORD WINAPI initialize(void*) noexcept {
             g_text->row_help);
 
         // TextInput was introduced in API 1.1 and remains part of the current
-        // API 1.3 table. The nearby capability check documents its dependency.
+        // API 1.4 table. The nearby capability check documents its dependency.
         if (menu.supports(erui::Capability::text_input)) {
             auto text_inputs = root.add_submenu(
                 g_text_input->showcase,
