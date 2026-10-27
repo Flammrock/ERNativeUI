@@ -430,10 +430,14 @@ _Static_assert(ERUI_CAP_ROW_VISIBILITY == (UINT64_C(1) << 22),
     "row-visibility capability bit drift");
 _Static_assert(ERUI_CAP_SUBMENU_UPDATES == (UINT64_C(1) << 23),
     "submenu-updates capability bit drift");
+_Static_assert(ERUI_CAP_TAB_UPDATES == (UINT64_C(1) << 24),
+    "tab-updates capability bit drift");
 _Static_assert(ERUI_UPDATE_KIND_ROW == 1u,
     "row update kind drift");
 _Static_assert(ERUI_UPDATE_KIND_SUBMENU == 2u,
     "submenu update kind drift");
+_Static_assert(ERUI_UPDATE_KIND_TAB == 3u,
+    "tab update kind drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_LABEL == (1u << 0),
     "row-label field bit drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_HELP == (1u << 1),
@@ -540,6 +544,32 @@ _Static_assert(offsetof(ERUI_SubmenuUpdateDesc, page_help) == 192u,
     "submenu-update page-help offset drift");
 _Static_assert(offsetof(ERUI_SubmenuUpdateDesc, reserved) == 208u,
     "submenu-update reserved offset drift");
+_Static_assert(ERUI_TAB_UPDATE_FIELD_TITLE == (1u << 0),
+    "tab-title field bit drift");
+_Static_assert(ERUI_TAB_UPDATE_FIELD_ICON == (1u << 1),
+    "tab-icon field bit drift");
+_Static_assert(ERUI_TAB_UPDATE_FIELD_VISIBLE == (1u << 2),
+    "tab-visible field bit drift");
+_Static_assert(ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER == (1u << 3),
+    "tab-preferred-order field bit drift");
+_Static_assert(sizeof(ERUI_TabUpdateDesc) == 64u,
+    "tab-update descriptor size drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, page) == 8u,
+    "tab-update page offset drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, fields) == 16u,
+    "tab-update fields offset drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, visible) == 20u,
+    "tab-update visible offset drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, title) == 24u,
+    "tab-update title offset drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, preferred_order) == 40u,
+    "tab-update preferred-order offset drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, reserved0) == 44u,
+    "tab-update reserved0 offset drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, icon) == 48u,
+    "tab-update icon offset drift");
+_Static_assert(offsetof(ERUI_TabUpdateDesc, reserved) == 56u,
+    "tab-update reserved offset drift");
 _Static_assert(sizeof(ERUI_UpdateDesc) == 24u,
     "update-envelope descriptor size drift");
 _Static_assert(offsetof(ERUI_UpdateDesc, payload) == 8u,

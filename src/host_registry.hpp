@@ -50,6 +50,8 @@ public:
     [[nodiscard]] bool updates_backend_available() const noexcept;
     [[nodiscard]] bool enable_submenu_updates_backend() noexcept;
     [[nodiscard]] bool submenu_updates_backend_available() const noexcept;
+    [[nodiscard]] bool enable_tab_updates_backend() noexcept;
+    [[nodiscard]] bool tab_updates_backend_available() const noexcept;
     // Typed-row runtime interaction/appearance is advertised independently
     // from text updates and only after every admitted native controller and
     // Scaleform presentation seam passes exact-build validation.
@@ -346,6 +348,7 @@ private:
         erui::detail::BuiltinPage builtin_page{
             erui::detail::BuiltinPage::count};
         bool custom_tab{};
+        bool tab_visible{true};
         std::string tab_id{};
         std::int32_t preferred_tab_order{};
         erui::TabIconSpec tab_icon{};
@@ -461,6 +464,7 @@ private:
     bool title_screen_text_backend_available_{};
     bool updates_backend_available_{};
     bool submenu_updates_backend_available_{};
+    bool tab_updates_backend_available_{};
     bool row_availability_backend_available_{};
     bool row_visibility_backend_available_{};
     bool open_{};

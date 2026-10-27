@@ -24,7 +24,8 @@ bool validate_native_tab_live_geometry(
         vertical_extent <= 0 ||
         vertical_extent > maximum_vertical_extent ||
         (horizontal_extent != 1 && vertical_extent != 1) ||
-        record_count != static_cast<std::uint64_t>(active_slot_count)) {
+        record_count < static_cast<std::uint64_t>(active_slot_count) ||
+        record_count > native_tab_physical_slot_capacity) {
         return false;
     }
 

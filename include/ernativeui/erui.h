@@ -127,7 +127,8 @@ enum {
     ERUI_CAP_UPDATES = UINT64_C(1) << 20,
     ERUI_CAP_ROW_AVAILABILITY = UINT64_C(1) << 21,
     ERUI_CAP_ROW_VISIBILITY = UINT64_C(1) << 22,
-    ERUI_CAP_SUBMENU_UPDATES = UINT64_C(1) << 23
+    ERUI_CAP_SUBMENU_UPDATES = UINT64_C(1) << 23,
+    ERUI_CAP_TAB_UPDATES = UINT64_C(1) << 24
 };
 
 /*
@@ -796,7 +797,8 @@ typedef struct ERUI_StyledTextView {
 typedef uint32_t ERUI_UpdateKind;
 enum {
     ERUI_UPDATE_KIND_ROW = 1u,
-    ERUI_UPDATE_KIND_SUBMENU = 2u
+    ERUI_UPDATE_KIND_SUBMENU = 2u,
+    ERUI_UPDATE_KIND_TAB = 3u
 };
 
 typedef uint32_t ERUI_RowUpdateFields;
@@ -889,6 +891,50 @@ typedef struct ERUI_SubmenuUpdateDesc {
 } ERUI_SubmenuUpdateDesc;
 
 /*
+ * API 1.4 rich custom-tab update. page must identify one custom tab owned by
+ * the provider passed to commit_updates. The update changes the tab's
+ * presentation and placement without replacing its page or registered rows.
+ *
+ * title must contain 1..ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS UTF-16 code
+ * units. It changes both the selector title and the base title used by the
+ * tab's page. A title update returns ERUI_NOT_SUPPORTED when a custom page
+ * title formatter remains authoritative. preferred_order has the same sorting
+ * semantics as ERUI_TabDesc and remains subordinate to an explicit player
+ * ERNativeUI.ini ordering override.
+ * visible must be exactly 0 or 1. When ICON is present, a NULL icon restores
+ * ERNativeUI's default triangle; a non-NULL descriptor supplies one exact
+ * 32x32 RGBA8 image whose bytes are copied before commit_updates returns.
+ * Icon-bearing generations are staged as complete immutable resource banks
+ * and published atomically at a safe UI boundary; the host never mutates an
+ * image still owned by Scaleform. If System closes during that handoff, the
+ * desired generation remains queued and is applied automatically in the first
+ * reopened movie. Icon edits are intended for infrequent configuration
+ * changes, not per-frame animation, because native image roots remain retained
+ * for process safety. Every tab in the same batch remains atomic with the icon
+ * change.
+ */
+typedef uint32_t ERUI_TabUpdateFields;
+enum {
+    ERUI_TAB_UPDATE_FIELD_TITLE = 1u << 0,
+    ERUI_TAB_UPDATE_FIELD_ICON = 1u << 1,
+    ERUI_TAB_UPDATE_FIELD_VISIBLE = 1u << 2,
+    ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER = 1u << 3
+};
+
+typedef struct ERUI_TabUpdateDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_PageHandle page;
+    ERUI_TabUpdateFields fields;
+    uint32_t visible;
+    ERUI_Utf16View title;
+    int32_t preferred_order;
+    uint32_t reserved0;
+    const ERUI_TabIconDesc* icon;
+    uint32_t reserved[2];
+} ERUI_TabUpdateDesc;
+
+/*
  * For ERUI_UPDATE_KIND_ROW, when its field bit is present, interactive must
  * be exactly 0 or 1 and
  * availability_appearance must name a declared value, and visible must be
@@ -911,6 +957,15 @@ typedef struct ERUI_SubmenuUpdateDesc {
  * handles must belong to the provider passed to commit_updates and must name
  * the opener and child page of the same submenu. One opener or child page may
  * occur at most once in a batch.
+ *
+ * ERUI_UPDATE_KIND_TAB requires ERUI_CAP_TAB_UPDATES. Every field whose bit
+ * is absent must contain its canonical zero value. page must belong to the
+ * provider and identify a registered custom tab. One tab page may occur at
+ * most once in a batch. A NULL icon is meaningful only when the ICON bit is
+ * present, where it restores the host's default triangle icon.
+ * A batch containing any TAB update may contain other TAB updates, but it
+ * must not contain ROW or SUBMENU updates; such a mixed-kind batch returns
+ * ERUI_INVALID_ARGUMENT without changing any target.
  */
 
 typedef struct ERUI_UpdateDesc {
@@ -1843,16 +1898,17 @@ typedef struct ERUI_Api {
 
     /*
      * API 1.4 append-only generic update block. The host validates and copies
-     * the complete batch before returning. Row updates are provider-scoped;
-     * every row must belong to provider and a row may occur only once in a
-     * batch. A view whose field bit is absent must be the canonical zero view
+     * the complete batch before returning. Every row/page target is
+     * provider-scoped and may occur only once for its update kind in a batch.
+     * A view whose field bit is absent must be the canonical zero view
      * (NULL data, zero length, zero reserved). The call is safe from ERNativeUI
      * callbacks: native presentation changes occur later at a safe UI boundary.
      * This entry is present in every valid 1.4 table; test ERUI_CAP_UPDATES
      * before calling it because an unvalidated game build may return
      * ERUI_NOT_SUPPORTED. Availability fields additionally require
      * ERUI_CAP_ROW_AVAILABILITY. Visibility additionally requires
-     * ERUI_CAP_ROW_VISIBILITY.
+     * ERUI_CAP_ROW_VISIBILITY; rich submenu and tab payloads respectively
+     * require ERUI_CAP_SUBMENU_UPDATES and ERUI_CAP_TAB_UPDATES.
      */
     ERUI_Result (ERUI_CALL* commit_updates)(
         ERUI_ProviderHandle provider,

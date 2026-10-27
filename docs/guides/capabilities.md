@@ -58,6 +58,8 @@ this page.
 | [`erui::Capability::updates`](#updates) | `ERUI_CAP_UPDATES` | 1.4 | Commit runtime row text and style edits |
 | [`erui::Capability::row_availability`](#row-availability) | `ERUI_CAP_ROW_AVAILABILITY` | 1.4 | Change row interaction and disabled appearance |
 | [`erui::Capability::row_visibility`](#row-visibility) | `ERUI_CAP_ROW_VISIBILITY` | 1.4 | Show or hide rows and rebuild pagination |
+| [`erui::Capability::submenu_updates`](#submenu-updates) | `ERUI_CAP_SUBMENU_UPDATES` | 1.4 | Edit a retained Submenu's opener and child-page text |
+| [`erui::Capability::tab_updates`](#tab-updates) | `ERUI_CAP_TAB_UPDATES` | 1.4 | Edit a retained custom tab's title, icon, visibility, or order |
 
 ## Reading capability requirements
 
@@ -143,6 +145,8 @@ are intentional:
 | Change runtime row text or style | `updates` |
 | Change runtime row interaction or disabled appearance | `updates` and `row_availability` |
 | Show or hide rows and repaginate | `updates` and `row_visibility` |
+| Change a Submenu opener or child-page text | `updates`, `submenu`, and `submenu_updates` |
+| Change a custom tab title, icon, visibility, or preferred order | `updates`, `custom_tabs`, and `tab_updates` |
 
 `title_screen_text` is also unavailable when the player's runtime GFX
 patching option is disabled. `custom_tabs`, `title_screen_text`, and the API
@@ -404,6 +408,30 @@ Together with [`updates`](#updates), enables `.visible(...)`, live row
 reconstruction, focus repair, and repagination for supported ordinary rows.
 When absent, keep every registered row visible. See
 [Show or hide rows at runtime](row-updates/visibility.md).
+
+<a id="submenu-updates"></a>
+### `submenu_updates`
+
+**C++:** `erui::Capability::submenu_updates`<br>
+**C:** `ERUI_CAP_SUBMENU_UPDATES`
+
+Together with [`updates`](#updates) and [`submenu`](#submenu), enables a
+retained `Submenu` to atomically edit its opener label, help, caption, child
+page title, and child page help. It does not make a Submenu eligible for the
+ordinary-row availability or visibility operations. See
+[Submenu](controls/submenu.md).
+
+<a id="tab-updates"></a>
+### `tab_updates`
+
+**C++:** `erui::Capability::tab_updates`<br>
+**C:** `ERUI_CAP_TAB_UPDATES`
+
+Together with [`updates`](#updates) and [`custom_tabs`](#custom-tabs), enables
+a retained `Tab` to atomically edit its title, 32x32 RGBA8 icon, visibility,
+and preferred order. Supported edits publish live in the active System menu;
+an interrupted icon handoff remains queued for the first reopened movie. See
+[Custom Configuration tabs](custom-tabs.md#edit-a-committed-tab).
 
 ## What a capability does not guarantee
 

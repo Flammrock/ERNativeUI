@@ -87,6 +87,28 @@ typedef struct ERUI_TestRowUpdateObservation {
 typedef ERUI_Result (ERUI_CALL* ERUI_TestGetRowUpdateObservationFn)(
     uint32_t index,
     ERUI_TestRowUpdateObservation* out_observation);
+
+/* Exact tab-update snapshot used only by the current C++ wrapper test. */
+typedef struct ERUI_TestTabUpdateObservation {
+    uint32_t size;
+    uint32_t descriptor_size;
+    ERUI_PageHandle page;
+    ERUI_TabUpdateFields fields;
+    uint32_t visible;
+    int32_t preferred_order;
+    uint32_t title_length;
+    uint16_t title[ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS];
+    uint32_t icon_present;
+    uint32_t icon_descriptor_size;
+    ERUI_TabIconFormat icon_format;
+    uint32_t icon_byte_count;
+    uint8_t icon_pixels[ERUI_TAB_ICON_RGBA8_BYTE_COUNT];
+    uint32_t reserved[2];
+} ERUI_TestTabUpdateObservation;
+
+typedef ERUI_Result (ERUI_CALL* ERUI_TestGetTabUpdateObservationFn)(
+    uint32_t index,
+    ERUI_TestTabUpdateObservation* out_observation);
 #endif
 
 /*

@@ -10,6 +10,7 @@
 #include "row_presentation_state.hpp"
 #include "row_update_state.hpp"
 #include "submenu_update_state.hpp"
+#include "tab_update_state.hpp"
 #include "row_visibility_state.hpp"
 #include "native_input_bindings.hpp"
 #include "native_row_visibility.hpp"
@@ -62,6 +63,7 @@ InstallResult fail_install(InstallError error) noexcept {
     detail::reset_row_presentation_state();
     detail::reset_submenu_update_state();
     detail::reset_row_visibility_state();
+    detail::reset_tab_update_state();
     detail::runtime_state().tab_catalogue.reset();
     detail::runtime_state().menu.reset();
     detail::runtime_state().installed.store(false, std::memory_order_release);
@@ -334,6 +336,18 @@ InstallResult install_impl(
             LogLevel::error,
             "Compiled menu contains custom tabs but no tab configuration was supplied");
         return fail_install(InstallError::invalid_options);
+    }
+
+    if (runtime.tab_catalogue) {
+        const detail::RowUpdatePublicationLock publication_lock =
+            detail::lock_row_update_publication();
+        if (!detail::configure_tab_update_state(
+                *runtime.menu, *runtime.tab_catalogue)) {
+            detail::logf(
+                LogLevel::error,
+                "Runtime tab-update state could not index the compiled custom-tab catalogue");
+            return fail_install(InstallError::menu_compile_failed);
+        }
     }
 
     detail::logf(
@@ -690,6 +704,7 @@ void uninstall() noexcept {
     detail::reset_row_presentation_state();
     detail::reset_submenu_update_state();
     detail::reset_row_visibility_state();
+    detail::reset_tab_update_state();
     runtime.button_action_hits.store(0, std::memory_order_release);
     runtime.diagnostic_button_action_logs.store(0, std::memory_order_release);
     runtime.button_action_faults.store(0, std::memory_order_release);

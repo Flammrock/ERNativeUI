@@ -24,6 +24,10 @@
   opener label, caption, and help together with the currently open child-page
   title and help; the same surface includes a nested retained Submenu and
   enough rows to validate regenerated pagination titles;
+- three retained API 1.4 custom tabs (**Rich Alpha**, **Rich Target**, and
+  **Rich Omega**) plus a built-in-page **Rich Tab Updates** controller; the
+  target changes title, custom/default icon, visibility, and preferred order
+  from both the controller and its own active-page callbacks;
 - an API 1.4 **Row Interaction Matrix** covering Button, Toggle, byte Slider,
   Numeric Slider, Custom Slider, Inline Choice, Popup Choice, TextInput, and
   ColorPicker, with an additional red-to-green styled Intensity row that
@@ -93,6 +97,49 @@ the same title/opener checks one level deeper. Repeat both changes after
 switching System tabs and after closing and reopening System. Each A/B change
 is one atomic `SubmenuEdit::commit()`; a mixed generation must never be
 visible.
+
+The rich-tab regression starts with three adjacent, unmistakable selectors:
+red-diamond **Rich Alpha**, gold-plus **Rich Target A**, and blue-ring
+**Rich Omega**. Test without a player `TabOrder` override first so the
+example's preferred-order changes remain visible.
+
+1. Open **Rich Target A** and press **Rename this active tab live**. The same
+   active page must remain open and focused while its selector and page
+   heading become **Rich Target Live**. No registered page or row may be
+   recreated.
+2. Press **Move this tab after Omega**. The active selector must move to the
+   other side of Omega without changing the current title/icon or losing the
+   focused row.
+3. Press **Hide this active tab**. Its selector must disappear immediately and
+   focus must transfer once to a valid surviving tab; there must be no flash,
+   duplicate selector, stale icon, or dead input.
+4. Return to Game Options, open **Rich Tab Updates**, and press **Show target
+   tab**. The same stable target must reappear with its latest title, icon,
+   order, and rows.
+5. Press **Apply Variant B**. The target must become **Rich Target B**, use the
+   green plus, and sort before Alpha live as one complete generation. There
+   must be no stock-icon, default-icon, or partially updated frame.
+6. Press **Use default triangle icon**, then **Apply Variant A**. Each icon must
+   change live while the title, order, page contents, and focused row remain
+   coherent. Now apply A or B and immediately close and reopen System: the
+   latest desired generation must settle automatically in that first reopened
+   movie, even when the close interrupts the live handoff. No second reopen is
+   required. The single-field controller actions must preserve every omitted
+   field.
+
+Repeat the sequence rapidly, wrap through the strip in both directions,
+select all three tabs with the mouse, and close/reopen System three times.
+Also hide and show the target while it is not selected. If player ordering is
+configured, repeat once with an explicit target override and confirm it
+remains authoritative over `.preferred_order(...)` while title, icon, and
+visibility still update. Every successful edit is one `TabEdit::commit()`
+made directly from a client callback; no separate Refresh action is involved.
+
+Title, preferred-order, visibility, and icon commits all support same-movie
+live publication. Icon edits use a complete staged resource bank and an atomic
+handoff, so ERNativeUI never mutates an image still owned by Scaleform. A close
+during that handoff leaves the desired revision queued for automatic adoption
+in the first reopened movie.
 
 This matrix also documents the font boundary visible in the effective game
 movie. Color and underline work with the vanilla settings presentation. The

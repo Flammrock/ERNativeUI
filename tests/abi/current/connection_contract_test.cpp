@@ -101,7 +101,8 @@ int main(int argc, char** argv) {
         CHECK(capability_gated.commit_updates != nullptr);
         capability_gated.capabilities &=
             ~(ERUI_CAP_UPDATES | ERUI_CAP_ROW_AVAILABILITY |
-                ERUI_CAP_ROW_VISIBILITY | ERUI_CAP_SUBMENU_UPDATES);
+                ERUI_CAP_ROW_VISIBILITY | ERUI_CAP_SUBMENU_UPDATES |
+                ERUI_CAP_TAB_UPDATES);
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities |= ERUI_CAP_ROW_AVAILABILITY;
@@ -119,10 +120,30 @@ int main(int argc, char** argv) {
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities &= ~ERUI_CAP_UPDATES;
+        capability_gated.capabilities |= ERUI_CAP_TAB_UPDATES;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_UPDATES;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities &= ~ERUI_CAP_CUSTOM_TABS;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_CUSTOM_TABS;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities &= ~ERUI_CAP_TAB_UPDATES;
+        capability_gated.capabilities &= ~ERUI_CAP_UPDATES;
         capability_gated.capabilities |= ERUI_CAP_SUBMENU_UPDATES;
         CHECK(!erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities |= ERUI_CAP_UPDATES;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities &= ~ERUI_CAP_SUBMENU;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_SUBMENU;
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
     }

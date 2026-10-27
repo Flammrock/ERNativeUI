@@ -16,6 +16,17 @@ struct Rgba8RetirementLimits final {
     std::uint32_t maximum_retirement_debt{};
 };
 
+// A raster Shape may be preserved across a tab projection only when it keeps
+// the exact immutable ImageResource. Stable tab identity is deliberately not
+// part of this predicate: one tab can own two resource generations during a
+// live icon handoff.
+[[nodiscard]] constexpr bool rgba8_resource_identity_preserved(
+    const void* source_resource,
+    const void* target_resource) noexcept {
+    return source_resource != nullptr &&
+        source_resource == target_resource;
+}
+
 enum class Rgba8RetirementPolicyStatus : std::uint8_t {
     accepted,
     invalid_limits,

@@ -13,6 +13,7 @@ using erui::detail::Rgba8RapidEpochHandoffState;
 using erui::detail::can_begin_vector_only_epoch_during_rgba8_retirement;
 using erui::detail::plan_rgba8_host_removal;
 using erui::detail::plan_rgba8_retirement_reconciliation;
+using erui::detail::rgba8_resource_identity_preserved;
 
 constexpr Rgba8RetirementLimits kLimits{
     .maximum_live_hosts = 40U,
@@ -87,6 +88,78 @@ void test_retirement_reconciliation_moves_only_downward() {
     ERUI_TEST_CHECK(complete.accepted());
     ERUI_TEST_CHECK(complete.complete());
     ERUI_TEST_CHECK(complete.retirement_debt_after == 0U);
+}
+
+void test_resource_identity_not_stable_tab_identity_controls_preservation() {
+    const std::uint8_t first_storage{};
+    const std::uint8_t second_storage{};
+    const void* const first = &first_storage;
+    const void* const second = &second_storage;
+
+    ERUI_TEST_CHECK(rgba8_resource_identity_preserved(first, first));
+    ERUI_TEST_CHECK(!rgba8_resource_identity_preserved(first, second));
+    ERUI_TEST_CHECK(!rgba8_resource_identity_preserved(nullptr, first));
+    ERUI_TEST_CHECK(!rgba8_resource_identity_preserved(first, nullptr));
+    ERUI_TEST_CHECK(!rgba8_resource_identity_preserved(nullptr, nullptr));
+}
+
+void test_retired_and_current_resource_banks_reconcile_independently() {
+    // The detached old resource has no live Shape, but two renderer-delayed
+    // references. The new immutable resource simultaneously owns four live
+    // Shapes and no debt. Both are valid only against their own identity.
+    const auto old_bank = plan_rgba8_retirement_reconciliation(
+        0U, 2U, 3U, kLimits);
+    const auto current_bank = plan_rgba8_retirement_reconciliation(
+        4U, 0U, 5U, kLimits);
+    ERUI_TEST_CHECK(old_bank.accepted());
+    ERUI_TEST_CHECK(!old_bank.complete());
+    ERUI_TEST_CHECK(old_bank.retirement_debt_after == 2U);
+    ERUI_TEST_CHECK(current_bank.accepted());
+    ERUI_TEST_CHECK(current_bank.complete());
+
+    // Sampling either RawImage with the other bank's host/debt arithmetic is
+    // rejected. A stable tab index can therefore never substitute for exact
+    // resource identity during the overlap.
+    ERUI_TEST_CHECK(plan_rgba8_retirement_reconciliation(
+        4U, 0U, 3U, kLimits).status ==
+        Rgba8RetirementPolicyStatus::observed_raw_below_minimum);
+    ERUI_TEST_CHECK(plan_rgba8_retirement_reconciliation(
+        0U, 2U, 5U, kLimits).status ==
+        Rgba8RetirementPolicyStatus::observed_raw_above_maximum);
+
+    const auto old_bank_complete = plan_rgba8_retirement_reconciliation(
+        0U, old_bank.retirement_debt_after, 1U, kLimits);
+    const auto current_bank_still_live =
+        plan_rgba8_retirement_reconciliation(4U, 0U, 5U, kLimits);
+    ERUI_TEST_CHECK(old_bank_complete.complete());
+    ERUI_TEST_CHECK(current_bank_still_live.complete());
+}
+
+void test_live_overlap_uses_per_resource_host_counts() {
+    // A changed icon temporarily has two source-bank Shapes and two
+    // target-bank Shapes under the same stable tab identity.  Each immutable
+    // RawImage sees only the Shapes bound to its own resource.
+    const auto source = plan_rgba8_retirement_reconciliation(
+        2U, 0U, 3U, kLimits);
+    const auto target = plan_rgba8_retirement_reconciliation(
+        2U, 0U, 3U, kLimits);
+    ERUI_TEST_CHECK(source.accepted());
+    ERUI_TEST_CHECK(target.accepted());
+
+    // Summing both banks by stable asset while sampling either one of their
+    // RawImages is invalid.  This is the exact overlap that a live immutable
+    // icon replacement must audit by resource identity.
+    ERUI_TEST_CHECK(plan_rgba8_retirement_reconciliation(
+        4U, 0U, 3U, kLimits).status ==
+        Rgba8RetirementPolicyStatus::observed_raw_below_minimum);
+
+    const auto delayed_source_detach = plan_rgba8_host_removal(
+        2U, 0U, 3U, 3U, kLimits);
+    ERUI_TEST_CHECK(delayed_source_detach.accepted());
+    ERUI_TEST_CHECK(delayed_source_detach.active_hosts_after == 1U);
+    ERUI_TEST_CHECK(delayed_source_detach.retirement_debt_after == 1U);
+    ERUI_TEST_CHECK(plan_rgba8_retirement_reconciliation(
+        2U, 0U, 3U, kLimits).accepted());
 }
 
 void test_rapid_epoch_handoff_requires_complete_ownership_proof() {
@@ -232,6 +305,9 @@ int main() {
     test_two_delayed_host_removals_accumulate_debt();
     test_prior_debt_can_retire_during_a_later_host_removal();
     test_retirement_reconciliation_moves_only_downward();
+    test_resource_identity_not_stable_tab_identity_controls_preservation();
+    test_retired_and_current_resource_banks_reconcile_independently();
+    test_live_overlap_uses_per_resource_host_counts();
     test_rapid_epoch_handoff_requires_complete_ownership_proof();
     test_host_removal_rejects_invalid_counts_and_bounds();
     test_reconciliation_rejects_invalid_counts_and_bounds();

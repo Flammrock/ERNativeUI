@@ -37,7 +37,7 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
     ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT | ERUI_CAP_UPDATES |
     ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY |
-    ERUI_CAP_SUBMENU_UPDATES;
+    ERUI_CAP_SUBMENU_UPDATES | ERUI_CAP_TAB_UPDATES;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
@@ -76,6 +76,7 @@ std::uint32_t g_custom_tab_count{};
 std::uint32_t g_title_screen_text_count{};
 std::vector<TitleScreenTextState> g_title_screen_text_observations{};
 std::vector<ERUI_TestRowUpdateObservation> g_row_update_observations{};
+std::vector<ERUI_TestTabUpdateObservation> g_tab_update_observations{};
 
 bool valid_slot(std::uint32_t state, std::uint32_t input,
     std::uint32_t count) noexcept {
@@ -991,12 +992,22 @@ ERUI_Result ERUI_CALL commit_updates(
         ERUI_SUBMENU_UPDATE_FIELD_CAPTION |
         ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE |
         ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP;
+    constexpr ERUI_TabUpdateFields kKnownTabFields =
+        ERUI_TAB_UPDATE_FIELD_TITLE |
+        ERUI_TAB_UPDATE_FIELD_ICON |
+        ERUI_TAB_UPDATE_FIELD_VISIBLE |
+        ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
     std::unordered_set<ERUI_RowHandle> rows{};
     std::unordered_set<ERUI_PageHandle> submenu_pages{};
+    std::unordered_set<ERUI_PageHandle> tab_pages{};
     std::vector<ERUI_TestRowUpdateObservation> observations{};
+    std::vector<ERUI_TestTabUpdateObservation> tab_observations{};
     try {
         rows.reserve(description->update_count);
+        submenu_pages.reserve(description->update_count);
+        tab_pages.reserve(description->update_count);
         observations.reserve(description->update_count);
+        tab_observations.reserve(description->update_count);
     } catch (...) {
         return ERUI_OUT_OF_MEMORY;
     }
@@ -1013,6 +1024,102 @@ ERUI_Result ERUI_CALL commit_updates(
         if (update.size != sizeof(update) || !update.payload ||
             update.reserved[0] != 0 || update.reserved[1] != 0) {
             return ERUI_INVALID_ARGUMENT;
+        }
+
+        if (update.kind == ERUI_UPDATE_KIND_TAB) {
+            std::uint32_t tab_size{};
+            std::memcpy(&tab_size, update.payload, sizeof(tab_size));
+            if (tab_size != sizeof(ERUI_TabUpdateDesc)) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            ERUI_TabUpdateDesc tab{};
+            std::memcpy(&tab, update.payload, sizeof(tab));
+            if (tab.flags != 0 || tab.page == ERUI_INVALID_PAGE ||
+                tab.fields == 0 || (tab.fields & ~kKnownTabFields) != 0 ||
+                tab.reserved0 != 0 || tab.reserved[0] != 0 ||
+                tab.reserved[1] != 0) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            try {
+                if (!tab_pages.insert(tab.page).second) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+            } catch (...) {
+                return ERUI_OUT_OF_MEMORY;
+            }
+            bool owned_tab{};
+            {
+                std::lock_guard lock(g_state_mutex);
+                const auto found = g_providers.find(provider);
+                if (found == g_providers.end()) return ERUI_INVALID_HANDLE;
+                for (const auto& entry : found->second.tabs) {
+                    if (entry.second == tab.page) {
+                        owned_tab = true;
+                        break;
+                    }
+                }
+            }
+            if (!owned_tab) return ERUI_INVALID_HANDLE;
+
+            const bool title =
+                (tab.fields & ERUI_TAB_UPDATE_FIELD_TITLE) != 0;
+            const bool icon =
+                (tab.fields & ERUI_TAB_UPDATE_FIELD_ICON) != 0;
+            const bool visible =
+                (tab.fields & ERUI_TAB_UPDATE_FIELD_VISIBLE) != 0;
+            const bool preferred_order =
+                (tab.fields & ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER) != 0;
+            if ((!title && !canonical_zero_utf16(tab.title)) ||
+                (title && (!valid_utf16(tab.title, false) ||
+                    tab.title.length >
+                        ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS)) ||
+                (!icon && tab.icon != nullptr) ||
+                (!visible && tab.visible != 0) ||
+                (visible && tab.visible > 1u) ||
+                (!preferred_order && tab.preferred_order != 0)) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+
+            ERUI_TabIconDesc tab_icon{};
+            if (icon && tab.icon) {
+                std::uint32_t icon_size{};
+                std::memcpy(&icon_size, tab.icon, sizeof(icon_size));
+                if (icon_size != sizeof(ERUI_TabIconDesc)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                std::memcpy(&tab_icon, tab.icon, sizeof(tab_icon));
+                if (tab_icon.flags != 0 ||
+                    tab_icon.format != ERUI_TAB_ICON_FORMAT_RGBA8 ||
+                    tab_icon.byte_count != ERUI_TAB_ICON_RGBA8_BYTE_COUNT ||
+                    !tab_icon.pixels || tab_icon.reserved[0] != 0 ||
+                    tab_icon.reserved[1] != 0) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+            }
+
+            ERUI_TestTabUpdateObservation observation{};
+            observation.size = sizeof(observation);
+            observation.descriptor_size = tab.size;
+            observation.page = tab.page;
+            observation.fields = tab.fields;
+            observation.visible = tab.visible;
+            observation.preferred_order = tab.preferred_order;
+            if (title) {
+                observation.title_length = tab.title.length;
+                std::memcpy(observation.title, tab.title.data,
+                    static_cast<std::size_t>(tab.title.length) *
+                        sizeof(tab.title.data[0]));
+            }
+            if (icon && tab.icon) {
+                observation.icon_present = 1u;
+                observation.icon_descriptor_size = tab_icon.size;
+                observation.icon_format = tab_icon.format;
+                observation.icon_byte_count = tab_icon.byte_count;
+                std::memcpy(observation.icon_pixels, tab_icon.pixels,
+                    ERUI_TAB_ICON_RGBA8_BYTE_COUNT);
+            }
+            tab_observations.push_back(std::move(observation));
+            continue;
         }
 
         if (update.kind == ERUI_UPDATE_KIND_SUBMENU) {
@@ -1130,9 +1237,14 @@ ERUI_Result ERUI_CALL commit_updates(
         std::lock_guard lock(g_state_mutex);
         g_row_update_observations.reserve(
             g_row_update_observations.size() + observations.size());
+        g_tab_update_observations.reserve(
+            g_tab_update_observations.size() + tab_observations.size());
         g_row_update_observations.insert(
             g_row_update_observations.end(),
             observations.begin(), observations.end());
+        g_tab_update_observations.insert(
+            g_tab_update_observations.end(),
+            tab_observations.begin(), tab_observations.end());
     } catch (...) {
         return ERUI_OUT_OF_MEMORY;
     }
@@ -1198,7 +1310,7 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
     } else {
         api.capabilities &= ~(ERUI_CAP_UPDATES |
             ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY |
-            ERUI_CAP_SUBMENU_UPDATES);
+            ERUI_CAP_SUBMENU_UPDATES | ERUI_CAP_TAB_UPDATES);
     }
     if ((g_disabled_features.load(std::memory_order_relaxed) &
             ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0) {
@@ -1256,6 +1368,7 @@ ERUI_TestConfigureConnection(
         g_title_screen_text_count = 0;
         g_title_screen_text_observations.clear();
         g_row_update_observations.clear();
+        g_tab_update_observations.clear();
     }
     return ERUI_OK;
 }
@@ -1301,6 +1414,22 @@ ERUI_TestGetRowUpdateObservation(
         return ERUI_NOT_FOUND;
     }
     *out_observation = g_row_update_observations[index];
+    return ERUI_OK;
+}
+
+extern "C" __declspec(dllexport) ERUI_Result ERUI_CALL
+ERUI_TestGetTabUpdateObservation(
+    std::uint32_t index,
+    ERUI_TestTabUpdateObservation* out_observation) {
+    if (!out_observation || out_observation->size < sizeof(*out_observation)) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    std::lock_guard lock(g_state_mutex);
+    if (index >= g_tab_update_observations.size()) {
+        return ERUI_NOT_FOUND;
+    }
+    *out_observation = g_tab_update_observations[index];
     return ERUI_OK;
 }
 

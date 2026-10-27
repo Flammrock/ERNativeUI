@@ -486,6 +486,7 @@ if(_ernativeui_need_native_core)
         src/submenu_navigation.cpp
         src/submenu_update_state.cpp
         src/tab_configuration.cpp
+        src/tab_update_state.cpp
         src/tab_viewport.cpp
         src/text_input_state.cpp
         src/text_registry.cpp)

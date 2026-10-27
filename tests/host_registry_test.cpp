@@ -1,10 +1,12 @@
 #include "host_registry.hpp"
 #include "menu_compiler.hpp"
+#include "native_tab_catalogue.hpp"
 #include "row_presentation_state.hpp"
 #include "row_update_state.hpp"
 #include "row_visibility_state.hpp"
 #include "steam_language.hpp"
 #include "submenu_update_state.hpp"
+#include "tab_update_state.hpp"
 
 #include <Windows.h>
 
@@ -3682,6 +3684,1112 @@ void verify_api_1_4_submenu_update_contract() {
     erui::detail::reset_submenu_update_state();
 }
 
+void verify_api_1_4_tab_update_contract() {
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_submenu_update_state();
+    erui::detail::reset_tab_update_state();
+
+    const auto submit = [](
+        erui::host::Registry& registry,
+        ERUI_ProviderHandle provider,
+        const ERUI_UpdateDesc* updates,
+        std::uint32_t count) {
+        ERUI_UpdateBatchDesc batch{};
+        batch.size = sizeof(batch);
+        batch.updates = updates;
+        batch.update_count = count;
+        batch.update_stride = sizeof(ERUI_UpdateDesc);
+        return registry.commit_updates(provider, &batch);
+    };
+    const auto wrap_tab = [](const ERUI_TabUpdateDesc& tab) {
+        ERUI_UpdateDesc update{};
+        update.size = sizeof(update);
+        update.kind = ERUI_UPDATE_KIND_TAB;
+        update.payload = &tab;
+        return update;
+    };
+
+    // The rich-tab surface depends on all three foundations it composes:
+    // custom tabs, the update transport, and live logical-page titles.
+    {
+        erui::host::Registry dependencies{};
+        ERUI_TEST_CHECK(!dependencies.enable_tab_updates_backend());
+        ERUI_TEST_CHECK(dependencies.enable_custom_tabs_backend());
+        ERUI_TEST_CHECK(!dependencies.enable_tab_updates_backend());
+        ERUI_TEST_CHECK(dependencies.enable_updates_backend());
+        ERUI_TEST_CHECK(!dependencies.enable_tab_updates_backend());
+        ERUI_TEST_CHECK(dependencies.enable_submenu_updates_backend());
+        ERUI_TEST_CHECK(dependencies.enable_tab_updates_backend());
+        ERUI_TEST_CHECK(dependencies.tab_updates_backend_available());
+        dependencies.open_registration();
+        ERUI_TEST_CHECK(!dependencies.enable_tab_updates_backend());
+    }
+
+    // A host may expose ordinary API 1.4 updates without admitting tab
+    // updates. Kind 3 must then fail before it mutates the provider model.
+    {
+        erui::host::Registry unavailable{};
+        ERUI_TEST_CHECK(unavailable.enable_custom_tabs_backend());
+        ERUI_TEST_CHECK(unavailable.enable_updates_backend());
+        ERUI_TEST_CHECK(unavailable.enable_submenu_updates_backend());
+        unavailable.open_registration();
+
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_4;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii("tab-updates.unavailable");
+        provider.display_name = utf16(L"Unavailable tab updates");
+        ERUI_ProviderHandle provider_handle{};
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(unavailable.register_provider(
+            ERUI_API_VERSION_1_4,
+            &provider,
+            &provider_handle,
+            &root) == ERUI_OK);
+        ERUI_TabDesc description{};
+        description.size = sizeof(description);
+        description.tab_id = ascii("target");
+        description.title = utf16(L"Target");
+        ERUI_PageHandle tab_page{};
+        ERUI_TEST_CHECK(unavailable.add_tab(
+            provider_handle, &description, &tab_page) == ERUI_OK);
+        ERUI_ToggleDesc sentinel{};
+        sentinel.size = sizeof(sentinel);
+        sentinel.label = utf16(L"Sentinel");
+        sentinel.help = utf16(L"Keeps the tab non-empty");
+        sentinel.enabled = 1u;
+        ERUI_TEST_CHECK(unavailable.add_toggle(
+            provider_handle, tab_page, &sentinel, nullptr) == ERUI_OK);
+        ERUI_TEST_CHECK(unavailable.commit_provider(provider_handle) ==
+            ERUI_OK);
+
+        ERUI_TabUpdateDesc edit{};
+        edit.size = sizeof(edit);
+        edit.page = tab_page;
+        edit.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE;
+        edit.visible = 0u;
+        const ERUI_UpdateDesc update = wrap_tab(edit);
+        ERUI_TEST_CHECK(submit(
+            unavailable, provider_handle, &update, 1u) ==
+            ERUI_NOT_SUPPORTED);
+    }
+
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_custom_tabs_backend());
+    ERUI_TEST_CHECK(registry.enable_updates_backend());
+    ERUI_TEST_CHECK(registry.enable_submenu_updates_backend());
+    ERUI_TEST_CHECK(registry.enable_tab_updates_backend());
+
+    erui::detail::TabConfiguration configuration{};
+    erui::detail::TabOrderOverride target_override{};
+    target_override.provider_id = "tab-updates.contract";
+    target_override.tab_id = "target";
+    target_override.stable_key = "tab-updates.contract/target";
+    target_override.order = 500;
+    configuration.order_overrides.emplace(
+        target_override.stable_key, target_override);
+    registry.set_tab_configuration(configuration);
+    registry.open_registration();
+
+    ERUI_ProviderDesc provider{};
+    provider.size = sizeof(provider);
+    provider.api_version = ERUI_API_VERSION_1_4;
+    provider.owner_module = GetModuleHandleW(nullptr);
+    provider.provider_id = ascii("tab-updates.contract");
+    provider.display_name = utf16(L"Tab update contract");
+    ERUI_ProviderHandle provider_handle{};
+    ERUI_PageHandle root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4,
+        &provider,
+        &provider_handle,
+        &root) == ERUI_OK);
+
+    ERUI_ToggleDesc rollback_toggle{};
+    rollback_toggle.size = sizeof(rollback_toggle);
+    rollback_toggle.label = utf16(L"Rollback row");
+    rollback_toggle.help = utf16(L"Rollback original help");
+    rollback_toggle.enabled = 1u;
+    ERUI_RowHandle rollback_row{};
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, root, &rollback_toggle, &rollback_row) == ERUI_OK);
+
+    ERUI_SubmenuDesc submenu{};
+    submenu.size = sizeof(submenu);
+    submenu.label = utf16(L"Mixed submenu");
+    submenu.help = utf16(L"Mixed original help");
+    submenu.page_title = utf16(L"Mixed child");
+    submenu.enabled = 1u;
+    ERUI_PageHandle child{};
+    ERUI_RowHandle opener{};
+    ERUI_TEST_CHECK(registry.add_submenu(
+        provider_handle, root, &submenu, &child, &opener) == ERUI_OK);
+    ERUI_ToggleDesc child_sentinel = rollback_toggle;
+    child_sentinel.label = utf16(L"Child sentinel");
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, child, &child_sentinel, nullptr) == ERUI_OK);
+
+    const auto add_tab = [&registry, provider_handle](
+        const char* id,
+        const wchar_t* title,
+        std::int32_t order,
+        ERUI_PageHandle& output) {
+        ERUI_TabDesc description{};
+        description.size = sizeof(description);
+        description.tab_id = ascii(id);
+        description.title = utf16(title);
+        description.preferred_order = order;
+        ERUI_TEST_CHECK(registry.add_tab(
+            provider_handle, &description, &output) == ERUI_OK);
+    };
+    const auto add_tab_sentinel = [&registry, provider_handle](
+        ERUI_PageHandle page,
+        const wchar_t* label) {
+        ERUI_ToggleDesc sentinel{};
+        sentinel.size = sizeof(sentinel);
+        sentinel.label = utf16(label);
+        sentinel.help = utf16(L"Custom-tab sentinel");
+        sentinel.enabled = 1u;
+        ERUI_TEST_CHECK(registry.add_toggle(
+            provider_handle, page, &sentinel, nullptr) == ERUI_OK);
+    };
+
+    ERUI_PageHandle target_page{};
+    ERUI_PageHandle other_page{};
+    ERUI_PageHandle formatter_page{};
+    add_tab("target", L"Target original", 0, target_page);
+    add_tab("other", L"Other original", 100, other_page);
+    add_tab("formatter", L"Formatter original", 900, formatter_page);
+    for (std::size_t index = 0;
+         index < erui::detail::native_subpage_capacity + 1u;
+         ++index) {
+        add_tab_sentinel(target_page, L"Target pagination row");
+    }
+    add_tab_sentinel(other_page, L"Other sentinel");
+    add_tab_sentinel(formatter_page, L"Formatter sentinel");
+
+    FormatterObservation formatter_observation{};
+    ERUI_PagePresentationDesc formatter_presentation{};
+    formatter_presentation.size = sizeof(formatter_presentation);
+    formatter_presentation.page_title = utf16(L"Formatter base");
+    formatter_presentation.formatter = &format_page_title;
+    formatter_presentation.user_data = &formatter_observation;
+    ERUI_TEST_CHECK(registry.set_page_presentation(
+        provider_handle,
+        formatter_page,
+        &formatter_presentation) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
+
+    ERUI_ProviderDesc foreign_provider = provider;
+    foreign_provider.provider_id = ascii("tab-updates.foreign");
+    foreign_provider.display_name = utf16(L"Foreign tab updates");
+    ERUI_ProviderHandle foreign_handle{};
+    ERUI_PageHandle foreign_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4,
+        &foreign_provider,
+        &foreign_handle,
+        &foreign_root) == ERUI_OK);
+    ERUI_TabDesc foreign_tab{};
+    foreign_tab.size = sizeof(foreign_tab);
+    foreign_tab.tab_id = ascii("foreign");
+    foreign_tab.title = utf16(L"Foreign tab");
+    ERUI_PageHandle foreign_page{};
+    ERUI_TEST_CHECK(registry.add_tab(
+        foreign_handle, &foreign_tab, &foreign_page) == ERUI_OK);
+    ERUI_ToggleDesc foreign_sentinel = rollback_toggle;
+    foreign_sentinel.label = utf16(L"Foreign sentinel");
+    ERUI_TEST_CHECK(registry.add_toggle(
+        foreign_handle, foreign_page, &foreign_sentinel, nullptr) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(foreign_handle) == ERUI_OK);
+
+    ERUI_ProviderDesc stale_provider = provider;
+    stale_provider.provider_id = ascii("tab-updates.stale");
+    stale_provider.display_name = utf16(L"Stale tab updates");
+    ERUI_ProviderHandle stale_handle{};
+    ERUI_PageHandle stale_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4,
+        &stale_provider,
+        &stale_handle,
+        &stale_root) == ERUI_OK);
+    ERUI_TabDesc stale_tab = foreign_tab;
+    stale_tab.tab_id = ascii("stale");
+    stale_tab.title = utf16(L"Stale tab");
+    ERUI_PageHandle stale_page{};
+    ERUI_TEST_CHECK(registry.add_tab(
+        stale_handle, &stale_tab, &stale_page) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.abort_provider(stale_handle) == ERUI_OK);
+
+    ERUI_TabUpdateDesc base{};
+    base.size = sizeof(base);
+    base.page = target_page;
+    base.fields = ERUI_TAB_UPDATE_FIELD_TITLE;
+    base.title = utf16(L"Candidate title");
+
+    unsigned expectation_index{};
+    const auto expect = [&](ERUI_TabUpdateDesc candidate,
+                            ERUI_Result expected) {
+        ++expectation_index;
+        const ERUI_UpdateDesc update = wrap_tab(candidate);
+        const ERUI_Result result = submit(
+            registry, provider_handle, &update, 1u);
+        if (result != expected) {
+            std::fprintf(
+                stderr,
+                "tab expectation %u: expected %d, got %d\n",
+                expectation_index,
+                static_cast<int>(expected),
+                static_cast<int>(result));
+        }
+        ERUI_TEST_CHECK(result == expected);
+    };
+
+    ERUI_TabUpdateDesc invalid = base;
+    invalid.page = root;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.page = child;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.page = foreign_page;
+    expect(invalid, ERUI_INVALID_HANDLE);
+    invalid = base;
+    invalid.page = stale_page;
+    expect(invalid, ERUI_INVALID_HANDLE);
+    invalid = base;
+    invalid.page = UINT64_C(0xD0D0D0D0D0D0D0D0);
+    expect(invalid, ERUI_INVALID_HANDLE);
+    invalid = base;
+    invalid.size = sizeof(invalid) - 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.flags = 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.reserved0 = 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.reserved[1] = 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = 0u;
+    invalid.title = {};
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = UINT32_C(0x80000000);
+    invalid.title = {};
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.title = {};
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    std::wstring oversized_title(
+        ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS + 1u, L'X');
+    invalid = base;
+    invalid.title = utf16(oversized_title);
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+
+    // Every payload whose bit is absent must remain canonically zero.
+    invalid = base;
+    invalid.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE;
+    invalid.visible = 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = ERUI_TAB_UPDATE_FIELD_ICON;
+    invalid.title = utf16(L"Hidden noncanonical title");
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = ERUI_TAB_UPDATE_FIELD_TITLE;
+    invalid.visible = 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.preferred_order = 12;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE;
+    invalid.title = {};
+    invalid.visible = 2u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+
+    std::array<std::uint8_t, ERUI_TAB_ICON_RGBA8_BYTE_COUNT> icon_pixels{};
+    for (std::size_t index = 0; index < icon_pixels.size(); ++index) {
+        icon_pixels[index] = static_cast<std::uint8_t>(index * 37u + 11u);
+    }
+    ERUI_TabIconDesc icon{};
+    icon.size = sizeof(icon);
+    icon.format = ERUI_TAB_ICON_FORMAT_RGBA8;
+    icon.byte_count = static_cast<std::uint32_t>(icon_pixels.size());
+    icon.pixels = icon_pixels.data();
+    invalid = base;
+    invalid.fields = ERUI_TAB_UPDATE_FIELD_TITLE;
+    invalid.icon = &icon;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = ERUI_TAB_UPDATE_FIELD_ICON;
+    invalid.title = {};
+    invalid.icon = &icon;
+    ERUI_TabIconDesc malformed_icon = icon;
+    malformed_icon.size = sizeof(malformed_icon) - 1u;
+    invalid.icon = &malformed_icon;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    malformed_icon = icon;
+    malformed_icon.flags = 1u;
+    invalid.icon = &malformed_icon;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    malformed_icon = icon;
+    malformed_icon.format = static_cast<ERUI_TabIconFormat>(2u);
+    invalid.icon = &malformed_icon;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    malformed_icon = icon;
+    malformed_icon.byte_count -= 1u;
+    invalid.icon = &malformed_icon;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    malformed_icon = icon;
+    malformed_icon.pixels = nullptr;
+    invalid.icon = &malformed_icon;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    malformed_icon = icon;
+    malformed_icon.reserved[0] = 1u;
+    invalid.icon = &malformed_icon;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+
+    invalid = base;
+    invalid.page = formatter_page;
+    expect(invalid, ERUI_NOT_SUPPORTED);
+
+    const ERUI_UpdateDesc duplicate = wrap_tab(base);
+    const std::array duplicate_updates{duplicate, duplicate};
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        duplicate_updates.data(),
+        static_cast<std::uint32_t>(duplicate_updates.size())) ==
+        ERUI_INVALID_ARGUMENT);
+
+    // A valid row edit preceding an invalid tab target must not escape the
+    // failed batch. The frozen compiled row below proves registry rollback.
+    ERUI_RowUpdateDesc rollback_update{};
+    rollback_update.size = sizeof(rollback_update);
+    rollback_update.row = rollback_row;
+    rollback_update.fields = ERUI_ROW_UPDATE_FIELD_HELP;
+    rollback_update.help = styled_text(L"Must not publish");
+    ERUI_UpdateDesc rollback_item{};
+    rollback_item.size = sizeof(rollback_item);
+    rollback_item.kind = ERUI_UPDATE_KIND_ROW;
+    rollback_item.payload = &rollback_update;
+    ERUI_TabUpdateDesc wrong_tab = base;
+    wrong_tab.page = root;
+    const ERUI_UpdateDesc wrong_tab_item = wrap_tab(wrong_tab);
+    const std::array atomic_updates{rollback_item, wrong_tab_item};
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        atomic_updates.data(),
+        static_cast<std::uint32_t>(atomic_updates.size())) ==
+        ERUI_INVALID_ARGUMENT);
+
+    const auto retained_icon_pixels = icon_pixels;
+    ERUI_TabUpdateDesc all_fields{};
+    all_fields.size = sizeof(all_fields);
+    all_fields.page = target_page;
+    all_fields.fields = ERUI_TAB_UPDATE_FIELD_TITLE |
+        ERUI_TAB_UPDATE_FIELD_ICON |
+        ERUI_TAB_UPDATE_FIELD_VISIBLE |
+        ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+    all_fields.title = utf16(L"Target staged");
+    all_fields.icon = &icon;
+    all_fields.visible = 0u;
+    all_fields.preferred_order = -200;
+    const ERUI_UpdateDesc all_fields_item = wrap_tab(all_fields);
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &all_fields_item, 1u) == ERUI_OK);
+    icon_pixels.fill(0u);
+
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+    const erui::detail::NativeTabCatalogueBuildResult catalogue_result =
+        erui::detail::build_native_tab_catalogue(
+            *compiled, configuration);
+    ERUI_TEST_CHECK(catalogue_result);
+    ERUI_TEST_CHECK(catalogue_result.catalogue != nullptr);
+    ERUI_TEST_CHECK(erui::detail::configure_row_presentation_state(
+        *compiled));
+    ERUI_TEST_CHECK(erui::detail::configure_submenu_update_state(
+        *compiled));
+    const bool tab_state_configured =
+        erui::detail::configure_tab_update_state(
+            *compiled, *catalogue_result.catalogue);
+    if (!tab_state_configured) {
+        for (const auto& catalogue_entry :
+             catalogue_result.catalogue->custom_entries()) {
+            const auto& page = compiled->pages[catalogue_entry.page_index];
+            std::fprintf(
+                stderr,
+                "tab configure entry key=%s/%s pageIndex=%zu identity=%llu/%llu title=%ls\n",
+                catalogue_entry.provider_id.c_str(),
+                catalogue_entry.tab_id.c_str(),
+                catalogue_entry.page_index,
+                static_cast<unsigned long long>(page.provider),
+                static_cast<unsigned long long>(page.page),
+                compiled->texts.lookup(
+                    static_cast<int>(catalogue_entry.title_id)));
+        }
+    }
+    ERUI_TEST_CHECK(tab_state_configured);
+    erui::detail::synchronize_pending_row_presentations();
+    erui::detail::synchronize_pending_submenu_updates();
+
+    const auto compiled_rollback = std::find_if(
+        compiled->root_page().rows.begin(),
+        compiled->root_page().rows.end(),
+        [&](const erui::detail::CompiledRow& row) {
+            return row.provider == provider_handle &&
+                row.row == rollback_row;
+        });
+    ERUI_TEST_CHECK(compiled_rollback != compiled->root_page().rows.end());
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_rollback->help_id)) == L"Rollback original help");
+
+    const auto compiled_opener = std::find_if(
+        compiled->root_page().rows.begin(),
+        compiled->root_page().rows.end(),
+        [&](const erui::detail::CompiledRow& row) {
+            return row.provider == provider_handle && row.row == opener;
+        });
+    ERUI_TEST_CHECK(compiled_opener != compiled->root_page().rows.end());
+
+    const auto compiled_target = std::find_if(
+        compiled->pages.begin(),
+        compiled->pages.end(),
+        [&](const erui::detail::CompiledPage& page) {
+            return page.provider == provider_handle &&
+                page.page == target_page;
+        });
+    ERUI_TEST_CHECK(compiled_target != compiled->pages.end());
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_target->title_id)) == L"Target staged");
+    const auto compiled_other = std::find_if(
+        compiled->pages.begin(),
+        compiled->pages.end(),
+        [&](const erui::detail::CompiledPage& page) {
+            return page.provider == provider_handle &&
+                page.page == other_page;
+        });
+    ERUI_TEST_CHECK(compiled_other != compiled->pages.end());
+    const auto compiled_formatter = std::find_if(
+        compiled->pages.begin(),
+        compiled->pages.end(),
+        [&](const erui::detail::CompiledPage& page) {
+            return page.provider == provider_handle &&
+                page.page == formatter_page;
+        });
+    ERUI_TEST_CHECK(compiled_formatter != compiled->pages.end());
+    ERUI_TEST_CHECK(formatter_observation.calls != 0u);
+    ERUI_TEST_CHECK(formatter_observation.page == formatter_page);
+
+    auto generation = erui::detail::acquire_applied_tab_generation();
+    ERUI_TEST_CHECK(generation != nullptr);
+    const auto find_entry = [](const auto& state, ERUI_PageHandle page)
+        -> const erui::detail::TabRuntimeEntry* {
+        if (!state) return nullptr;
+        const auto found = std::find_if(
+            state->entries.begin(),
+            state->entries.end(),
+            [page](const erui::detail::TabRuntimeEntry& entry) {
+                return entry.page == page;
+            });
+        return found == state->entries.end() ? nullptr : &*found;
+    };
+    const erui::detail::TabRuntimeEntry* target =
+        find_entry(generation, target_page);
+    const erui::detail::TabRuntimeEntry* other =
+        find_entry(generation, other_page);
+    ERUI_TEST_CHECK(target != nullptr && other != nullptr);
+    ERUI_TEST_CHECK(target->title == L"Target staged");
+    ERUI_TEST_CHECK(target->title_overridden);
+    ERUI_TEST_CHECK(!other->title_overridden);
+    ERUI_TEST_CHECK(!target->visible);
+    ERUI_TEST_CHECK(target->preferred_order == -200);
+    ERUI_TEST_CHECK(target->player_order == 500);
+    ERUI_TEST_CHECK(target->effective_order == 500);
+    ERUI_TEST_CHECK(target->icon.source == erui::TabIconSource::rgba8);
+    ERUI_TEST_CHECK(target->icon.rgba8_pixels.size() ==
+        retained_icon_pixels.size());
+    ERUI_TEST_CHECK(std::equal(
+        target->icon.rgba8_pixels.begin(),
+        target->icon.rgba8_pixels.end(),
+        retained_icon_pixels.begin(),
+        retained_icon_pixels.end()));
+    // Other, formatter, and the independently owned foreign tab remain
+    // visible; only Target was filtered by the preconfiguration edit.
+    ERUI_TEST_CHECK(generation->visible_order.size() == 3u);
+    ERUI_TEST_CHECK(std::find(
+        generation->visible_order.begin(),
+        generation->visible_order.end(),
+        target->stable_index) == generation->visible_order.end());
+
+    const std::size_t target_page_index = static_cast<std::size_t>(
+        std::distance(compiled->pages.begin(), compiled_target));
+    ERUI_TEST_CHECK(target_page_index < compiled->page_plans.size());
+    const std::size_t target_slices =
+        compiled->page_plans[target_page_index].slices.size();
+    ERUI_TEST_CHECK(target_slices > 1u);
+    std::array<wchar_t, ERUI_PAGE_TITLE_BUFFER_CAPACITY> title_buffer{};
+    std::uint64_t title_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        0u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        title_revision));
+    ERUI_TEST_CHECK(title_revision == generation->revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target staged (1/" + std::to_wstring(target_slices) + L")");
+    // Untouched tabs do not create a rich-title override. Their registered
+    // static PagePresentation (Other) or formatter (Formatter) remains the
+    // page-heading authority even though the selector generation also owns a
+    // title for each tab icon.
+    const std::size_t other_page_index = static_cast<std::size_t>(
+        std::distance(compiled->pages.begin(), compiled_other));
+    title_buffer.fill(L'\0');
+    std::uint64_t other_title_revision{};
+    ERUI_TEST_CHECK(!erui::detail::format_applied_tab_page_title(
+        other_page_index,
+        0u,
+        1u,
+        title_buffer.data(),
+        title_buffer.size(),
+        other_title_revision));
+    ERUI_TEST_CHECK(other_title_revision == 0u);
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_other->title_id)) == L"Other original");
+    const std::size_t formatter_page_index = static_cast<std::size_t>(
+        std::distance(compiled->pages.begin(), compiled_formatter));
+    std::uint64_t formatter_title_revision{};
+    ERUI_TEST_CHECK(!erui::detail::format_applied_tab_page_title(
+        formatter_page_index,
+        0u,
+        1u,
+        title_buffer.data(),
+        title_buffer.size(),
+        formatter_title_revision));
+    ERUI_TEST_CHECK(formatter_title_revision == 0u);
+    // A custom-tab title is never staged through the independently applied
+    // submenu-title channel.  Otherwise an icon+title edit could expose the
+    // new heading before the selector's icon generation is installed.
+    std::uint64_t unrelated_submenu_revision{};
+    ERUI_TEST_CHECK(!erui::detail::format_submenu_page_title(
+        compiled_target->submenu_update_slot,
+        0u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        unrelated_submenu_revision));
+    ERUI_TEST_CHECK(unrelated_submenu_revision == 0u);
+
+    // A TAB descriptor cannot share a transaction with ROW or SUBMENU.  The
+    // rejection happens before any of the three update channels is prepared,
+    // so synchronizing the independent channels afterward changes nothing.
+    ERUI_RowUpdateDesc mixed_row{};
+    mixed_row.size = sizeof(mixed_row);
+    mixed_row.row = rollback_row;
+    mixed_row.fields = ERUI_ROW_UPDATE_FIELD_HELP;
+    mixed_row.help = styled_text(L"Mixed row help");
+    ERUI_UpdateDesc mixed_row_item{};
+    mixed_row_item.size = sizeof(mixed_row_item);
+    mixed_row_item.kind = ERUI_UPDATE_KIND_ROW;
+    mixed_row_item.payload = &mixed_row;
+    ERUI_SubmenuUpdateDesc mixed_submenu{};
+    mixed_submenu.size = sizeof(mixed_submenu);
+    mixed_submenu.row = opener;
+    mixed_submenu.page = child;
+    mixed_submenu.fields = ERUI_SUBMENU_UPDATE_FIELD_HELP;
+    mixed_submenu.help = styled_text(L"Mixed opener help");
+    ERUI_UpdateDesc mixed_submenu_item{};
+    mixed_submenu_item.size = sizeof(mixed_submenu_item);
+    mixed_submenu_item.kind = ERUI_UPDATE_KIND_SUBMENU;
+    mixed_submenu_item.payload = &mixed_submenu;
+    ERUI_TabUpdateDesc mixed_tab{};
+    mixed_tab.size = sizeof(mixed_tab);
+    mixed_tab.page = other_page;
+    mixed_tab.fields = ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+    mixed_tab.preferred_order = 1000;
+    const ERUI_UpdateDesc mixed_tab_item = wrap_tab(mixed_tab);
+    const std::array mixed_updates{
+        mixed_row_item, mixed_submenu_item, mixed_tab_item};
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        mixed_updates.data(),
+        static_cast<std::uint32_t>(mixed_updates.size())) ==
+        ERUI_INVALID_ARGUMENT);
+    erui::detail::synchronize_pending_row_presentations();
+    erui::detail::synchronize_pending_submenu_updates();
+    ERUI_TEST_CHECK(!erui::detail::row_presentation_view(
+        compiled_rollback->presentation_slot));
+    ERUI_TEST_CHECK(!erui::detail::row_presentation_view(
+        compiled_opener->presentation_slot));
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_rollback->help_id)) == L"Rollback original help");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_opener->help_id)) == L"Mixed original help");
+    ERUI_TEST_CHECK(!erui::detail::tab_updates_pending());
+    const auto desired_after_mixed_rejection =
+        erui::detail::acquire_desired_tab_generation();
+    const auto applied_after_mixed_rejection =
+        erui::detail::acquire_applied_tab_generation();
+    ERUI_TEST_CHECK(desired_after_mixed_rejection == generation);
+    ERUI_TEST_CHECK(applied_after_mixed_rejection == generation);
+    other = find_entry(generation, other_page);
+    ERUI_TEST_CHECK(other != nullptr && other->preferred_order == 100);
+
+    // Several TAB descriptors are one valid atomic tab-generation update.
+    ERUI_TabUpdateDesc multi_target{};
+    multi_target.size = sizeof(multi_target);
+    multi_target.page = target_page;
+    multi_target.fields = ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+    multi_target.preferred_order = -900;
+    ERUI_TabUpdateDesc multi_other{};
+    multi_other.size = sizeof(multi_other);
+    multi_other.page = other_page;
+    multi_other.fields = ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+    multi_other.preferred_order = 1000;
+    const std::array multi_tab_updates{
+        wrap_tab(multi_target), wrap_tab(multi_other)};
+    const std::uint64_t multi_old_revision = generation->revision;
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        multi_tab_updates.data(),
+        static_cast<std::uint32_t>(multi_tab_updates.size())) == ERUI_OK);
+    ERUI_TEST_CHECK(erui::detail::tab_updates_pending());
+    const auto multi_desired =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(multi_desired != nullptr);
+    ERUI_TEST_CHECK(multi_desired->revision > multi_old_revision);
+    const auto* multi_desired_target = find_entry(
+        multi_desired, target_page);
+    const auto* multi_desired_other = find_entry(multi_desired, other_page);
+    ERUI_TEST_CHECK(multi_desired_target != nullptr);
+    ERUI_TEST_CHECK(multi_desired_other != nullptr);
+    ERUI_TEST_CHECK(multi_desired_target->preferred_order == -900);
+    ERUI_TEST_CHECK(multi_desired_other->preferred_order == 1000);
+    ERUI_TEST_CHECK(
+        erui::detail::acquire_applied_tab_generation() == generation);
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        multi_desired));
+    ERUI_TEST_CHECK(!erui::detail::tab_updates_pending());
+    generation = erui::detail::acquire_applied_tab_generation();
+    target = find_entry(generation, target_page);
+    other = find_entry(generation, other_page);
+    ERUI_TEST_CHECK(target != nullptr && other != nullptr);
+    ERUI_TEST_CHECK(target->preferred_order == -900);
+    ERUI_TEST_CHECK(other->preferred_order == 1000);
+
+    // Live title/default-icon/show/order is staged as one tab generation.
+    ERUI_TabUpdateDesc live{};
+    live.size = sizeof(live);
+    live.page = target_page;
+    live.fields = ERUI_TAB_UPDATE_FIELD_TITLE |
+        ERUI_TAB_UPDATE_FIELD_ICON |
+        ERUI_TAB_UPDATE_FIELD_VISIBLE |
+        ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+    live.title = utf16(L"Target live");
+    live.icon = nullptr;
+    live.visible = 1u;
+    live.preferred_order = -1000;
+    const ERUI_UpdateDesc live_item = wrap_tab(live);
+    const std::uint64_t old_revision = generation->revision;
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &live_item, 1u) == ERUI_OK);
+    ERUI_TEST_CHECK(erui::detail::tab_updates_pending());
+    ERUI_TEST_CHECK(erui::detail::acquire_applied_tab_generation()->revision ==
+        old_revision);
+    title_buffer.fill(L'\0');
+    std::uint64_t staged_title_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        target_slices - 1u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        staged_title_revision));
+    ERUI_TEST_CHECK(staged_title_revision == old_revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target staged (" + std::to_wstring(target_slices) + L"/" +
+            std::to_wstring(target_slices) + L")");
+
+    const auto live_desired =
+        erui::detail::acquire_desired_tab_generation();
+    const auto* desired_target = find_entry(live_desired, target_page);
+    ERUI_TEST_CHECK(live_desired != nullptr && desired_target != nullptr);
+    ERUI_TEST_CHECK(live_desired->revision > old_revision);
+    ERUI_TEST_CHECK(desired_target->title == L"Target live");
+    ERUI_TEST_CHECK(desired_target->title_overridden);
+    ERUI_TEST_CHECK(desired_target->visible);
+    ERUI_TEST_CHECK(desired_target->icon.source ==
+        erui::TabIconSource::fallback);
+    // A fresh Configuration movie may open before the prior movie's raster
+    // references finish retiring.  The native adapter deliberately performs
+    // no acknowledgement in that case.  Reacquiring the desired generation
+    // on later frames (or another fast reopen) must preserve the exact retry
+    // target while the last fully installed generation remains applied.
+    const auto first_fresh_epoch_retry =
+        erui::detail::acquire_desired_tab_generation();
+    const auto second_fresh_epoch_retry =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(first_fresh_epoch_retry == live_desired);
+    ERUI_TEST_CHECK(second_fresh_epoch_retry == live_desired);
+    ERUI_TEST_CHECK(erui::detail::tab_updates_pending());
+    ERUI_TEST_CHECK(erui::detail::acquire_applied_tab_generation()->revision ==
+        old_revision);
+    // Publishing unrelated submenu titles cannot leak the desired custom-tab
+    // title.  The page heading remains tied to the applied icon generation.
+    erui::detail::synchronize_pending_submenu_updates();
+    title_buffer.fill(L'\0');
+    std::uint64_t after_submenu_sync_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        target_slices - 1u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        after_submenu_sync_revision));
+    ERUI_TEST_CHECK(after_submenu_sync_revision == old_revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target staged (" + std::to_wstring(target_slices) + L"/" +
+            std::to_wstring(target_slices) + L")");
+
+    // This explicit acknowledgement stands in for the native tab adapter,
+    // which publishes only after the selector records and icon resources for
+    // this exact immutable generation are installed.
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        live_desired));
+    generation = erui::detail::acquire_applied_tab_generation();
+    target = find_entry(generation, target_page);
+    other = find_entry(generation, other_page);
+    ERUI_TEST_CHECK(target != nullptr && other != nullptr);
+    ERUI_TEST_CHECK(generation->revision > old_revision);
+    ERUI_TEST_CHECK(target->title == L"Target live");
+    ERUI_TEST_CHECK(target->visible);
+    ERUI_TEST_CHECK(target->preferred_order == -1000);
+    ERUI_TEST_CHECK(target->effective_order == 500);
+    ERUI_TEST_CHECK(target->icon.source == erui::TabIconSource::fallback);
+    ERUI_TEST_CHECK(target->icon.rgba8_pixels.empty());
+    ERUI_TEST_CHECK(generation->visible_order.size() == 4u);
+    const auto target_position = std::find(
+        generation->visible_order.begin(),
+        generation->visible_order.end(),
+        target->stable_index);
+    const auto other_position = std::find(
+        generation->visible_order.begin(),
+        generation->visible_order.end(),
+        other->stable_index);
+    ERUI_TEST_CHECK(target_position < other_position);
+
+    std::uint64_t live_title_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        target_slices - 1u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        live_title_revision));
+    ERUI_TEST_CHECK(live_title_revision > title_revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target live (" + std::to_wstring(target_slices) + L"/" +
+            std::to_wstring(target_slices) + L")");
+
+    // Recommitting byte-identical icon content advances the logical update
+    // generation but not the immutable icon revision. The native adapter can
+    // acknowledge this as a non-icon generation without allocating another
+    // process-retained image root.
+    ERUI_TabUpdateDesc identical_icon{};
+    identical_icon.size = sizeof(identical_icon);
+    identical_icon.page = target_page;
+    identical_icon.fields = ERUI_TAB_UPDATE_FIELD_ICON;
+    identical_icon.icon = nullptr;
+    const ERUI_UpdateDesc identical_icon_item = wrap_tab(identical_icon);
+    const std::uint64_t before_identical_icon_revision =
+        target->icon_revision;
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &identical_icon_item, 1u) == ERUI_OK);
+    const auto identical_icon_desired =
+        erui::detail::acquire_desired_tab_generation();
+    const auto* identical_icon_target = find_entry(
+        identical_icon_desired, target_page);
+    ERUI_TEST_CHECK(identical_icon_desired != nullptr);
+    ERUI_TEST_CHECK(identical_icon_target != nullptr);
+    ERUI_TEST_CHECK(identical_icon_target->icon_revision ==
+        before_identical_icon_revision);
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        identical_icon_desired));
+    generation = erui::detail::acquire_applied_tab_generation();
+    target = find_entry(generation, target_page);
+    ERUI_TEST_CHECK(target != nullptr);
+    ERUI_TEST_CHECK(target->icon_revision == before_identical_icon_revision);
+
+    // A title-only generation follows the same applied-generation boundary;
+    // it must not bypass the native adapter merely because no icon changed.
+    ERUI_TabUpdateDesc title_only{};
+    title_only.size = sizeof(title_only);
+    title_only.page = target_page;
+    title_only.fields = ERUI_TAB_UPDATE_FIELD_TITLE;
+    title_only.title = utf16(L"Target title only");
+    const ERUI_UpdateDesc title_only_item = wrap_tab(title_only);
+    const std::uint64_t before_title_only_revision = generation->revision;
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &title_only_item, 1u) == ERUI_OK);
+    ERUI_TEST_CHECK(erui::detail::tab_updates_pending());
+    title_buffer.fill(L'\0');
+    std::uint64_t before_title_publish_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        0u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        before_title_publish_revision));
+    ERUI_TEST_CHECK(before_title_publish_revision ==
+        before_title_only_revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target live (1/" + std::to_wstring(target_slices) + L")");
+    const auto title_only_desired =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(title_only_desired != nullptr);
+    desired_target = find_entry(title_only_desired, target_page);
+    ERUI_TEST_CHECK(desired_target != nullptr);
+    ERUI_TEST_CHECK(desired_target->title == L"Target title only");
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        title_only_desired));
+    generation = erui::detail::acquire_applied_tab_generation();
+    target = find_entry(generation, target_page);
+    ERUI_TEST_CHECK(target != nullptr);
+    ERUI_TEST_CHECK(target->title == L"Target title only");
+    title_buffer.fill(L'\0');
+    std::uint64_t title_only_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        target_slices - 1u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        title_only_revision));
+    ERUI_TEST_CHECK(title_only_revision == generation->revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target title only (" + std::to_wstring(target_slices) + L"/" +
+            std::to_wstring(target_slices) + L")");
+
+    // Projection generations are acknowledged independently from commits.
+    // Keep the current generation applied while the adapter owns a captured
+    // projection, then queue a newer title generation before acknowledging
+    // that projection.  The captured generation is accepted as applied but
+    // is no longer latest, so the newer desired generation stays pending.
+    const auto source_before_queued_projection = generation;
+    ERUI_TabUpdateDesc queued_projection{};
+    queued_projection.size = sizeof(queued_projection);
+    queued_projection.page = target_page;
+    queued_projection.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE |
+        ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+    queued_projection.visible = 0u;
+    queued_projection.preferred_order = -1100;
+    const ERUI_UpdateDesc queued_projection_item = wrap_tab(
+        queued_projection);
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        &queued_projection_item,
+        1u) == ERUI_OK);
+    ERUI_TEST_CHECK(erui::detail::tab_updates_pending());
+    const auto captured_projection =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(captured_projection != nullptr);
+    ERUI_TEST_CHECK(captured_projection->revision >
+        source_before_queued_projection->revision);
+    const auto* captured_projection_target = find_entry(
+        captured_projection, target_page);
+    ERUI_TEST_CHECK(captured_projection_target != nullptr);
+    ERUI_TEST_CHECK(!captured_projection_target->visible);
+    ERUI_TEST_CHECK(captured_projection_target->preferred_order == -1100);
+    ERUI_TEST_CHECK(captured_projection_target->title ==
+        L"Target title only");
+    ERUI_TEST_CHECK(erui::detail::acquire_applied_tab_generation() ==
+        source_before_queued_projection);
+
+    ERUI_TabUpdateDesc queued_title{};
+    queued_title.size = sizeof(queued_title);
+    queued_title.page = target_page;
+    queued_title.fields = ERUI_TAB_UPDATE_FIELD_TITLE;
+    queued_title.title = utf16(L"Target queued title");
+    const ERUI_UpdateDesc queued_title_item = wrap_tab(queued_title);
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &queued_title_item, 1u) == ERUI_OK);
+    const auto queued_newer =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(queued_newer != nullptr);
+    ERUI_TEST_CHECK(queued_newer->revision > captured_projection->revision);
+    const auto* queued_newer_target = find_entry(queued_newer, target_page);
+    ERUI_TEST_CHECK(queued_newer_target != nullptr);
+    ERUI_TEST_CHECK(!queued_newer_target->visible);
+    ERUI_TEST_CHECK(queued_newer_target->preferred_order == -1100);
+    ERUI_TEST_CHECK(queued_newer_target->title == L"Target queued title");
+    ERUI_TEST_CHECK(erui::detail::acquire_applied_tab_generation() ==
+        source_before_queued_projection);
+
+    ERUI_TEST_CHECK(!erui::detail::publish_applied_tab_generation(
+        captured_projection));
+    ERUI_TEST_CHECK(erui::detail::acquire_applied_tab_generation() ==
+        captured_projection);
+    ERUI_TEST_CHECK(erui::detail::acquire_desired_tab_generation() ==
+        queued_newer);
+    ERUI_TEST_CHECK(erui::detail::tab_updates_pending());
+    title_buffer.fill(L'\0');
+    std::uint64_t captured_projection_title_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        0u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        captured_projection_title_revision));
+    ERUI_TEST_CHECK(captured_projection_title_revision ==
+        captured_projection->revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target title only (1/" + std::to_wstring(target_slices) + L")");
+
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        queued_newer));
+    generation = erui::detail::acquire_applied_tab_generation();
+    ERUI_TEST_CHECK(generation == queued_newer);
+    ERUI_TEST_CHECK(!erui::detail::tab_updates_pending());
+    target = find_entry(generation, target_page);
+    ERUI_TEST_CHECK(target != nullptr);
+    ERUI_TEST_CHECK(!target->visible);
+    ERUI_TEST_CHECK(target->preferred_order == -1100);
+    ERUI_TEST_CHECK(target->title == L"Target queued title");
+
+    // Finish the projection -> title -> projection cycle.  A later
+    // projection must preserve the applied rich title while changing only
+    // visibility/order, and it remains deferred until explicitly published.
+    ERUI_TabUpdateDesc final_projection{};
+    final_projection.size = sizeof(final_projection);
+    final_projection.page = target_page;
+    final_projection.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE |
+        ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+    final_projection.visible = 1u;
+    final_projection.preferred_order = -1200;
+    const ERUI_UpdateDesc final_projection_item = wrap_tab(final_projection);
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        &final_projection_item,
+        1u) == ERUI_OK);
+    const auto final_projection_desired =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(final_projection_desired != nullptr);
+    ERUI_TEST_CHECK(final_projection_desired->revision > generation->revision);
+    const auto* final_projection_target = find_entry(
+        final_projection_desired, target_page);
+    ERUI_TEST_CHECK(final_projection_target != nullptr);
+    ERUI_TEST_CHECK(final_projection_target->visible);
+    ERUI_TEST_CHECK(final_projection_target->preferred_order == -1200);
+    ERUI_TEST_CHECK(final_projection_target->title ==
+        L"Target queued title");
+    ERUI_TEST_CHECK(erui::detail::acquire_applied_tab_generation() ==
+        generation);
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        final_projection_desired));
+    generation = erui::detail::acquire_applied_tab_generation();
+    target = find_entry(generation, target_page);
+    ERUI_TEST_CHECK(target != nullptr);
+    ERUI_TEST_CHECK(target->visible);
+    ERUI_TEST_CHECK(target->preferred_order == -1200);
+    ERUI_TEST_CHECK(target->title == L"Target queued title");
+    title_buffer.fill(L'\0');
+    std::uint64_t final_projection_title_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_applied_tab_page_title(
+        target_page_index,
+        target_slices - 1u,
+        target_slices,
+        title_buffer.data(),
+        title_buffer.size(),
+        final_projection_title_revision));
+    ERUI_TEST_CHECK(final_projection_title_revision == generation->revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Target queued title (" + std::to_wstring(target_slices) + L"/" +
+            std::to_wstring(target_slices) + L")");
+
+    // Hiding every custom tab is valid: stock tabs remain the deterministic
+    // fallback set. Re-showing restores stable identities and latest fields.
+    std::vector<ERUI_TabUpdateDesc> hide_payloads{};
+    std::vector<ERUI_UpdateDesc> hide_items{};
+    hide_payloads.reserve(generation->entries.size());
+    hide_items.reserve(generation->entries.size());
+    for (const erui::detail::TabRuntimeEntry& entry : generation->entries) {
+        if (entry.provider != provider_handle) continue;
+        ERUI_TabUpdateDesc hide{};
+        hide.size = sizeof(hide);
+        hide.page = entry.page;
+        hide.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE;
+        hide.visible = 0u;
+        hide_payloads.push_back(hide);
+    }
+    for (const ERUI_TabUpdateDesc& hide : hide_payloads) {
+        hide_items.push_back(wrap_tab(hide));
+    }
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        hide_items.data(),
+        static_cast<std::uint32_t>(hide_items.size())) == ERUI_OK);
+
+    ERUI_TabUpdateDesc hide_foreign{};
+    hide_foreign.size = sizeof(hide_foreign);
+    hide_foreign.page = foreign_page;
+    hide_foreign.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE;
+    hide_foreign.visible = 0u;
+    const ERUI_UpdateDesc hide_foreign_item = wrap_tab(hide_foreign);
+    ERUI_TEST_CHECK(submit(
+        registry, foreign_handle, &hide_foreign_item, 1u) == ERUI_OK);
+    const auto hidden_desired =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(hidden_desired != nullptr);
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        hidden_desired));
+    generation = erui::detail::acquire_applied_tab_generation();
+    ERUI_TEST_CHECK(generation->visible_order.empty());
+
+    ERUI_TabUpdateDesc restore{};
+    restore.size = sizeof(restore);
+    restore.page = target_page;
+    restore.fields = ERUI_TAB_UPDATE_FIELD_VISIBLE;
+    restore.visible = 1u;
+    const ERUI_UpdateDesc restore_item = wrap_tab(restore);
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &restore_item, 1u) == ERUI_OK);
+    const auto restored_desired =
+        erui::detail::acquire_desired_tab_generation();
+    ERUI_TEST_CHECK(restored_desired != nullptr);
+    ERUI_TEST_CHECK(erui::detail::publish_applied_tab_generation(
+        restored_desired));
+    generation = erui::detail::acquire_applied_tab_generation();
+    target = find_entry(generation, target_page);
+    ERUI_TEST_CHECK(target != nullptr && target->visible);
+    ERUI_TEST_CHECK(target->title == L"Target queued title");
+    ERUI_TEST_CHECK(generation->visible_order.size() == 1u);
+    ERUI_TEST_CHECK(generation->visible_order.front() ==
+        target->stable_index);
+
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_submenu_update_state();
+    erui::detail::reset_tab_update_state();
+}
+
 } // namespace
 
 int main() {
@@ -3701,6 +4809,7 @@ int main() {
     verify_api_1_4_row_visibility_admission_edges();
     verify_api_1_4_row_visibility_contract();
     verify_api_1_4_submenu_update_contract();
+    verify_api_1_4_tab_update_contract();
 
     ERUI_Api early_v1{};
     early_v1.size = ERUI_API_V1_0_SIZE;

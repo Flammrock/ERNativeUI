@@ -4,8 +4,11 @@ Some ERNativeUI controls accept an `enabled` value while the menu is being
 built. Depending on the native widget, it controls either whether the row is
 included at all or whether the player may interact with a visible row.
 
-The value is fixed when the provider commits. API 1.1 cannot change a row from
-enabled to disabled, or from disabled to enabled, while the game is running.
+The registration-time value is copied when the provider commits. API 1.4 can
+later change interaction and disabled appearance for a retained, materialized
+ordinary row through `row.edit()`, but it cannot resurrect a Button,
+ColorPicker, or Submenu that `enabled = false` caused the construction path to
+omit.
 
 ## What `false` looks like
 
@@ -33,7 +36,7 @@ it:
 ```cpp
 #include <ernativeui/ERNativeUI.hpp>
 
-erui::RowHandle add_strength_slider(
+erui::SliderRow add_strength_slider(
     erui::Page page,
     bool backend_available) noexcept
 {
@@ -69,7 +72,7 @@ void rebuild_cache() noexcept
     // Perform one short action or queue longer work.
 }
 
-erui::RowHandle add_rebuild_button(
+erui::ButtonRow add_rebuild_button(
     erui::Page page,
     bool cache_supported) noexcept
 {
@@ -86,17 +89,30 @@ ERNativeUI validates the complete Button declaration during registration.
 
 ## When interaction can change later
 
-Use `enabled` only for a condition that is known while registering the menu
-and remains stable for the process. Changing the original C++ variable later
-does nothing; ERNativeUI copied its value.
+Use `enabled` for the row's initial construction state. Changing the original
+C++ variable later does nothing because ERNativeUI copied it.
 
-If a Button must remain visible while its action is temporarily unavailable,
-leave it enabled and let its callback check the mod's current state. The
-callback may then do nothing or show a native alert explaining why the action
-cannot run. See [Native dialogs](../../native-dialogs.md).
+For a condition that changes at runtime, retain the typed row and commit its
+availability explicitly:
 
-Programmatic value methods such as `Registration::set_value()` change a
-control's value, not its enabled state.
+```cpp
+ERUI_Result result = strength_row.edit()
+    .interactive(backend_available)
+    .availability_appearance(
+        erui::AvailabilityAppearance::follow_interactivity)
+    .commit();
+```
+
+Here `backend_available` is an ordinary client-owned `bool`. The appearance
+call is optional: `follow_interactivity` is already the default, while
+`normal` and `disabled` deliberately decouple presentation from interaction.
+The row must have been materialized during registration. See
+[Enable or disable rows at runtime](../../row-updates/availability.md) for the
+complete capability checks, supported families, and focus behavior.
+
+Programmatic value methods change a control's value, not its interaction
+state. A callback should still validate any gameplay precondition that may
+change between presentation and activation.
 
 [Controls index](../README.md) |
 [Capabilities](../../capabilities.md) |

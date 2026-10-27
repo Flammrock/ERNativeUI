@@ -1166,6 +1166,18 @@ DWORD run_host() noexcept {
             }
             log::write(
                 "Runtime title bridge preflight passed; API 1.4 rich submenu updates are available");
+            if (tab_preflight ==
+                    erui::native::NativeTabsPreflightStatus::available) {
+                if (!registry().enable_tab_updates_backend()) {
+                    log::write(
+                        erui::LogLevel::fatal,
+                        "Runtime custom-tab and title backends passed preflight but rich tab updates could not be published before registration opened");
+                    set_api_state(ApiState::failed);
+                    return 1;
+                }
+                log::write(
+                    "Runtime custom-tab lifecycle preflight passed; API 1.4 rich tab updates are available");
+            }
             if (erui::native::native_row_availability_build_supported(
                     row_update_game)) {
                 if (!registry().enable_row_availability_backend()) {

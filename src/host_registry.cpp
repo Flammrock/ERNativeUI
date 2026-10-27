@@ -8,6 +8,7 @@
 #include "row_update_state.hpp"
 #include "row_visibility_state.hpp"
 #include "submenu_update_state.hpp"
+#include "tab_update_state.hpp"
 #include "runtime_log.hpp"
 
 #include <algorithm>
@@ -635,6 +636,21 @@ bool Registry::enable_submenu_updates_backend() noexcept {
 bool Registry::submenu_updates_backend_available() const noexcept {
     std::lock_guard lock(mutex_);
     return submenu_updates_backend_available_;
+}
+
+bool Registry::enable_tab_updates_backend() noexcept {
+    std::lock_guard lock(mutex_);
+    if (open_ || frozen_ || !custom_tabs_backend_available_ ||
+        !updates_backend_available_ || !submenu_updates_backend_available_) {
+        return false;
+    }
+    tab_updates_backend_available_ = true;
+    return true;
+}
+
+bool Registry::tab_updates_backend_available() const noexcept {
+    std::lock_guard lock(mutex_);
+    return tab_updates_backend_available_;
 }
 
 bool Registry::enable_row_availability_backend() noexcept {
@@ -2791,12 +2807,31 @@ ERUI_Result Registry::commit_updates(
         bool caption_overridden{};
         bool materialized{};
     };
+    struct ParsedTabUpdate {
+        ERUI_PageHandle page{};
+        ERUI_TabUpdateFields fields{};
+        std::wstring title{};
+        erui::TabIconSpec icon{};
+        bool visible{true};
+        std::int32_t preferred_order{};
+    };
+    struct PendingTabMutation {
+        Page* page{};
+        ERUI_TabUpdateFields fields{};
+        std::wstring title{};
+        std::wstring page_title{};
+        erui::TabIconSpec icon{};
+        bool visible{true};
+        std::int32_t preferred_order{};
+    };
 
     try {
         std::vector<ParsedRowUpdate> parsed_rows{};
         parsed_rows.reserve(description->update_count);
         std::vector<ParsedSubmenuUpdate> parsed_submenus{};
         parsed_submenus.reserve(description->update_count);
+        std::vector<ParsedTabUpdate> parsed_tabs{};
+        parsed_tabs.reserve(description->update_count);
         const auto* const update_bytes = reinterpret_cast<const std::byte*>(
             description->updates);
         constexpr ERUI_RowUpdateFields kKnownRowFields =
@@ -2811,6 +2846,11 @@ ERUI_Result Registry::commit_updates(
             ERUI_SUBMENU_UPDATE_FIELD_CAPTION |
             ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE |
             ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP;
+        constexpr ERUI_TabUpdateFields kKnownTabFields =
+            ERUI_TAB_UPDATE_FIELD_TITLE |
+            ERUI_TAB_UPDATE_FIELD_ICON |
+            ERUI_TAB_UPDATE_FIELD_VISIBLE |
+            ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
         const auto canonical_zero_styled_view =
             [](const ERUI_StyledTextView& view) {
                 return view.size == 0 && view.flags == 0 &&
@@ -3018,6 +3058,81 @@ ERUI_Result Registry::commit_updates(
                 parsed_submenus.push_back(std::move(parsed_update));
                 continue;
             }
+            if (update.kind == ERUI_UPDATE_KIND_TAB) {
+                std::uint32_t tab_update_size{};
+                std::memcpy(
+                    &tab_update_size, update.payload,
+                    sizeof(tab_update_size));
+                if (tab_update_size != sizeof(ERUI_TabUpdateDesc)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                ERUI_TabUpdateDesc tab_update{};
+                std::memcpy(
+                    &tab_update, update.payload, sizeof(tab_update));
+                if (tab_update.flags != 0 ||
+                    tab_update.page == ERUI_INVALID_PAGE ||
+                    tab_update.fields == 0 ||
+                    (tab_update.fields & ~kKnownTabFields) != 0 ||
+                    tab_update.reserved0 != 0 ||
+                    tab_update.reserved[0] != 0 ||
+                    tab_update.reserved[1] != 0) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                const bool changes_title =
+                    (tab_update.fields & ERUI_TAB_UPDATE_FIELD_TITLE) != 0;
+                const bool changes_icon =
+                    (tab_update.fields & ERUI_TAB_UPDATE_FIELD_ICON) != 0;
+                const bool changes_visible =
+                    (tab_update.fields & ERUI_TAB_UPDATE_FIELD_VISIBLE) != 0;
+                const bool changes_order =
+                    (tab_update.fields &
+                        ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER) != 0;
+                if ((!changes_title &&
+                        !canonical_zero_utf16_view(tab_update.title)) ||
+                    (changes_title &&
+                        (!valid_view(tab_update.title) ||
+                         tab_update.title.length == 0 ||
+                         tab_update.title.length >
+                            ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS)) ||
+                    (!changes_icon && tab_update.icon != nullptr) ||
+                    (!changes_visible && tab_update.visible != 0) ||
+                    (changes_visible && tab_update.visible > 1) ||
+                    (!changes_order && tab_update.preferred_order != 0)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                if (changes_icon && tab_update.icon) {
+                    const ERUI_TabIconDesc& icon = *tab_update.icon;
+                    if (!field_available(
+                            icon.size,
+                            ERUI_FIELD_END(ERUI_TabIconDesc, reserved)) ||
+                        icon.flags != 0 ||
+                        icon.format != ERUI_TAB_ICON_FORMAT_RGBA8 ||
+                        icon.byte_count != ERUI_TAB_ICON_RGBA8_BYTE_COUNT ||
+                        !icon.pixels || icon.reserved[0] != 0 ||
+                        icon.reserved[1] != 0) {
+                        return ERUI_INVALID_ARGUMENT;
+                    }
+                }
+
+                ParsedTabUpdate parsed_update{};
+                parsed_update.page = tab_update.page;
+                parsed_update.fields = tab_update.fields;
+                parsed_update.visible = tab_update.visible != 0;
+                parsed_update.preferred_order = tab_update.preferred_order;
+                if (changes_title) {
+                    parsed_update.title = copy_utf16(
+                        tab_update.title, false);
+                }
+                if (changes_icon && tab_update.icon) {
+                    parsed_update.icon.source = erui::TabIconSource::rgba8;
+                    parsed_update.icon.rgba8_pixels.assign(
+                        tab_update.icon->pixels,
+                        tab_update.icon->pixels +
+                            tab_update.icon->byte_count);
+                }
+                parsed_tabs.push_back(std::move(parsed_update));
+                continue;
+            }
             return ERUI_INVALID_ARGUMENT;
         }
 
@@ -3030,8 +3145,21 @@ ERUI_Result Registry::commit_updates(
             return ERUI_NOT_SUPPORTED;
         }
         if (!provider.committed) return ERUI_INVALID_HANDLE;
+        // A tab generation owns selector ordering, visibility, icon resources,
+        // and the active page heading as one native publication.  Mixing it
+        // with row/submenu state would require two independently re-entrant
+        // native adapters to expose the same batch in one frame.  Keep the
+        // public transaction honest: one batch may update several tabs, but
+        // it cannot mix tab and non-tab descriptors.
+        if (!parsed_tabs.empty() &&
+            (!parsed_rows.empty() || !parsed_submenus.empty())) {
+            return ERUI_INVALID_ARGUMENT;
+        }
         if (!parsed_submenus.empty() &&
             !submenu_updates_backend_available_) {
+            return ERUI_NOT_SUPPORTED;
+        }
+        if (!parsed_tabs.empty() && !tab_updates_backend_available_) {
             return ERUI_NOT_SUPPORTED;
         }
 
@@ -3092,6 +3220,8 @@ ERUI_Result Registry::commit_updates(
         unique_rows.reserve(parsed_rows.size() + parsed_submenus.size());
         std::unordered_set<ERUI_PageHandle> unique_submenu_pages{};
         unique_submenu_pages.reserve(parsed_submenus.size());
+        std::unordered_set<ERUI_PageHandle> unique_tab_pages{};
+        unique_tab_pages.reserve(parsed_tabs.size());
         std::unordered_map<const Row*, bool> visibility_overrides{};
         visibility_overrides.reserve(parsed_rows.size());
         std::unordered_set<ERUI_PageHandle> visibility_pages{};
@@ -3303,6 +3433,64 @@ ERUI_Result Registry::commit_updates(
             submenu_mutations.push_back(std::move(mutation));
         }
 
+        std::vector<PendingTabMutation> tab_mutations{};
+        tab_mutations.reserve(parsed_tabs.size());
+        std::vector<erui::detail::TabRuntimeUpdate> tab_runtime_updates{};
+        tab_runtime_updates.reserve(parsed_tabs.size());
+        for (ParsedTabUpdate& update : parsed_tabs) {
+            if (!unique_tab_pages.insert(update.page).second) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            const auto page_it = provider.page_lookup.find(update.page);
+            if (page_it == provider.page_lookup.end()) {
+                return ERUI_INVALID_HANDLE;
+            }
+            Page& page = *page_it->second;
+            if (!page.custom_tab || page.provider != provider_handle) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            const bool changes_title =
+                (update.fields & ERUI_TAB_UPDATE_FIELD_TITLE) != 0;
+            if (changes_title && page.title_formatter) {
+                return ERUI_NOT_SUPPORTED;
+            }
+
+            PendingTabMutation mutation{};
+            mutation.page = &page;
+            mutation.fields = update.fields;
+            mutation.visible = (update.fields &
+                    ERUI_TAB_UPDATE_FIELD_VISIBLE) != 0
+                ? update.visible
+                : page.tab_visible;
+            mutation.preferred_order = (update.fields &
+                    ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER) != 0
+                ? update.preferred_order
+                : page.preferred_tab_order;
+            mutation.title = changes_title
+                ? std::move(update.title)
+                : page.title;
+            if (changes_title) mutation.page_title = mutation.title;
+            mutation.icon = (update.fields & ERUI_TAB_UPDATE_FIELD_ICON) != 0
+                ? std::move(update.icon)
+                : page.tab_icon;
+
+            erui::detail::TabRuntimeUpdate runtime_update{
+                .provider = provider_handle,
+                .page = page.handle,
+                .fields = mutation.fields,
+                .visible = mutation.visible,
+                .preferred_order = mutation.preferred_order,
+            };
+            if (changes_title) {
+                runtime_update.title = mutation.title;
+            }
+            if ((mutation.fields & ERUI_TAB_UPDATE_FIELD_ICON) != 0) {
+                runtime_update.icon = mutation.icon;
+            }
+            tab_runtime_updates.push_back(std::move(runtime_update));
+            tab_mutations.push_back(std::move(mutation));
+        }
+
         // The live rebuild matrix deliberately rejected a zero-row logical
         // projection for every page family. Preserve that proven boundary
         // until an explicit zero-row lifecycle probe establishes otherwise.
@@ -3416,6 +3604,7 @@ ERUI_Result Registry::commit_updates(
             erui::detail::lock_row_update_publication();
         erui::detail::PreparedRowVisibilityUpdates prepared_visibility{};
         erui::detail::PreparedSubmenuTitleUpdates prepared_submenu_titles{};
+        erui::detail::PreparedTabRuntimeUpdates prepared_tabs{};
         if (!visibility_updates.empty()) {
             const ERUI_Result prepared =
                 erui::detail::prepare_row_visibility_updates(
@@ -3427,6 +3616,12 @@ ERUI_Result Registry::commit_updates(
                 erui::detail::prepare_submenu_title_updates(
                     std::move(submenu_title_updates),
                     prepared_submenu_titles);
+            if (prepared != ERUI_OK) return prepared;
+        }
+        if (!tab_runtime_updates.empty()) {
+            const ERUI_Result prepared =
+                erui::detail::prepare_tab_runtime_updates(
+                    std::move(tab_runtime_updates), prepared_tabs);
             if (prepared != ERUI_OK) return prepared;
         }
         if (!snapshots.empty()) {
@@ -3442,6 +3637,10 @@ ERUI_Result Registry::commit_updates(
         if (prepared_visibility) {
             erui::detail::commit_prepared_row_visibility_updates(
                 std::move(prepared_visibility));
+        }
+        if (prepared_tabs) {
+            erui::detail::commit_prepared_tab_runtime_updates(
+                std::move(prepared_tabs));
         }
 
         // Publication above is all-or-nothing. The remaining moves are
@@ -3478,8 +3677,35 @@ ERUI_Result Registry::commit_updates(
                 mutation.page->help = std::move(mutation.page_help);
             }
         }
+        for (PendingTabMutation& mutation : tab_mutations) {
+            if ((mutation.fields & ERUI_TAB_UPDATE_FIELD_TITLE) != 0) {
+                mutation.page->title = std::move(mutation.title);
+                mutation.page->page_title = std::move(mutation.page_title);
+            }
+            if ((mutation.fields & ERUI_TAB_UPDATE_FIELD_ICON) != 0) {
+                mutation.page->tab_icon = std::move(mutation.icon);
+            }
+            mutation.page->tab_visible = mutation.visible;
+            mutation.page->preferred_tab_order = mutation.preferred_order;
+        }
         ++generation_;
         if (open_) note_activity_locked();
+        if (!tab_mutations.empty()) {
+            ERUI_TabUpdateFields aggregate_fields{};
+            for (const PendingTabMutation& mutation : tab_mutations) {
+                aggregate_fields |= mutation.fields;
+            }
+            erui::detail::logf(
+                erui::LogLevel::info,
+                "Tab update batch queued: provider=%s handle=%llu targets=%zu fields=0x%08X iconField=%u",
+                provider.id.c_str(),
+                static_cast<unsigned long long>(provider.handle),
+                tab_mutations.size(),
+                static_cast<unsigned>(aggregate_fields),
+                (aggregate_fields & ERUI_TAB_UPDATE_FIELD_ICON) != 0
+                    ? 1U
+                    : 0U);
+        }
         return ERUI_OK;
     } catch (const std::bad_alloc&) {
         return ERUI_OUT_OF_MEMORY;
@@ -3778,9 +4004,10 @@ void Registry::append_page_locked(
     const Page& source,
     erui::Page& destination) {
     if (!erui::detail::valid_builtin_page(source.builtin_page)) {
-        if (source.submenu_opener != ERUI_INVALID_ROW) {
-            destination.identify_page(provider.handle, source.handle);
-        }
+        // Every client-owned compiled page needs its stable public identity.
+        // Submenu children use it for rich submenu updates; custom-tab roots
+        // use the same bridge for tab title updates and runtime projection.
+        destination.identify_page(provider.handle, source.handle);
         destination.set_presentation({
             .menu_title = source.menu_title.empty()
                 ? provider.display_name

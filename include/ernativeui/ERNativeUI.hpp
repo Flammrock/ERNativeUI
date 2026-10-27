@@ -92,6 +92,7 @@ enum class Capability : ERUI_Capabilities {
     row_availability = ERUI_CAP_ROW_AVAILABILITY,
     row_visibility = ERUI_CAP_ROW_VISIBILITY,
     submenu_updates = ERUI_CAP_SUBMENU_UPDATES,
+    tab_updates = ERUI_CAP_TAB_UPDATES,
 };
 
 enum class AvailabilityAppearance : ERUI_AvailabilityAppearance {
@@ -238,6 +239,8 @@ template <typename> class RowEditDraft;
 
 class Submenu;
 class SubmenuEdit;
+class Tab;
+class TabEdit;
 
 class ActionInputs {
 public:
@@ -536,8 +539,8 @@ struct ProviderOptions {
 };
 
 struct TabIconView {
-    // Exact 32x32, tightly packed, row-major RGBA8 pixels. The host copies
-    // the bytes during Menu::add_tab.
+    // Exact 32x32, tightly packed, row-major RGBA8 pixels. Menu::add_tab and
+    // TabEdit::icon each copy the bytes before returning.
     const std::uint8_t* pixels{};
     std::size_t byte_count{};
     TabIconFormat format{TabIconFormat::rgba8};
@@ -1415,7 +1418,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_UPDATES |
                     ERUI_CAP_ROW_AVAILABILITY |
                     ERUI_CAP_ROW_VISIBILITY |
-                    ERUI_CAP_SUBMENU_UPDATES)) == 0;
+                    ERUI_CAP_SUBMENU_UPDATES |
+                    ERUI_CAP_TAB_UPDATES)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -1442,7 +1446,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_UPDATES |
                     ERUI_CAP_ROW_AVAILABILITY |
                     ERUI_CAP_ROW_VISIBILITY |
-                    ERUI_CAP_SUBMENU_UPDATES)) == 0;
+                    ERUI_CAP_SUBMENU_UPDATES |
+                    ERUI_CAP_TAB_UPDATES)) == 0;
     }
     if (version == ERUI_API_VERSION_1_2) {
         return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
@@ -1472,7 +1477,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 &&
-            (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0;
+            (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0 &&
+            (api.capabilities & ERUI_CAP_TAB_UPDATES) == 0;
     }
     if (version == ERUI_API_VERSION_1_3) {
         return api.size == ERUI_API_V1_3_SIZE && api.add_text_input &&
@@ -1501,7 +1507,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 &&
-            (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0;
+            (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0 &&
+            (api.capabilities & ERUI_CAP_TAB_UPDATES) == 0;
     }
     if (version == ERUI_API_VERSION_1_4) {
         return api.size == ERUI_API_V1_4_SIZE && api.add_text_input &&
@@ -1533,7 +1540,10 @@ inline bool api_complete_for_version(
              (api.capabilities & ERUI_CAP_UPDATES) != 0) &&
             ((api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0 ||
              ((api.capabilities & ERUI_CAP_UPDATES) != 0 &&
-              (api.capabilities & ERUI_CAP_SUBMENU) != 0));
+              (api.capabilities & ERUI_CAP_SUBMENU) != 0)) &&
+            ((api.capabilities & ERUI_CAP_TAB_UPDATES) == 0 ||
+             ((api.capabilities & ERUI_CAP_UPDATES) != 0 &&
+              (api.capabilities & ERUI_CAP_CUSTOM_TABS) != 0));
     }
     return false;
 }
@@ -2426,8 +2436,8 @@ private:
 /*
  * One atomic edit of a submenu opener and its child-page text. The draft owns
  * every string and is inert until commit(), matching the ordinary row-edit
- * lifecycle. Availability, visibility, removal, and tab mutation deliberately
- * remain outside this API.
+ * lifecycle. Submenu availability, visibility, and removal deliberately remain
+ * outside this edit surface.
  */
 class SubmenuEdit final {
 public:
@@ -2715,6 +2725,186 @@ private:
     StyledText caption_{};
     std::wstring page_title_{};
     std::wstring page_help_{};
+};
+
+/*
+ * One atomic edit of a registered custom tab. The page and all of its rows
+ * retain their identities; only the selected presentation/placement fields
+ * change. An empty icon view restores ERNativeUI's default triangle icon.
+ * Every supported field, including an icon, can publish atomically in the
+ * active System movie. If that movie closes during an icon handoff, the desired
+ * generation remains queued and is applied automatically after the first
+ * reopen. Icon edits are for infrequent configuration changes rather than
+ * animation because their immutable native image roots are process-retained.
+ */
+class TabEdit final {
+public:
+    TabEdit(const TabEdit&) = delete;
+    TabEdit& operator=(const TabEdit&) = delete;
+    TabEdit(TabEdit&&) noexcept = default;
+    TabEdit& operator=(TabEdit&&) noexcept = default;
+    ~TabEdit() = default;
+
+    TabEdit& title(std::wstring_view value) & noexcept {
+        set_title(value);
+        return *this;
+    }
+    TabEdit&& title(std::wstring_view value) && noexcept {
+        set_title(value);
+        return std::move(*this);
+    }
+
+    TabEdit& icon(TabIconView value) & noexcept {
+        set_icon(value);
+        return *this;
+    }
+    TabEdit&& icon(TabIconView value) && noexcept {
+        set_icon(value);
+        return std::move(*this);
+    }
+
+    TabEdit& default_icon() & noexcept {
+        set_icon({});
+        return *this;
+    }
+    TabEdit&& default_icon() && noexcept {
+        set_icon({});
+        return std::move(*this);
+    }
+
+    TabEdit& visible(bool value) & noexcept {
+        if (!committed_ && error_ == ERUI_OK) {
+            visible_ = value;
+            fields_ |= ERUI_TAB_UPDATE_FIELD_VISIBLE;
+        }
+        return *this;
+    }
+    TabEdit&& visible(bool value) && noexcept {
+        static_cast<TabEdit&>(*this).visible(value);
+        return std::move(*this);
+    }
+
+    TabEdit& preferred_order(std::int32_t value) & noexcept {
+        if (!committed_ && error_ == ERUI_OK) {
+            preferred_order_ = value;
+            fields_ |= ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER;
+        }
+        return *this;
+    }
+    TabEdit&& preferred_order(std::int32_t value) && noexcept {
+        static_cast<TabEdit&>(*this).preferred_order(value);
+        return std::move(*this);
+    }
+
+    [[nodiscard]] ERUI_Result commit() noexcept {
+        if (committed_) return ERUI_ALREADY_COMMITTED;
+        committed_ = true;
+        if (error_ != ERUI_OK) return error_;
+        if (fields_ == 0) return ERUI_INVALID_ARGUMENT;
+        if (page_ == ERUI_INVALID_PAGE || !context_ ||
+            !context_->committed() ||
+            context_->provider == ERUI_INVALID_PROVIDER) {
+            return ERUI_INVALID_HANDLE;
+        }
+        constexpr ERUI_Capabilities required =
+            ERUI_CAP_UPDATES | ERUI_CAP_TAB_UPDATES;
+        if ((context_->api.capabilities & required) != required ||
+            !context_->api.commit_updates) {
+            return ERUI_NOT_SUPPORTED;
+        }
+
+        ERUI_TabIconDesc icon{};
+        ERUI_TabUpdateDesc tab_update{};
+        tab_update.size = sizeof(tab_update);
+        tab_update.page = page_;
+        tab_update.fields = fields_;
+        if ((fields_ & ERUI_TAB_UPDATE_FIELD_TITLE) != 0) {
+            tab_update.title = detail::utf16_view(title_);
+        }
+        if ((fields_ & ERUI_TAB_UPDATE_FIELD_ICON) != 0 &&
+            !icon_pixels_.empty()) {
+            icon.size = sizeof(icon);
+            icon.format = static_cast<ERUI_TabIconFormat>(icon_format_);
+            icon.byte_count = static_cast<std::uint32_t>(
+                icon_pixels_.size());
+            icon.pixels = icon_pixels_.data();
+            tab_update.icon = &icon;
+        }
+        if ((fields_ & ERUI_TAB_UPDATE_FIELD_VISIBLE) != 0) {
+            tab_update.visible = visible_ ? 1u : 0u;
+        }
+        if ((fields_ & ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER) != 0) {
+            tab_update.preferred_order = preferred_order_;
+        }
+
+        ERUI_UpdateDesc update{};
+        update.size = sizeof(update);
+        update.kind = ERUI_UPDATE_KIND_TAB;
+        update.payload = &tab_update;
+
+        ERUI_UpdateBatchDesc batch{};
+        batch.size = sizeof(batch);
+        batch.updates = &update;
+        batch.update_count = 1u;
+        batch.update_stride = sizeof(update);
+        return context_->api.commit_updates(context_->provider, &batch);
+    }
+
+private:
+    friend class Tab;
+
+    TabEdit(
+        std::shared_ptr<detail::RowContext> context,
+        PageHandle page) noexcept
+        : context_(std::move(context)), page_(page) {}
+
+    void set_title(std::wstring_view value) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        if (value.empty() ||
+            value.size() > ERUI_CUSTOM_TAB_TITLE_MAX_CODE_UNITS ||
+            !detail::view_size_fits(value.size())) {
+            error_ = ERUI_INVALID_ARGUMENT;
+            return;
+        }
+        try {
+            title_.assign(value.data(), value.size());
+            fields_ |= ERUI_TAB_UPDATE_FIELD_TITLE;
+        } catch (...) {
+            error_ = ERUI_OUT_OF_MEMORY;
+        }
+    }
+
+    void set_icon(TabIconView value) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        if (!detail::valid_tab_icon(value)) {
+            error_ = ERUI_INVALID_ARGUMENT;
+            return;
+        }
+        try {
+            if (value.pixels) {
+                icon_pixels_.assign(
+                    value.pixels, value.pixels + value.byte_count);
+                icon_format_ = value.format;
+            } else {
+                icon_pixels_.clear();
+                icon_format_ = TabIconFormat::rgba8;
+            }
+            fields_ |= ERUI_TAB_UPDATE_FIELD_ICON;
+        } catch (...) {
+            error_ = ERUI_OUT_OF_MEMORY;
+        }
+    }
+
+    std::shared_ptr<detail::RowContext> context_{};
+    PageHandle page_{ERUI_INVALID_PAGE};
+    ERUI_TabUpdateFields fields_{};
+    ERUI_Result error_{ERUI_OK};
+    bool committed_{};
+    bool visible_{};
+    std::int32_t preferred_order_{};
+    std::wstring title_{};
+    std::vector<std::uint8_t> icon_pixels_{};
+    TabIconFormat icon_format_{TabIconFormat::rgba8};
 };
 
 class ButtonRow;
@@ -3635,6 +3825,7 @@ public:
 private:
     friend class Menu;
     friend class Submenu;
+    friend class Tab;
     Page(std::shared_ptr<detail::Draft> draft,
         ERUI_PageHandle page,
         bool custom_tab = false) noexcept
@@ -3852,6 +4043,45 @@ private:
     std::shared_ptr<detail::RowContext> context_{};
     RowHandle opener_{ERUI_INVALID_ROW};
     PageHandle child_{ERUI_INVALID_PAGE};
+};
+
+/*
+ * A custom tab is also its ordinary page builder. Inheriting Page preserves
+ * existing code that stores the result of Menu::add_tab as Page while auto
+ * receives the richer API 1.4 reference.
+ */
+class Tab final : public Page {
+public:
+    Tab() noexcept = default;
+
+    [[nodiscard]] bool valid() const noexcept {
+        return Page::valid() ||
+            (page_ != ERUI_INVALID_PAGE && context_ &&
+             context_->committed() &&
+             context_->provider != ERUI_INVALID_PROVIDER);
+    }
+    explicit operator bool() const noexcept { return valid(); }
+
+    [[nodiscard]] TabEdit edit() const noexcept {
+        return TabEdit(context_, page_);
+    }
+
+    [[nodiscard]] PageHandle page_handle() const noexcept {
+        return page_;
+    }
+
+private:
+    friend class Menu;
+
+    Tab(
+        std::shared_ptr<detail::Draft> draft,
+        PageHandle page) noexcept
+        : Page(draft, page, true),
+          context_(draft ? draft->row_context_ : nullptr),
+          page_(page) {}
+
+    std::shared_ptr<detail::RowContext> context_{};
+    PageHandle page_{ERUI_INVALID_PAGE};
 };
 
 inline Submenu Page::add_submenu(
@@ -4918,7 +5148,7 @@ public:
         draft_->record(draft_->api_.add_title_screen_text(
             draft_->provider_, &description), L"add_title_screen_text");
     }
-    Page add_tab(const TabOptions& options) noexcept {
+    Tab add_tab(const TabOptions& options) noexcept {
         if (!draft_ || !draft_->open() || draft_->failed_) return {};
         if (!draft_->api_.add_tab ||
             (draft_->api_.capabilities & ERUI_CAP_CUSTOM_TABS) == 0) {
@@ -4961,8 +5191,8 @@ public:
             draft_->record(ERUI_INTERNAL_ERROR, L"add_tab");
         }
         return result == ERUI_OK && page_handle != ERUI_INVALID_PAGE
-            ? Page(draft_, page_handle, true)
-            : Page{};
+            ? Tab(draft_, page_handle)
+            : Tab{};
     }
     Page page(BuiltinPage builtin_page) noexcept {
         if (!draft_ || !draft_->open() || draft_->failed_) return {};

@@ -43,7 +43,7 @@ page like this larger integration showcase.*
 | Order | Control | What the player does | Stored value | API |
 |---:|---|---|---|---|
 | 1 | [Button](button.md) | Confirms one action | None | 1.0 |
-| 2 | [Submenu](submenu.md) | Opens a provider-owned child page | None; returns a `Page` | 1.0 |
+| 2 | [Submenu](submenu.md) | Opens a provider-owned child page | None; returns a `Submenu` child-page builder/reference | 1.0 |
 | 3 | [Toggle](toggle.md) | Chooses off or on | `0` or `1` | 1.0 |
 | 4 | [Slider](slider.md) | Adjusts a bounded integer | `std::uint8_t` | 1.0 |
 | 5 | [Numeric Slider](numeric-slider.md) | Adjusts a signed or decimal sequence | Exact base-10 value and logical index | 1.2 |
@@ -61,9 +61,9 @@ Use a button when the row performs work but does not itself own a setting.
 
 - [Capabilities](../capabilities.md) explains the **Capability requirements**
   section found on every control page and how to check host support.
-- [Enabled controls](options/enabled.md) explains which controls can be disabled, why
-  some remain visible while others are omitted, and why the state is fixed at
-  registration time.
+- [Enabled controls](options/enabled.md) explains the registration-time option,
+  why some construction-disabled rows are omitted, and how API 1.4 runtime
+  availability differs from that initial state.
 
 ## Rules shared by every control
 
@@ -82,8 +82,8 @@ Use a button when the row performs work but does not itself own a setting.
   `SliderRow`, or `TextInputRow`. Retain it only when later runtime getters or
   setters need it. Each typed row exposes `handle()` and converts implicitly
   to the API 1.3 `RowHandle`, preserving existing raw-handle source patterns.
-  `add_submenu` instead returns a child `Page` builder that is valid only
-  during registration.
+  `add_submenu` instead returns a `Submenu`: it is a child `Page` builder during
+  registration and a stable presentation-edit reference after commit.
 - Declare logical rows without assuming how many fit on screen. ERNativeUI
   paginates from the capacity of the live native page.
 

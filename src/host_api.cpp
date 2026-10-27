@@ -699,6 +699,9 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
         if (erui::host::registry().submenu_updates_backend_available()) {
             table.capabilities |= ERUI_CAP_SUBMENU_UPDATES;
         }
+        if (erui::host::registry().tab_updates_backend_available()) {
+            table.capabilities |= ERUI_CAP_TAB_UPDATES;
+        }
         if (erui::host::registry().row_availability_backend_available()) {
             table.capabilities |= ERUI_CAP_ROW_AVAILABILITY;
         }

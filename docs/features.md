@@ -13,7 +13,7 @@ contracts.
 
 | Label | Meaning |
 |---|---|
-| **Current API 1.4 pre-release** | The feature scope is complete for release preparation. It adds typed row references plus runtime text/style, availability, visibility, and repagination updates. The contract is not frozen or published yet. |
+| **Current API 1.4 pre-release** | The feature scope is complete for release preparation. It adds typed row/Submenu/Tab references plus runtime text/style, availability, visibility, repagination, rich Submenu, and custom-tab presentation updates. The contract is not frozen or published yet. |
 | **Latest published API 1.3** | First shipped by ERNativeUI 1.3.0. It adds custom top-level Configuration tabs and title-screen status text. |
 | **Frozen APIs 1.0 through 1.3** | Already-compiled clients remain supported by compatible 1.x hosts. |
 | **Future research** | Not implemented in the public API. Do not design a client around it yet. |
@@ -87,17 +87,20 @@ does not remove custom tabs.
 
 | Feature | What the player sees | Minimum API and capability | GFX presentation | Important limits and examples |
 |---|---|---|---|---|
-| Typed C++ row references | No visual change by itself; retained controls expose only the value and edit operations valid for their row type. | API 1.4 C++ wrapper; value methods retain their original capability requirements. | No. | Ordinary `Page::add_*` builders return typed references that remain implicitly convertible to the frozen raw `RowHandle`. Button has no canonical value; Submenu keeps its existing page-returning API. [Value guide](guides/row-updates/values.md). |
+| Typed C++ references | No visual change by itself; retained rows, Submenus, and custom Tabs expose only operations valid for their type. | API 1.4 C++ wrapper; individual methods retain their capability requirements. | No. | Ordinary `Page::add_*` builders return typed rows implicitly convertible to the frozen raw `RowHandle`; `add_submenu` returns `Submenu`, and `add_tab` returns `Tab`, while both remain page builders. [Value guide](guides/row-updates/values.md). |
 | [Runtime row text and style](guides/row-updates/text-and-styles.md) | Labels, focused help, and supported Button/Popup Choice captions can change after registration, including mixed color and underline. | 1.4; `ERUI_CAP_UPDATES` | Uses validated text fields in the effective native movie; no additional GFX transformation. | Plain text is escaped. Structured text is limited to 4,096 UTF-16 code units and 256 spans. Bold/italic remain dependent on effective font faces. |
 | [Runtime row availability](guides/row-updates/availability.md) | A visible row can be skipped by focus and independently use its normal or disabled presentation. | 1.4; `ERUI_CAP_UPDATES` and `ERUI_CAP_ROW_AVAILABILITY` | No. | Supported for the nine ordinary materialized row families; Submenu and omitted construction-disabled rows are excluded. |
 | [Runtime row visibility and repagination](guides/row-updates/visibility.md) | Rows appear or disappear in place; page slices, navigation rows, titles, focus, and subpage scrollbars are rebuilt without closing the page. | 1.4; `ERUI_CAP_UPDATES` and `ERUI_CAP_ROW_VISIBILITY` | No. | Supported on built-in pages, custom-tab content, and subpages for the nine ordinary materialized row families. A committed projection cannot leave a logical page empty. This does not hide or show the custom tab itself. |
+| [Runtime Submenu text](guides/controls/submenu.md) | A retained opener and its child-page title/help can change together without replacing either page. | 1.4; `ERUI_CAP_UPDATES`, `ERUI_CAP_SUBMENU`, and `ERUI_CAP_SUBMENU_UPDATES` | No. | `SubmenuEdit` atomically supports opener label/help/caption plus child-page title/help. Runtime Submenu availability and visibility remain excluded. |
+| [Runtime custom-tab presentation](guides/custom-tabs.md#edit-a-committed-tab) | A retained top-level tab can change title, icon, visibility, and preferred order—normally live—while preserving its page and rows. | 1.4; `ERUI_CAP_UPDATES`, `ERUI_CAP_CUSTOM_TABS`, and `ERUI_CAP_TAB_UPDATES` | No. | `TabEdit` publishes complete generations atomically, repairs active selection when hidden, respects player order overrides, and carries an interrupted icon handoff into the first reopened System movie. Geometry-incompatible strip changes defer safely; icons are low-frequency changes, not animation frames. |
 
 The API 1.4 C table appends one provider-scoped `commit_updates` operation.
 Its array batch is validated, copied, and published atomically; a failed item
 leaves the previous logical generation intact. The C++ wrapper exposes
-one-row `row.edit()...commit()` drafts. A C++ multi-row collector, recursive
-Collapse controls, runtime custom-tab visibility, and runtime Submenu
-availability/visibility are not part of API 1.4.
+one-target `row.edit()...commit()`, `submenu.edit()...commit()`, and
+`tab.edit()...commit()` drafts. A C++ multi-target collector, recursive
+Collapse controls, and runtime Submenu availability/visibility are not part
+of API 1.4.
 
 ## Runtime GFX completion
 

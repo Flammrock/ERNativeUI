@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdio>
+#include <utility>
 
 namespace {
 
@@ -18,12 +19,39 @@ namespace {
 
 void button_pressed() noexcept {}
 
+void accept_page(erui::Page) noexcept {}
+
+// These statements are intentionally never executed. They keep the source
+// compatibility promised by the richer API 1.4 Tab return type under direct
+// compilation: explicit Page storage, passing a Tab to Page-taking code, and
+// building ordinary inherited rows through Tab all remain valid.
+[[maybe_unused]] void compile_tab_source_compatibility(
+    erui::Menu& menu,
+    const erui::TabOptions& options) noexcept {
+    erui::Page page = menu.add_tab(options);
+    auto tab = menu.add_tab(options);
+    accept_page(tab);
+    (void)tab.add_button<&button_pressed>(
+        L"Inherited row", L"Built directly through Tab");
+    (void)page;
+}
+
 std::wstring observed_text(
     const ERUI_TestTitleScreenTextObservation& observation) {
     std::wstring result;
     result.reserve(observation.text_length);
     for (std::uint32_t index = 0; index < observation.text_length; ++index) {
         result.push_back(static_cast<wchar_t>(observation.text[index]));
+    }
+    return result;
+}
+
+std::wstring observed_tab_title(
+    const ERUI_TestTabUpdateObservation& observation) {
+    std::wstring result;
+    result.reserve(observation.title_length);
+    for (std::uint32_t index = 0; index < observation.title_length; ++index) {
+        result.push_back(static_cast<wchar_t>(observation.title[index]));
     }
     return result;
 }
@@ -45,6 +73,10 @@ int main(int argc, char** argv) {
         reinterpret_cast<ERUI_TestGetTitleScreenTextObservationFn>(
             GetProcAddress(
                 host.module, "ERUI_TestGetTitleScreenTextObservation"));
+    const auto get_tab_update_observation =
+        reinterpret_cast<ERUI_TestGetTabUpdateObservationFn>(
+            GetProcAddress(
+                host.module, "ERUI_TestGetTabUpdateObservation"));
 
     std::array<std::uint8_t, ERUI_TAB_ICON_RGBA8_BYTE_COUNT> pixels{};
     for (std::size_t offset = 3; offset < pixels.size(); offset += 4) {
@@ -55,6 +87,7 @@ int main(int argc, char** argv) {
     provider.display_name = L"Current custom-tabs C++ wrapper";
     provider.owner_module = GetModuleHandleW(nullptr);
     erui::RowHandle row{ERUI_INVALID_ROW};
+    erui::Tab editable_tab{};
     const auto result = connected.value().register_menu(
         provider,
         [&](erui::Menu& menu) noexcept {
@@ -72,9 +105,12 @@ int main(int argc, char** argv) {
             tab.title = L"Settings";
             tab.preferred_order = 25;
             tab.icon = {pixels.data(), pixels.size()};
-            erui::Page page = menu.add_tab(tab);
-            row = page.add_button<&button_pressed>(
+            editable_tab = menu.add_tab(tab);
+            erui::Page page = editable_tab;
+            accept_page(editable_tab);
+            row = editable_tab.add_button<&button_pressed>(
                 L"Apply", L"Ordinary rows work on custom-tab pages");
+            (void)page;
 
             pixels[3] = 0u;
             pixels[7] = 127u;
@@ -95,7 +131,92 @@ int main(int argc, char** argv) {
     CHECK(result.success());
     CHECK(result.value().supports(erui::Capability::custom_tabs));
     CHECK(result.value().supports(erui::Capability::title_screen_text));
+    CHECK(result.value().supports(erui::Capability::tab_updates));
     CHECK(row != ERUI_INVALID_ROW);
+    CHECK(editable_tab.valid());
+    CHECK(editable_tab.page_handle() != ERUI_INVALID_PAGE);
+
+    erui::Tab invalid_tab{};
+    CHECK(!invalid_tab.valid());
+    CHECK(invalid_tab.edit().title(L"Invalid").commit() ==
+        ERUI_INVALID_HANDLE);
+
+    // The edit draft owns its icon snapshot. Mutating the source after icon()
+    // must not affect the bytes submitted by commit().
+    const auto expected_runtime_pixels = pixels;
+    auto tab_edit = editable_tab.edit()
+        .title(L"Runtime Settings")
+        .icon({pixels.data(), pixels.size()})
+        .visible(true)
+        .preferred_order(-50);
+    pixels.fill(0u);
+    CHECK(tab_edit.commit() == ERUI_OK);
+    CHECK(tab_edit.commit() == ERUI_ALREADY_COMMITTED);
+    CHECK(editable_tab.edit().default_icon().commit() == ERUI_OK);
+    CHECK(editable_tab.edit().title(L"").commit() ==
+        ERUI_INVALID_ARGUMENT);
+    CHECK(editable_tab.edit().commit() == ERUI_INVALID_ARGUMENT);
+
+    erui::TabIconView invalid_runtime_icon{};
+    invalid_runtime_icon.pixels = pixels.data();
+    invalid_runtime_icon.byte_count = pixels.size() - 1u;
+    CHECK(editable_tab.edit().icon(invalid_runtime_icon).commit() ==
+        ERUI_INVALID_ARGUMENT);
+
+    if (get_tab_update_observation) {
+        ERUI_TestTabUpdateObservation observed{};
+        observed.size = sizeof(observed);
+        CHECK(get_tab_update_observation(0, &observed) == ERUI_OK);
+        CHECK(observed.descriptor_size == sizeof(ERUI_TabUpdateDesc));
+        CHECK(observed.page == editable_tab.page_handle());
+        CHECK(observed.fields ==
+            (ERUI_TAB_UPDATE_FIELD_TITLE |
+                ERUI_TAB_UPDATE_FIELD_ICON |
+                ERUI_TAB_UPDATE_FIELD_VISIBLE |
+                ERUI_TAB_UPDATE_FIELD_PREFERRED_ORDER));
+        CHECK(observed.visible == 1u);
+        CHECK(observed.preferred_order == -50);
+        CHECK(observed_tab_title(observed) == L"Runtime Settings");
+        CHECK(observed.icon_present == 1u);
+        CHECK(observed.icon_descriptor_size == sizeof(ERUI_TabIconDesc));
+        CHECK(observed.icon_format == ERUI_TAB_ICON_FORMAT_RGBA8);
+        CHECK(observed.icon_byte_count == ERUI_TAB_ICON_RGBA8_BYTE_COUNT);
+        for (std::size_t index = 0;
+             index < expected_runtime_pixels.size();
+             ++index) {
+            CHECK(observed.icon_pixels[index] ==
+                expected_runtime_pixels[index]);
+        }
+        CHECK(observed.reserved[0] == 0u);
+        CHECK(observed.reserved[1] == 0u);
+
+        observed = {};
+        observed.size = sizeof(observed);
+        CHECK(get_tab_update_observation(1, &observed) == ERUI_OK);
+        CHECK(observed.descriptor_size == sizeof(ERUI_TabUpdateDesc));
+        CHECK(observed.page == editable_tab.page_handle());
+        CHECK(observed.fields == ERUI_TAB_UPDATE_FIELD_ICON);
+        CHECK(observed.visible == 0u);
+        CHECK(observed.preferred_order == 0);
+        CHECK(observed.title_length == 0u);
+        for (const auto unit : observed.title) CHECK(unit == 0u);
+        CHECK(observed.icon_present == 0u);
+        CHECK(observed.icon_descriptor_size == 0u);
+        CHECK(observed.icon_format == 0u);
+        CHECK(observed.icon_byte_count == 0u);
+        for (const auto byte : observed.icon_pixels) CHECK(byte == 0u);
+        CHECK(observed.reserved[0] == 0u);
+        CHECK(observed.reserved[1] == 0u);
+
+        observed = {};
+        observed.size = sizeof(observed);
+        CHECK(get_tab_update_observation(2, &observed) == ERUI_NOT_FOUND);
+    }
+
+    auto moved_from_edit = editable_tab.edit().visible(true);
+    auto moved_edit = std::move(moved_from_edit);
+    CHECK(moved_from_edit.commit() == ERUI_INVALID_HANDLE);
+    CHECK(moved_edit.commit() == ERUI_OK);
 
     // The explicit connection fixture exposes a test-only descriptor capture
     // seam.  The production host deliberately does not export it; the shared

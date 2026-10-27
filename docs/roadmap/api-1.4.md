@@ -1,4 +1,4 @@
-# ERUI API 1.4 release roadmap: runtime row updates
+# ERUI API 1.4 release roadmap: runtime UI updates
 
 > **Status: feature-complete, pre-freeze release preparation.** The API 1.4
 > feature scope is complete, but the public contract has not been frozen or
@@ -6,18 +6,21 @@
 > freeze, migration and release documentation, packaging, and the protected
 > release process.
 
-API 1.4 gives a client mod safe runtime control over rows it registered. It
-adds typed C++ row references, one atomic provider-scoped C update operation,
-one-row C++ edit drafts, styled text, runtime availability, explicit row
-visibility, and live repagination.
+API 1.4 gives a client mod safe runtime control over UI it registered. It adds
+typed C++ row, Submenu, and custom-tab references; one atomic provider-scoped C
+update operation; one-target C++ edit drafts; styled text; runtime availability;
+explicit row visibility and live repagination; rich Submenu text edits; and
+custom-tab presentation edits.
 
-Recursive Collapse controls, headless Groups, and mutation of a custom tab
-itself are deliberately outside this release. Rows inside an API 1.3 custom
-tab still receive the same API 1.4 update behavior as rows on supported
-built-in pages and subpages.
+Recursive Collapse controls and headless Groups remain outside this release.
+Rows inside an API 1.3 custom tab receive the same API 1.4 update behavior as
+rows on supported built-in pages and subpages, while API 1.4 can also retain
+and edit the custom tab itself.
 
-The task-oriented [row-update guides](../guides/row-updates/README.md) describe
-normal use. The public C and C++ headers remain the normative contract.
+The task-oriented [row-update guides](../guides/row-updates/README.md),
+[Submenu guide](../guides/controls/submenu.md), and
+[custom-tab guide](../guides/custom-tabs.md) describe normal use. The public C
+and C++ headers remain the normative contract.
 
 ## API 1.4 feature scope
 
@@ -29,6 +32,8 @@ normal use. The public C and C++ headers remain the normative contract.
 | Runtime text | Label, focused help, and supported Button/Popup Choice captions using plain or structured text | Complete |
 | Runtime availability | Independent interaction and `AvailabilityAppearance` for the nine validated ordinary row families | Complete |
 | Runtime visibility | Explicit `.visible(bool)` with in-place reconstruction, focus repair, pagination, titles, navigation rows, and subpage scrollbar reconciliation | Complete |
+| Rich Submenu editing | Retained `Submenu`, atomic opener label/help/caption and child-page title/help edits | Complete |
+| Rich custom-tab editing | Retained `Tab`, atomic title/icon/visibility/preferred-order edits, active-tab fallback, and fast-reopen icon recovery | Complete |
 
 ### Typed row references and values
 
@@ -50,15 +55,18 @@ RowHandle raw = difficulty;                   // Source-compatible conversion
 Typed value methods expose only operations valid for that control family.
 They forward to the same canonical host-owned values introduced in earlier
 APIs. A raw handle cannot silently reconstruct a typed row because it lacks
-the owning provider and negotiated API context. `Page::add_submenu` retains
-its existing page-returning contract.
+the owning provider and negotiated API context. `Page::add_submenu` now returns
+a `Submenu` that remains a child-page builder, and `Menu::add_tab` returns a
+`Tab` that remains an ordinary page builder; both retain stable edit identity.
 
-### Atomic row edits
+### Atomic target edits
 
 The strict-C table appends `commit_updates`. One call validates and copies an
-entire `ERUI_UpdateBatchDesc` before publication. Every row must belong to the
-submitting provider, a row may occur only once in a batch, and any invalid
-item rejects the complete batch without changing the published generation.
+entire `ERUI_UpdateBatchDesc` before publication. Every row or page target must
+belong to the submitting provider, duplicate targets are rejected, and any
+invalid item rejects the complete batch without changing the published
+generation. Tab batches may contain several distinct tabs but do not mix tab
+items with row or Submenu items.
 
 The C++ wrapper builds a move-only, one-shot draft from the typed row:
 
@@ -76,9 +84,9 @@ boundary. It is safe to commit from an ERNativeUI callback; the callback
 finishes against the generation with which it started, without recursive
 native reconstruction.
 
-The C operation can atomically submit several rows. API 1.4's C++ convenience
-surface intentionally commits one row draft at a time; it does not include a
-`registration.updates()` multi-row collector.
+The C operation can atomically submit several compatible targets. API 1.4's
+C++ convenience surface intentionally commits one row, Submenu, or Tab draft
+at a time; it does not include a `registration.updates()` collector.
 
 ### Text and structured presentation
 
@@ -126,9 +134,45 @@ The complete lifecycle is live-validated on:
 - the content page of an API 1.3 custom tab; and
 - a provider subpage.
 
-This does not add runtime show/hide for the custom tab itself.
+Custom-tab visibility is a separate `TabEdit` field and does not participate
+in row repagination.
 
 See [Show or hide rows](../guides/row-updates/visibility.md).
+
+### Rich Submenu edits
+
+`Page::add_submenu` returns a `Submenu` that is both the registration-time
+child-page builder and the stable reference to its opener/page pair. Its
+move-only `SubmenuEdit` atomically changes opener label, help, caption,
+child-page title, and child-page help. Omitted fields retain their latest
+values, structured text is admitted for the three opener fields, and an open
+child page refreshes without replacing its rows or navigation identity.
+
+Submenu availability and visibility remain excluded because those operations
+affect the page stack and reachability rather than one ordinary materialized
+row.
+
+See [Submenu](../guides/controls/submenu.md#edit-a-committed-submenu).
+
+### Rich custom-tab edits
+
+`Menu::add_tab` returns a `Tab` that is both the registration-time page builder
+and a stable runtime reference. `TabEdit` atomically changes title, exact 32x32
+RGBA8 icon (or the shared default triangle), visibility, and preferred order.
+The registered page, rows, values, and provider/tab identity remain unchanged.
+Player `TabOrder` overrides remain authoritative over the preferred-order hint.
+
+Admitted fields normally publish live in an open System movie. Icon generations
+use a complete immutable resource bank and an atomic host/property-ledger
+handoff, so no stock fallback or partially updated frame is exposed. If System
+closes during that handoff, the desired revision remains queued and is adopted
+in the first reopened movie without a second reopen. A strip change that cannot
+preserve the current physical geometry is deferred to the next movie rather
+than risking an unsafe live rebuild. Hiding the active tab repairs selection
+deterministically. Icon edits are low-frequency state changes rather than an
+animation API because native image roots are retained for process safety.
+
+See [Custom Configuration tabs](../guides/custom-tabs.md#edit-a-committed-tab).
 
 ## Compatibility contract
 
@@ -137,7 +181,8 @@ See [Show or hide rows](../guides/row-updates/visibility.md).
 - Already-compiled earlier clients continue requesting their exact frozen
   table. There is no silent API upgrade or downgrade.
 - API 1.4 descriptors use exact sizes, explicit field-presence bits, zeroed
-  reserved fields, copied strings, and provider ownership validation.
+  reserved fields, copied strings/icon bytes, and provider ownership
+  validation.
 - Clients test capability bits rather than inferring native support from the
   API number alone. Unsupported game builds fail closed.
 - Row references, edit drafts, and public descriptors never expose game
@@ -155,6 +200,8 @@ See [Show or hide rows](../guides/row-updates/visibility.md).
 | Text and style | Escaping/span tests plus live callback updates, focus changes, tab changes, native editor transitions, and repeated System close/reopen |
 | Availability | Live nine-family matrix covering focus skipping, activation blocking, native dim/restore behavior, authored-color restoration, callback self-disable, mouse/controller navigation, tab changes, and reopen cycles |
 | Visibility and pagination | Repeated full/compact/minimal projections on a built-in page, custom-tab content, and a subpage, including navigation-row removal, focus restoration, no transition/flash, and exact scrollbar reconciliation |
+| Rich Submenu editing | Atomic A/B generations for opener and child-page text, nested retained Submenus, pagination titles, active child-page refresh, callbacks, tab changes, and reopen cycles |
+| Rich custom-tab editing | Live title/order/visibility/icon generations, active-tab fallback, overflow navigation, exact immutable-resource accounting, rapid close/reopen recovery, and repeated controller/mouse selection |
 | Legacy behavior | API 1.3 examples and custom-tab stress paths rebuilt and live-regressed against the development host before the 1.4-only surfaces were added |
 
 ## Deliberately deferred beyond API 1.4
@@ -162,7 +209,6 @@ See [Show or hide rows](../guides/row-updates/visibility.md).
 | Idea | Why it is not in 1.4 |
 |---|---|
 | Headless conditional Groups and recursive Collapse controls | They require a new ownership tree, nested-state rules, header presentation, and additional focus semantics. Explicit row visibility already provides the proven primitive without freezing that larger design. |
-| Runtime custom-tab mutation, including show/hide | The tab catalogue, active-tab fallback, shifting viewport, mouse/controller selection, icon lifetime, and reopen behavior require their own lifecycle proof. Existing API 1.3 tab registration is unchanged. |
 | C++ multi-row update collector | The atomic C batch is available, while the ergonomic ownership and duplicate-target policy for a fluent C++ collector can be designed independently later. |
 | Arbitrary whole-row presentation color | Structured text colors are supported. Replacing every native selected, focused, and disabled timeline color needs a separate semantic design. |
 | Runtime Submenu availability or visibility | Submenu mutation affects the page stack and controller lifetime, unlike an ordinary row. It remains rejected by the 1.4 runtime availability and visibility operations. |
@@ -197,12 +243,14 @@ to:
 | R2 — atomic row edits | API 1.4 C table, immutable update generations, validation, callback safety, and one-row C++ drafts completed |
 | R3 — presentation and availability | Runtime text, structured styles, captions, interaction, and independent availability appearance completed |
 | R4 — visibility and pagination | Explicit row visibility and in-place native reconstruction completed across all three target page surfaces |
-| R5 — stable publication | Current: fixtures, migration/What's New documentation, final validation, packaging, and protected release |
+| R5 — rich container edits | Retained Submenu and Tab references, live atomic presentation updates, exact icon handoff, and fast-reopen recovery completed |
+| R6 — stable publication | Current: fixtures, migration/What's New documentation, final validation, packaging, and protected release |
 
 ## Progress log
 
 | Date | Change | Evidence or build |
 |---|---|---|
+| 2026-10-27 | Expanded the pre-freeze scope with rich Submenu and custom-tab editing after completing their additional lifecycle proof. | Live opener/page text generations plus tab title/order/visibility/icon updates, rapid close/reopen icon recovery, and Release/Debug full suites |
 | 2026-10-26 | Closed the API 1.4 feature scope. Promoted the proven subpage scrollbar reconciliation into production, finalized the row-update guides and screenshot scenes, and deferred Collapse/custom-tab mutation beyond 1.4. | Repeated live full/compact/minimal rebuilds on built-in, custom-tab, and subpage surfaces; no page transition, flash, duplicate/missing row, stale focus, stale title, or stale scrollbar |
 | 2026-10-25 | Completed explicit row visibility, dynamic repagination, and runtime availability for the nine admitted row families. | Atomic registry/state tests and live controller/mouse matrices across repeated updates, tab changes, and System reopen cycles |
 | 2026-10-24 | Completed typed captions and independent interaction/availability appearance. | ABI/layout, stable-buffer, native mapping, focus relocation, reconstruction, and callback self-disable tests |

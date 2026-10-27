@@ -32,6 +32,73 @@ erui::Submenu g_rich_submenu{};
 erui::Submenu g_nested_rich_submenu{};
 std::atomic<std::uint8_t> g_rich_submenu_variant{0};
 std::atomic<std::uint8_t> g_nested_rich_submenu_variant{0};
+erui::Tab g_rich_tab_alpha{};
+erui::Tab g_rich_tab_target{};
+erui::Tab g_rich_tab_omega{};
+
+using TabIconPixels =
+    std::array<std::uint8_t, ERUI_TAB_ICON_RGBA8_BYTE_COUNT>;
+
+// Keep every live-edit icon in static client-owned storage. TabEdit copies the
+// complete image into its draft, but distinct permanent sources make this
+// example's ownership and expected pixels especially easy to inspect.
+[[nodiscard]] constexpr TabIconPixels make_rich_tab_icon(
+    std::uint8_t red,
+    std::uint8_t green,
+    std::uint8_t blue,
+    std::uint8_t shape) noexcept {
+    TabIconPixels pixels{};
+    for (std::size_t y = 0; y < ERUI_TAB_ICON_HEIGHT; ++y) {
+        for (std::size_t x = 0; x < ERUI_TAB_ICON_WIDTH; ++x) {
+            const int dx = static_cast<int>(x * 2u + 1u) - 32;
+            const int dy = static_cast<int>(y * 2u + 1u) - 32;
+            const int ax = dx < 0 ? -dx : dx;
+            const int ay = dy < 0 ? -dy : dy;
+            bool inside{};
+            bool boundary{};
+            if (shape == 0u) {
+                const int distance = ax + ay;
+                inside = distance <= 24;
+                boundary = distance >= 21;
+            } else if (shape == 1u) {
+                inside = (ax <= 5 && ay <= 23) ||
+                    (ay <= 5 && ax <= 23);
+                boundary = ax >= 3 || ay >= 3;
+            } else {
+                const int outer = ax > ay ? ax : ay;
+                const int inner = ax < ay ? ax : ay;
+                inside = outer <= 23 && outer >= 15 && inner <= 19;
+                boundary = outer >= 21 || outer <= 16;
+            }
+            if (!inside) continue;
+
+            const std::size_t offset =
+                (y * ERUI_TAB_ICON_WIDTH + x) * 4u;
+            pixels[offset + 0u] = red;
+            pixels[offset + 1u] = green;
+            pixels[offset + 2u] = blue;
+            pixels[offset + 3u] = boundary ? 176u : 255u;
+        }
+    }
+    return pixels;
+}
+
+inline constexpr TabIconPixels kRichTabAlphaIcon =
+    make_rich_tab_icon(224u, 96u, 96u, 0u);
+inline constexpr TabIconPixels kRichTabTargetGoldIcon =
+    make_rich_tab_icon(218u, 185u, 98u, 1u);
+inline constexpr TabIconPixels kRichTabTargetGreenIcon =
+    make_rich_tab_icon(96u, 220u, 128u, 1u);
+inline constexpr TabIconPixels kRichTabOmegaIcon =
+    make_rich_tab_icon(96u, 180u, 255u, 2u);
+
+[[nodiscard]] constexpr erui::TabIconView tab_icon_view(
+    const TabIconPixels& pixels) noexcept {
+    return {
+        pixels.data(),
+        pixels.size(),
+        erui::TabIconFormat::rgba8};
+}
 
 struct LabelHelpRows {
     erui::ButtonRow button{};
@@ -765,6 +832,76 @@ const wchar_t* result_name(ERUI_Result result) noexcept {
     }
 }
 
+void log_rich_tab_edit(
+    const wchar_t* operation,
+    ERUI_Result result) noexcept {
+    wchar_t message[192]{};
+    _snwprintf_s(
+        message,
+        std::size(message),
+        _TRUNCATE,
+        L"Rich Tab %ls: %ls.",
+        operation,
+        result_name(result));
+    debug(message);
+}
+
+ERUI_Result commit_rich_tab_variant_a() noexcept {
+    return g_rich_tab_target.edit()
+        .title(L"Rich Target A")
+        .icon(tab_icon_view(kRichTabTargetGoldIcon))
+        .visible(true)
+        .preferred_order(610)
+        .commit();
+}
+
+ERUI_Result commit_rich_tab_variant_b() noexcept {
+    return g_rich_tab_target.edit()
+        .title(L"Rich Target B")
+        .icon(tab_icon_view(kRichTabTargetGreenIcon))
+        .visible(true)
+        .preferred_order(590)
+        .commit();
+}
+
+void rich_tab_apply_variant_a() noexcept {
+    log_rich_tab_edit(L"apply Variant A", commit_rich_tab_variant_a());
+}
+
+void rich_tab_apply_variant_b() noexcept {
+    log_rich_tab_edit(L"apply Variant B", commit_rich_tab_variant_b());
+}
+
+void rich_tab_rename_live() noexcept {
+    log_rich_tab_edit(
+        L"rename live",
+        g_rich_tab_target.edit().title(L"Rich Target Live").commit());
+}
+
+void rich_tab_move_after_omega() noexcept {
+    log_rich_tab_edit(
+        L"move after Omega",
+        g_rich_tab_target.edit().preferred_order(630).commit());
+}
+
+void rich_tab_restore_default_icon() noexcept {
+    log_rich_tab_edit(
+        L"restore default icon",
+        g_rich_tab_target.edit().default_icon().commit());
+}
+
+void rich_tab_hide_target() noexcept {
+    log_rich_tab_edit(
+        L"hide target",
+        g_rich_tab_target.edit().visible(false).commit());
+}
+
+void rich_tab_show_target() noexcept {
+    log_rich_tab_edit(
+        L"show target",
+        g_rich_tab_target.edit().visible(true).commit());
+}
+
 void color_picker_changed(
     ColorPickerState& state,
     const erui::ColorPickerChange& change) noexcept {
@@ -1260,6 +1397,87 @@ DWORD WINAPI initialize(void*) noexcept {
             slider,
             &intensity_changed,
             &g_intensity);
+
+        if (menu.supports(erui::Capability::custom_tabs) &&
+            menu.supports(erui::Capability::tab_updates)) {
+            // These three stable registrations deliberately keep their
+            // provider/tab identities while the middle tab changes title,
+            // icon, visibility, and preferred order at runtime.
+            erui::TabOptions alpha{};
+            alpha.tab_id = "rich-tab-alpha";
+            alpha.title = L"Rich Alpha";
+            alpha.preferred_order = 600;
+            alpha.icon = tab_icon_view(kRichTabAlphaIcon);
+            g_rich_tab_alpha = menu.add_tab(alpha);
+            g_rich_tab_alpha.add_button<&show_native_alert>(
+                L"Alpha sentinel",
+                L"This stable neighbor proves the edited tab can move and disappear safely.");
+
+            erui::TabOptions target{};
+            target.tab_id = "rich-tab-target";
+            target.title = L"Rich Target A";
+            target.preferred_order = 610;
+            target.icon = tab_icon_view(kRichTabTargetGoldIcon);
+            g_rich_tab_target = menu.add_tab(target);
+            g_rich_tab_target.add_button<&rich_tab_apply_variant_a>(
+                L"Apply active Variant A",
+                L"Publishes complete Variant A live, including its gold icon.");
+            g_rich_tab_target.add_button<&rich_tab_apply_variant_b>(
+                L"Apply active Variant B",
+                L"Publishes complete Variant B live, including its green icon.");
+            g_rich_tab_target.add_button<&rich_tab_rename_live>(
+                L"Rename this active tab live",
+                L"Changes only the selector and page title while this tab remains open.");
+            g_rich_tab_target.add_button<&rich_tab_move_after_omega>(
+                L"Move this tab after Omega",
+                L"Reorders the active selector while preserving this page and its focus.");
+            g_rich_tab_target.add_button<&rich_tab_restore_default_icon>(
+                L"Use default triangle icon",
+                L"Replaces the current custom icon with ERNativeUI's shared default icon.");
+            g_rich_tab_target.add_button<&rich_tab_hide_target>(
+                L"Hide this active tab",
+                L"Removes this selector and transfers focus to a deterministic surviving tab.");
+            g_rich_tab_target.add_button<&show_native_alert>(
+                L"Target sentinel",
+                L"This row and its value state must survive every tab edit.");
+
+            erui::TabOptions omega{};
+            omega.tab_id = "rich-tab-omega";
+            omega.title = L"Rich Omega";
+            omega.preferred_order = 620;
+            omega.icon = tab_icon_view(kRichTabOmegaIcon);
+            g_rich_tab_omega = menu.add_tab(omega);
+            g_rich_tab_omega.add_button<&show_native_alert>(
+                L"Omega sentinel",
+                L"This stable neighbor proves active-tab fallback and reordering.");
+
+            auto controller = root.add_submenu(
+                L"Rich Tab Updates",
+                L"Controls the retained Rich Target tab, including after it hides itself.",
+                L"Rich Tab Updates",
+                L"Every action commits immediately; no separate refresh is required.");
+            controller.add_button<&rich_tab_apply_variant_a>(
+                L"Apply Variant A",
+                L"Publishes complete Variant A live, including its gold icon.");
+            controller.add_button<&rich_tab_apply_variant_b>(
+                L"Apply Variant B",
+                L"Publishes complete Variant B live, including its green icon.");
+            controller.add_button<&rich_tab_rename_live>(
+                L"Rename target live",
+                L"Changes only the retained target tab's title.");
+            controller.add_button<&rich_tab_move_after_omega>(
+                L"Move target after Omega",
+                L"Changes only preferred order and retains the current title and icon.");
+            controller.add_button<&rich_tab_restore_default_icon>(
+                L"Use default triangle icon",
+                L"Changes only the target icon; title, visibility, and order remain unchanged.");
+            controller.add_button<&rich_tab_hide_target>(
+                L"Hide target tab",
+                L"The registered page and rows remain alive while its selector is absent.");
+            controller.add_button<&rich_tab_show_target>(
+                L"Show target tab",
+                L"Restores the target with its latest title, icon, order, and row state.");
+        }
 
         if (menu.supports(erui::Capability::row_visibility)) {
             // The same no-refresh visibility matrix runs on all three native

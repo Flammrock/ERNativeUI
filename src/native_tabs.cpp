@@ -15,6 +15,8 @@
 #include "native_tabs.hpp"
 #include "runtime_log.hpp"
 #include "runtime_state.hpp"
+#include "row_update_state.hpp"
+#include "tab_update_state.hpp"
 #endif
 
 #include <Windows.h>
@@ -527,6 +529,10 @@ constexpr bool is_research_custom_category(std::int32_t category) noexcept {
 extern const erui::detail::NativeTabCatalogue* g_native_tab_catalogue;
 extern std::unique_ptr<erui::detail::NativeTabRuntimeState>
     g_native_tab_runtime;
+extern std::shared_ptr<const erui::detail::TabRuntimeGeneration>
+    g_tab_projection_generation;
+extern thread_local const erui::detail::TabRuntimeGeneration*
+    g_rgba8_staging_generation;
 #endif
 [[nodiscard]] std::size_t active_custom_tab_count() noexcept {
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
@@ -535,7 +541,11 @@ extern std::unique_ptr<erui::detail::NativeTabRuntimeState>
     return kCustomTabCount;
 #endif
 }
+[[nodiscard]] std::size_t active_visible_custom_tab_count() noexcept;
 [[nodiscard]] std::size_t active_logical_tab_count() noexcept {
+    return kStockLogicalTabCount + active_visible_custom_tab_count();
+}
+[[nodiscard]] std::size_t resource_logical_tab_count() noexcept {
     return kStockLogicalTabCount + active_custom_tab_count();
 }
 
@@ -726,6 +736,9 @@ using SelectorSelectFn = bool(__fastcall*)(
     void* selector,
     std::uint32_t physical_index,
     std::uint8_t suppress_selection_callbacks);
+using SelectorSetActiveCountFn = void(__fastcall*)(
+    void* selector,
+    std::int32_t active_count);
 struct PointerPosition {
     float x{};
     float y{};
@@ -874,15 +887,18 @@ struct Rgba8Pixel {
     std::uint32_t x,
     std::uint32_t y) noexcept {
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
-    if (!g_native_tab_catalogue || icon >= active_custom_tab_count() ||
+    const erui::detail::TabRuntimeGeneration* const generation =
+        g_rgba8_staging_generation
+        ? g_rgba8_staging_generation
+        : g_tab_projection_generation.get();
+    if (!generation || icon >= active_custom_tab_count() ||
         x >= ERUI_TAB_ICON_WIDTH || y >= ERUI_TAB_ICON_HEIGHT) {
         return {0xFFU, 0x00U, 0xFFU, 0xFFU};
     }
-    const auto custom = g_native_tab_catalogue->custom_entries();
-    if (icon >= custom.size()) {
+    if (icon >= generation->entries.size()) {
         return {0xFFU, 0x00U, 0xFFU, 0xFFU};
     }
-    const auto& specification = custom[icon].icon;
+    const auto& specification = generation->entries[icon].icon;
     const std::uint8_t* pixels{};
     if (specification.source == erui::TabIconSource::fallback) {
         if (!specification.rgba8_pixels.empty()) {
@@ -1033,9 +1049,13 @@ struct Rgba8Pixel {
 [[nodiscard]] bool catalogue_icon_requires_raster(
     std::size_t icon) noexcept {
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
-    const erui::detail::NativeTabRuntimeEntry* const entry =
-        g_native_tab_runtime ? g_native_tab_runtime->tab(icon) : nullptr;
-    return entry && entry->icon().raster_requested;
+    const erui::detail::TabRuntimeGeneration* const generation =
+        g_rgba8_staging_generation
+        ? g_rgba8_staging_generation
+        : g_tab_projection_generation.get();
+    return generation && icon < generation->entries.size() &&
+        erui::native::custom_tab_icon_requests_raster(
+            generation->entries[icon].icon.source);
 #else
     return icon < kCustomTabCount;
 #endif
@@ -1193,6 +1213,7 @@ struct RepaintContext {
 
 struct PendingAliasedIcon {
     void* resource{};
+    void* image{};
     VectorIconKind kind{VectorIconKind::none};
     RepaintContext context{};
     bool direct_rgba8{};
@@ -1205,6 +1226,14 @@ struct PendingAliasedIcon {
 
 struct LogicalTab {
     std::array<wchar_t, kTitleCapacity> title{};
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    // Projection changes repaint a complete inactive icon/title mapping
+    // before retiring the visible Shape bank. Keep a second process-owned
+    // title buffer so a mixed title+order transaction never has to mutate the
+    // string still borrowed by the source native records.
+    std::array<wchar_t, kTitleCapacity> alternate_title{};
+    bool alternate_title_active{};
+#endif
     std::int32_t category{-1};
     std::array<std::byte, kPresentationSize> presentation{};
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
@@ -1352,6 +1381,8 @@ struct Rgba8ReplacementPlan {
     TabHostMask audit_mask{};
     std::array<std::size_t, kTabHostCapacity> source_assets{};
     std::array<std::size_t, kTabHostCapacity> target_assets{};
+    std::array<void*, kTabHostCapacity> source_resources{};
+    std::array<void*, kTabHostCapacity> target_resources{};
 };
 
 struct InjectedHostLayout {
@@ -1359,6 +1390,7 @@ struct InjectedHostLayout {
     TabHostMask rgba_mask{};
     TabHostMask vector_mask{};
     std::array<std::size_t, kTabHostCapacity> assets{};
+    std::array<void*, kTabHostCapacity> resources{};
 };
 
 using PendingTransitionCommitResult = TabTransitionCommitResult;
@@ -1383,6 +1415,17 @@ struct PendingTransition {
     std::int32_t desired_category{-1};
     std::uint64_t pointer_dwell_ticket{};
     std::uint64_t requested_qpc{};
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    // A projection refresh changes stable-custom -> visible-logical mapping
+    // without changing any immutable icon resource. The source generation
+    // remains globally authoritative until the inactive target Shape bank is
+    // complete and the old bank has retired.
+    bool projection_refresh{};
+    bool icon_resource_refresh{};
+    bool projection_selected_hidden{};
+    std::shared_ptr<const erui::detail::TabRuntimeGeneration>
+        projection_generation{};
+#endif
 };
 
 struct PointerDwellNaturalIntent {
@@ -1481,6 +1524,7 @@ struct RuntimeState {
     std::uint64_t presentation_epoch{};
     std::uint64_t completed_shape_replacement_transitions{};
     bool destructive_transition_failed{};
+    bool frozen_projection_retained_target{};
 };
 
 struct InjectedMovieFingerprint {
@@ -1527,6 +1571,8 @@ struct InPlaceRgba8RebindTransaction {
     TabHostMask preserved_host_mask{};
     std::array<std::size_t, kTabHostCapacity> source_assets{};
     std::array<std::size_t, kTabHostCapacity> target_assets{};
+    std::array<void*, kTabHostCapacity> source_resources{};
+    std::array<void*, kTabHostCapacity> target_resources{};
 };
 
 struct PointerCellSampleTrace {
@@ -1627,6 +1673,25 @@ RuntimeState g_runtime{};
 const erui::detail::NativeTabCatalogue* g_native_tab_catalogue{};
 std::unique_ptr<erui::detail::NativeTabRuntimeState> g_native_tab_runtime{};
 std::unique_ptr<PinnedLogicalTabCatalogue> g_logical_tab_catalogue{};
+std::shared_ptr<const erui::detail::TabRuntimeGeneration>
+    g_tab_projection_generation{};
+thread_local const erui::detail::TabRuntimeGeneration*
+    g_rgba8_staging_generation{};
+// Allocated once before hooks are exposed. Native image construction reuses
+// this exact-sized scratch for both fresh-movie and same-movie transactions and
+// never asks the C++ heap for storage from a UI hook.
+std::vector<std::uint64_t> g_rgba8_expected_checksums_scratch{};
+std::vector<RetainedRgba8Resource> g_rgba8_staged_resources_scratch{};
+std::vector<std::uint8_t> g_rgba8_staged_changed_scratch{};
+std::vector<RetainedRgba8Resource> g_rgba8_retired_resources_scratch{};
+std::vector<std::uint32_t> g_rgba8_retired_debts_scratch{};
+std::shared_ptr<const erui::detail::TabRuntimeGeneration>
+    g_rgba8_staged_tab_generation{};
+bool g_rgba8_staged_bank_ready{};
+bool g_rgba8_retired_bank_active{};
+std::uint64_t g_rgba8_staging_failed_epoch{};
+std::uint64_t g_rgba8_retirement_wait_logged_epoch{};
+std::uint64_t g_rgba8_retirement_wait_logged_revision{};
 std::size_t g_navigation_margin{kNavigationMargin};
 bool g_mouse_dwell_enabled{true};
 TabPointerDwellTiming g_pointer_dwell_timing{
@@ -1691,6 +1756,7 @@ std::atomic<TextureLookupFn> g_original_texture_lookup{};
 std::atomic<ImageBindFn> g_original_image_bind{};
 
 SelectorSelectFn g_selector_select{};
+SelectorSetActiveCountFn g_selector_set_active_count{};
 GetPointerPositionFn g_get_pointer_position{};
 GridHitTestFn g_grid_hit_test{};
 NativePointerSelectFn g_native_pointer_select{};
@@ -1811,6 +1877,12 @@ thread_local RepaintContext g_repaint_context{};
 // presented. Rollback repainting deliberately runs outside this scope so a
 // failed initial publication always restores the visible vector fallback.
 thread_local bool g_initial_target_repaint{};
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+// Set only around synchronous target-layout construction/repaint. Native
+// source validation outside that scope always resolves the applied generation.
+thread_local const erui::detail::TabRuntimeGeneration*
+    g_target_tab_projection_generation{};
+#endif
 // The alias lookup and image binding are adjacent calls in the validated
 // presenter. Mark the exact resource, icon kind, and repaint cell, then
 // consume the marker at the next image-bind call on the same UI thread.
@@ -1823,6 +1895,12 @@ thread_local BitmapDataPropertyVerification
 thread_local std::uint64_t g_composite_frame_sequence{};
 
 constexpr std::size_t kNoRgba8Asset = invalid_tab_index;
+
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+[[nodiscard]] bool staged_rgba8_bank_publishable() noexcept;
+[[nodiscard]] bool publish_staged_rgba8_bank_after_handoff() noexcept;
+void finish_staged_rgba8_bank_publication() noexcept;
+#endif
 
 [[nodiscard]] std::size_t active_physical_tab_count() noexcept {
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
@@ -1838,11 +1916,132 @@ constexpr std::size_t kNoRgba8Asset = invalid_tab_index;
     return kStockLogicalTabCount;
 }
 
+[[nodiscard]] std::size_t active_visible_custom_tab_count() noexcept {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    const erui::detail::TabRuntimeGeneration* const generation =
+        g_target_tab_projection_generation
+        ? g_target_tab_projection_generation
+        : g_tab_projection_generation.get();
+    return generation ? generation->visible_order.size() : 0U;
+#else
+    return active_custom_tab_count();
+#endif
+}
+
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+[[nodiscard]] const erui::detail::TabRuntimeGeneration*
+effective_tab_projection_generation() noexcept {
+    return g_target_tab_projection_generation
+        ? g_target_tab_projection_generation
+        : g_tab_projection_generation.get();
+}
+
+class ScopedTargetTabProjectionGeneration final {
+public:
+    explicit ScopedTargetTabProjectionGeneration(
+        const erui::detail::TabRuntimeGeneration* generation) noexcept
+        : previous_(g_target_tab_projection_generation) {
+        g_target_tab_projection_generation = generation;
+    }
+
+    ~ScopedTargetTabProjectionGeneration() noexcept {
+        g_target_tab_projection_generation = previous_;
+    }
+
+    ScopedTargetTabProjectionGeneration(
+        const ScopedTargetTabProjectionGeneration&) = delete;
+    ScopedTargetTabProjectionGeneration& operator=(
+        const ScopedTargetTabProjectionGeneration&) = delete;
+
+private:
+    const erui::detail::TabRuntimeGeneration* previous_{};
+};
+
+[[nodiscard]] std::size_t stable_custom_index_for_logical(
+    std::size_t logical) noexcept {
+    if (!g_logical_tab_catalogue ||
+        logical < kStockLogicalTabCount) {
+        return invalid_tab_index;
+    }
+    const erui::detail::TabRuntimeGeneration* const generation =
+        effective_tab_projection_generation();
+    const std::size_t ordinal = logical - kStockLogicalTabCount;
+    if (!generation || ordinal >= generation->visible_order.size()) {
+        return invalid_tab_index;
+    }
+    const std::size_t stable = generation->visible_order[ordinal];
+    return stable < active_custom_tab_count()
+        ? stable
+        : invalid_tab_index;
+}
+
+[[nodiscard]] std::size_t logical_for_stable_custom_index(
+    std::size_t stable) noexcept {
+    if (!g_logical_tab_catalogue ||
+        stable >= active_custom_tab_count()) {
+        return invalid_tab_index;
+    }
+    const erui::detail::TabRuntimeGeneration* const generation =
+        effective_tab_projection_generation();
+    if (!generation) return invalid_tab_index;
+    const auto found = std::find(
+        generation->visible_order.begin(),
+        generation->visible_order.end(),
+        stable);
+    return found == generation->visible_order.end()
+        ? invalid_tab_index
+        : kStockLogicalTabCount + static_cast<std::size_t>(
+              found - generation->visible_order.begin());
+}
+
+[[nodiscard]] const wchar_t* active_logical_title(
+    const LogicalTab& tab) noexcept {
+    return tab.alternate_title_active
+        ? tab.alternate_title.data()
+        : tab.title.data();
+}
+
+[[nodiscard]] std::array<wchar_t, kTitleCapacity>&
+active_logical_title_storage(LogicalTab& tab) noexcept {
+    return tab.alternate_title_active ? tab.alternate_title : tab.title;
+}
+
+[[nodiscard]] std::array<wchar_t, kTitleCapacity>&
+inactive_logical_title(LogicalTab& tab) noexcept {
+    return tab.alternate_title_active ? tab.title : tab.alternate_title;
+}
+
+[[nodiscard]] const wchar_t* inactive_logical_title(
+    const LogicalTab& tab) noexcept {
+    return tab.alternate_title_active
+        ? tab.title.data()
+        : tab.alternate_title.data();
+}
+
+[[nodiscard]] const wchar_t* mapping_logical_title(
+    const LogicalTab& tab,
+    std::size_t logical) noexcept {
+    return g_target_tab_projection_generation &&
+            logical >= kStockLogicalTabCount
+        ? inactive_logical_title(tab)
+        : active_logical_title(tab);
+}
+#endif
+
 [[nodiscard]] LogicalTab* runtime_logical_tab(std::size_t logical) noexcept {
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
-    return g_logical_tab_catalogue &&
-            logical < g_logical_tab_catalogue->tabs.size()
-        ? &g_logical_tab_catalogue->tabs[logical]
+    if (!g_logical_tab_catalogue) return nullptr;
+    if (logical < kStockLogicalTabCount) {
+        return logical < g_logical_tab_catalogue->tabs.size()
+            ? &g_logical_tab_catalogue->tabs[logical]
+            : nullptr;
+    }
+    const std::size_t stable = stable_custom_index_for_logical(logical);
+    const std::size_t storage = stable == invalid_tab_index
+        ? invalid_tab_index
+        : kStockLogicalTabCount + stable;
+    return storage < g_logical_tab_catalogue->tabs.size()
+        ? &g_logical_tab_catalogue->tabs[storage]
         : nullptr;
 #else
     return logical < g_runtime.catalogue.size()
@@ -1852,6 +2051,16 @@ constexpr std::size_t kNoRgba8Asset = invalid_tab_index;
 }
 
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+[[nodiscard]] LogicalTab* runtime_stable_custom_logical_tab(
+    std::size_t stable) noexcept {
+    const std::size_t storage = kStockLogicalTabCount + stable;
+    return g_logical_tab_catalogue &&
+            stable < active_custom_tab_count() &&
+            storage < g_logical_tab_catalogue->tabs.size()
+        ? &g_logical_tab_catalogue->tabs[storage]
+        : nullptr;
+}
+
 [[nodiscard]] erui::detail::NativeTabRuntimeEntry* runtime_custom_tab(
     std::size_t custom) noexcept {
     return g_native_tab_runtime ? g_native_tab_runtime->tab(custom) : nullptr;
@@ -1934,6 +2143,41 @@ constexpr std::size_t kNoRgba8Asset = invalid_tab_index;
         g_retained_rgba8_ready[custom].load(std::memory_order_acquire);
 #endif
 }
+
+[[nodiscard]] RetainedRgba8Resource current_retained_rgba8(
+    std::size_t custom) noexcept {
+    return {
+        .image = retained_rgba8_image(custom),
+        .resource = retained_rgba8_resource(custom),
+        .checksum = retained_rgba8_checksum(custom),
+        .ready = retained_rgba8_ready(custom),
+    };
+}
+
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+[[nodiscard]] bool target_rgba8_bank_is_active() noexcept {
+    return g_rgba8_staged_bank_ready &&
+        g_rgba8_staged_tab_generation &&
+        g_target_tab_projection_generation ==
+            g_rgba8_staged_tab_generation.get() &&
+        g_rgba8_staged_resources_scratch.size() ==
+            active_custom_tab_count();
+}
+
+[[nodiscard]] RetainedRgba8Resource effective_retained_rgba8(
+    std::size_t custom) noexcept {
+    if (target_rgba8_bank_is_active() &&
+        custom < g_rgba8_staged_resources_scratch.size()) {
+        return g_rgba8_staged_resources_scratch[custom];
+    }
+    return current_retained_rgba8(custom);
+}
+#else
+[[nodiscard]] RetainedRgba8Resource effective_retained_rgba8(
+    std::size_t custom) noexcept {
+    return current_retained_rgba8(custom);
+}
+#endif
 
 void publish_retained_rgba8(
     std::size_t custom,
@@ -2207,8 +2451,9 @@ RuntimeRawResourceNameView kRawImageResourceProbeNames{};
 
 [[nodiscard]] bool all_rgba8_retirement_debts_zero() noexcept {
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
-    return !g_native_tab_runtime ||
-        g_native_tab_runtime->retiring_tab_indices().empty();
+    return (!g_native_tab_runtime ||
+        g_native_tab_runtime->retiring_tab_indices().empty()) &&
+        !g_rgba8_retired_bank_active;
 #else
     for (std::size_t custom = 0;
          custom < active_custom_tab_count();
@@ -2248,12 +2493,9 @@ void clear_all_rgba8_retirement_debts() noexcept {
         !g_rgba8_catalogue_ready.load(std::memory_order_acquire)) {
         return false;
     }
-    return g_retained_rgba8_ready[icon].load(
-               std::memory_order_acquire) &&
-        g_retained_rgba8_resources[icon].load(
-               std::memory_order_acquire) != nullptr &&
-        g_retained_rgba8_images[icon].load(
-               std::memory_order_acquire) != nullptr;
+    const RetainedRgba8Resource retained =
+        effective_retained_rgba8(icon);
+    return retained.ready && retained.resource && retained.image;
 }
 
 [[nodiscard]] bool catalogue_icon_has_effective_raster(
@@ -2986,6 +3228,9 @@ std::uint32_t count_active_rgba8_asset_hosts(
     std::size_t override_asset = 0) noexcept {
     if (asset_index >= active_custom_tab_count()) return 0;
     const std::size_t encoded_asset = asset_index + 1U;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    void* const current_resource = retained_rgba8_resource(asset_index);
+#endif
     std::uint32_t count{};
     for (std::size_t host = 0; host < g_rgba8_host_assets.size(); ++host) {
         const std::size_t encoded = host == override_host
@@ -2995,7 +3240,24 @@ std::uint32_t count_active_rgba8_asset_hosts(
         const std::size_t staged =
             g_staged_rgba8_host_assets[host].load(
                 std::memory_order_acquire);
-        if (staged == encoded_asset) ++count;
+        if (staged == encoded_asset) {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            // A live immutable-icon handoff can temporarily expose the old
+            // and target resources under the same stable tab index.  Only a
+            // staged host that retained the exact current resource belongs in
+            // the current RawImage reference count; a changed target resource
+            // is audited independently during the overlap.
+            void* staged_resource = current_resource;
+            if (g_rgba8_staged_bank_ready &&
+                asset_index < g_rgba8_staged_resources_scratch.size()) {
+                staged_resource =
+                    g_rgba8_staged_resources_scratch[asset_index].resource;
+            }
+            if (staged_resource == current_resource) ++count;
+#else
+            ++count;
+#endif
+        }
     }
     return count;
 }
@@ -3022,6 +3284,134 @@ Rgba8ReferenceSnapshot snapshot_rgba8_references(
         static_cast<const std::byte*>(image) + 0x08,
         snapshot.raw);
     return snapshot;
+}
+
+Rgba8ReferenceSnapshot snapshot_rgba8_references(
+    const RetainedRgba8Resource& retained) noexcept {
+    Rgba8ReferenceSnapshot snapshot{};
+    snapshot.resource_read = retained.resource && guarded_read(
+        static_cast<const std::byte*>(retained.resource) + 0x08,
+        snapshot.resource);
+    snapshot.raw_read = retained.image && guarded_read(
+        static_cast<const std::byte*>(retained.image) + 0x08,
+        snapshot.raw);
+    return snapshot;
+}
+
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+[[nodiscard]] std::uint32_t count_rgba8_resource_hosts(
+    void* resource) noexcept {
+    if (!resource) return 0U;
+    std::uint32_t count{};
+    for (std::size_t host = 0; host < active_tab_host_count(); ++host) {
+        const std::size_t active = g_rgba8_host_assets[host].load(
+            std::memory_order_acquire);
+        if (active != 0U &&
+            retained_rgba8_resource(active - 1U) == resource) {
+            ++count;
+        }
+        const std::size_t staged = g_staged_rgba8_host_assets[host].load(
+            std::memory_order_acquire);
+        if (staged != 0U) {
+            void* staged_resource = retained_rgba8_resource(staged - 1U);
+            if (g_rgba8_staged_bank_ready &&
+                staged - 1U < g_rgba8_staged_resources_scratch.size()) {
+                staged_resource =
+                    g_rgba8_staged_resources_scratch[staged - 1U].resource;
+            }
+            if (staged_resource == resource) ++count;
+        }
+    }
+    return count;
+}
+
+[[nodiscard]] std::uint32_t rgba8_debt_for_resource(
+    std::size_t asset_index,
+    void* resource) noexcept {
+    return asset_index < active_custom_tab_count() &&
+            retained_rgba8_resource(asset_index) == resource
+        ? rgba8_retirement_debt(asset_index)
+        : 0U;
+}
+#else
+[[nodiscard]] std::uint32_t count_rgba8_resource_hosts(
+    void* resource) noexcept {
+    if (!resource) return 0U;
+    std::uint32_t count{};
+    for (std::size_t asset = 0; asset < active_custom_tab_count(); ++asset) {
+        if (retained_rgba8_resource(asset) == resource) {
+            count += count_active_rgba8_asset_hosts(asset);
+        }
+    }
+    return count;
+}
+
+[[nodiscard]] std::uint32_t rgba8_debt_for_resource(
+    std::size_t asset_index,
+    void* resource) noexcept {
+    return asset_index < active_custom_tab_count() &&
+            retained_rgba8_resource(asset_index) == resource
+        ? rgba8_retirement_debt(asset_index)
+        : 0U;
+}
+#endif
+
+[[nodiscard]] bool reconcile_retired_rgba8_bank(
+    const char* phase) noexcept {
+#if !defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    (void)phase;
+    return true;
+#else
+    if (!g_rgba8_retired_bank_active) return true;
+    if (g_rgba8_retired_resources_scratch.size() !=
+            active_custom_tab_count() ||
+        g_rgba8_retired_debts_scratch.size() !=
+            active_custom_tab_count()) {
+        return false;
+    }
+    bool exact{true};
+    bool any_pending{};
+    for (std::size_t index = 0;
+         index < g_rgba8_retired_resources_scratch.size();
+         ++index) {
+        RetainedRgba8Resource& retired =
+            g_rgba8_retired_resources_scratch[index];
+        std::uint32_t& debt = g_rgba8_retired_debts_scratch[index];
+        if (!retired.ready) continue;
+        const Rgba8ReferenceSnapshot refs =
+            snapshot_rgba8_references(retired);
+        const auto retirement = plan_rgba8_retirement_reconciliation(
+            0U, debt, refs.raw, kRgba8RetirementLimits);
+        const bool entry_exact = refs.resource_read && refs.raw_read &&
+            refs.resource == 1U && retirement.accepted();
+        if (!entry_exact) {
+            exact = false;
+            any_pending = true;
+            log_failure(
+                "retired RGBA8 bank reconciliation phase=%s asset=%zu refs={resource:%u raw:%u} debt=%u policy=%u",
+                phase ? phase : "unknown",
+                index,
+                static_cast<unsigned>(refs.resource),
+                static_cast<unsigned>(refs.raw),
+                static_cast<unsigned>(debt),
+                static_cast<unsigned>(retirement.status));
+            continue;
+        }
+        debt = retirement.retirement_debt_after;
+        if (debt == 0U && refs.raw == 1U) {
+            retired = {};
+        } else {
+            any_pending = true;
+        }
+    }
+    if (exact && !any_pending) {
+        g_rgba8_retired_bank_active = false;
+        log_line(
+            "retired RGBA8 resource bank reached exact root baseline phase=%s; next live icon generation may proceed",
+            phase ? phase : "unknown");
+    }
+    return exact;
+#endif
 }
 
 bool reconcile_rgba8_retirement_debt(
@@ -3180,13 +3570,19 @@ bool reconcile_rgba8_retirement_debt(
         exact = reconcile_asset(asset, removed) && exact;
     }
 #endif
-    return exact;
+    return reconcile_retired_rgba8_bank(phase) && exact;
 }
 
 bool rgba8_resources_at_root_baseline() noexcept {
     if (!g_rgba8_catalogue_ready.load(std::memory_order_acquire)) {
         return false;
     }
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    if (!reconcile_retired_rgba8_bank("epoch-root-baseline") ||
+        g_rgba8_retired_bank_active) {
+        return false;
+    }
+#endif
 
     // This predicate is used only at an epoch boundary after the current
     // display object reports a different Movie fingerprint. The old Movie has
@@ -3442,6 +3838,168 @@ bool rgba8_references_match_tracked_hosts(
     return exact;
 }
 
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+// During a live immutable-icon handoff the active and inactive property banks
+// can deliberately contain two different resources for the same stable tab.
+// The ordinary audit is indexed by that stable tab and is therefore valid only
+// outside this short overlap.  Audit the exact resource/image identities here
+// until the target bank is published and the ordinary single-bank invariant is
+// restored.
+[[nodiscard]] bool rgba8_rebind_overlap_references_match(
+    const char* phase) noexcept {
+    const InPlaceRgba8RebindTransaction& transaction =
+        g_in_place_rgba8_rebind_transaction;
+    if (!transaction.active || !g_rgba8_staged_bank_ready ||
+        !g_rgba8_staged_tab_generation ||
+        g_rgba8_staged_resources_scratch.size() !=
+            active_custom_tab_count()) {
+        return false;
+    }
+
+    struct ExactResourceAuditEntry final {
+        RetainedRgba8Resource retained{};
+        std::size_t asset{invalid_tab_index};
+        std::uint32_t hosts{};
+        std::uint32_t debt{};
+    };
+    std::array<ExactResourceAuditEntry, kTabHostCapacity * 2U> entries{};
+    std::size_t entry_count{};
+    bool exact{true};
+
+    const auto add_host = [&entries, &entry_count, &exact](
+        std::size_t asset,
+        const RetainedRgba8Resource& retained,
+        std::uint32_t debt) noexcept {
+        if (asset >= active_custom_tab_count() || !retained.ready ||
+            !retained.resource || !retained.image) {
+            exact = false;
+            return;
+        }
+        for (std::size_t entry = 0; entry < entry_count; ++entry) {
+            if (entries[entry].retained.resource != retained.resource) {
+                continue;
+            }
+            exact = exact &&
+                entries[entry].retained.image == retained.image &&
+                entries[entry].retained.checksum == retained.checksum &&
+                entries[entry].debt == debt;
+            ++entries[entry].hosts;
+            return;
+        }
+        if (entry_count >= entries.size()) {
+            exact = false;
+            return;
+        }
+        entries[entry_count++] = {
+            .retained = retained,
+            .asset = asset,
+            .hosts = 1U,
+            .debt = debt,
+        };
+    };
+
+    const TabHostMask active_bits = g_rgba8_icon_hosts.load(
+        std::memory_order_acquire);
+    const TabHostMask staged_bits = g_staged_rgba8_icon_hosts.load(
+        std::memory_order_acquire);
+    exact = exact &&
+        (active_bits & ~transaction.source_rgba_mask) == 0U &&
+        (staged_bits & ~transaction.target_rgba_mask) == 0U;
+
+    for (std::size_t host = 0; host < active_tab_host_count(); ++host) {
+        const TabHostMask mask = TabHostMask{1} << host;
+        const std::size_t active_encoded = g_rgba8_host_assets[host].load(
+            std::memory_order_acquire);
+        const bool active_bit = (active_bits & mask) != 0;
+        const bool source_raster_was_retired =
+            (transaction.source_rgba_mask & mask) != 0U &&
+            (transaction.completed_clear_mask & mask) != 0U;
+        if ((active_encoded != 0U) != active_bit ||
+            (active_encoded == 0U &&
+                transaction.source_assets[host] != 0U &&
+                !source_raster_was_retired) ||
+            (active_encoded != 0U &&
+                active_encoded != transaction.source_assets[host])) {
+            exact = false;
+        } else if (active_encoded != 0U) {
+            const std::size_t asset = active_encoded - 1U;
+            const RetainedRgba8Resource retained =
+                current_retained_rgba8(asset);
+            if (retained.resource != transaction.source_resources[host]) {
+                exact = false;
+            }
+            add_host(
+                asset,
+                retained,
+                rgba8_debt_for_resource(asset, retained.resource));
+        }
+
+        const std::size_t staged_encoded =
+            g_staged_rgba8_host_assets[host].load(
+                std::memory_order_acquire);
+        const bool staged_bit = (staged_bits & mask) != 0;
+        if ((staged_encoded != 0U) != staged_bit) {
+            exact = false;
+        } else if (staged_encoded != 0U) {
+            const std::size_t asset = staged_encoded - 1U;
+            if (asset >= g_rgba8_staged_resources_scratch.size() ||
+                staged_encoded != transaction.target_assets[host]) {
+                exact = false;
+                continue;
+            }
+            const RetainedRgba8Resource& retained =
+                g_rgba8_staged_resources_scratch[asset];
+            if (retained.resource != transaction.target_resources[host]) {
+                exact = false;
+            }
+            add_host(asset, retained, 0U);
+        }
+    }
+
+    for (std::size_t entry = 0; entry < entry_count; ++entry) {
+        const ExactResourceAuditEntry& expected = entries[entry];
+        const Rgba8ReferenceSnapshot refs =
+            snapshot_rgba8_references(expected.retained);
+        const std::uint32_t expected_raw =
+            1U + expected.hosts + expected.debt;
+        const bool entry_exact = refs.resource_read && refs.resource == 1U &&
+            refs.raw_read && refs.raw == expected_raw;
+        exact = exact && entry_exact;
+        if (!entry_exact) {
+            log_failure(
+                "RGBA8 overlap ref audit phase=%s asset=%zu resource=%p image=%p refs={resource:%u/%u expected:1 raw:%u/%u expected:%u} hosts=%u debt=%u",
+                phase ? phase : "unknown",
+                expected.asset,
+                expected.retained.resource,
+                expected.retained.image,
+                refs.resource_read ? 1U : 0U,
+                static_cast<unsigned>(refs.resource),
+                refs.raw_read ? 1U : 0U,
+                static_cast<unsigned>(refs.raw),
+                static_cast<unsigned>(expected_raw),
+                static_cast<unsigned>(expected.hosts),
+                static_cast<unsigned>(expected.debt));
+        }
+    }
+    if (!exact) {
+        log_failure(
+            "RGBA8 overlap ledger audit phase=%s failed (active=0x%04X/0x%04X staged=0x%04X target=0x%04X resources=%zu)",
+            phase ? phase : "unknown",
+            static_cast<unsigned>(active_bits),
+            static_cast<unsigned>(transaction.source_rgba_mask),
+            static_cast<unsigned>(staged_bits),
+            static_cast<unsigned>(transaction.target_rgba_mask),
+            entry_count);
+    }
+    return exact;
+}
+#else
+[[nodiscard]] bool rgba8_rebind_overlap_references_match(
+    const char* phase) noexcept {
+    return rgba8_references_match_tracked_hosts(phase);
+}
+#endif
+
 void log_rgba8_lifecycle_snapshot(
     const char* phase,
     void* top) noexcept {
@@ -3623,16 +4181,25 @@ void** __fastcall texture_lookup_detour(
     const std::size_t logical = g_repaint_context.logical;
     const bool logical_resolved = exact_repaint_context &&
         logical < active_logical_tab_count();
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    const std::size_t logical_custom = logical_resolved
+        ? stable_custom_index_for_logical(logical)
+        : invalid_tab_index;
+#else
+    const std::size_t logical_custom = logical >= kStockLogicalTabCount
+        ? logical - kStockLogicalTabCount
+        : invalid_tab_index;
+#endif
     const bool exact_catalogue_icon =
         rgba8_index < active_custom_tab_count() &&
-        logical_resolved && logical == kStockLogicalTabCount + rgba8_index;
+        logical_resolved && logical_custom == rgba8_index;
     const bool effective_raster = exact_catalogue_icon &&
         catalogue_icon_has_effective_raster(rgba8_index);
     const bool exact_initial_logical_raster =
         kind == VectorIconKind::cross && exact_repaint_coordinate &&
         rgba8_index < active_custom_tab_count() &&
         logical < active_logical_tab_count() &&
-        logical == kStockLogicalTabCount + rgba8_index &&
+        logical_custom == rgba8_index &&
         catalogue_icon_requires_raster(rgba8_index);
     const bool transparent_vector_placeholder =
         should_use_transparent_initial_raster_placeholder({
@@ -3644,19 +4211,13 @@ void** __fastcall texture_lookup_detour(
             exact_initial_logical_raster &&
                 catalogue_icon_has_effective_raster(rgba8_index),
         });
-    void* const retained_resource = rgba8_index < active_custom_tab_count()
-        ? g_retained_rgba8_resources[rgba8_index].load(
-              std::memory_order_acquire)
-        : nullptr;
-    void* const retained_image = rgba8_index < active_custom_tab_count()
-        ? g_retained_rgba8_images[rgba8_index].load(
-              std::memory_order_acquire)
-        : nullptr;
-    const std::uint64_t retained_checksum =
+    const RetainedRgba8Resource retained =
         rgba8_index < active_custom_tab_count()
-        ? g_retained_rgba8_checksums[rgba8_index].load(
-              std::memory_order_acquire)
-        : 0;
+        ? effective_retained_rgba8(rgba8_index)
+        : RetainedRgba8Resource{};
+    void* const retained_resource = retained.resource;
+    void* const retained_image = retained.image;
+    const std::uint64_t retained_checksum = retained.checksum;
     if (kind == VectorIconKind::cross && effective_raster &&
         retained_resource && retained_image && out_resource &&
         !g_rgba8_publication_disabled.load(std::memory_order_acquire)) {
@@ -3779,6 +4340,7 @@ void** __fastcall texture_lookup_detour(
         if (output_written) {
             g_pending_aliased_icon = {
                 retained_resource,
+                retained_image,
                 kind,
                 g_repaint_context,
                 true,
@@ -3826,6 +4388,7 @@ void** __fastcall texture_lookup_detour(
     if (resolved) {
         g_pending_aliased_icon = {
             resolved,
+            nullptr,
             kind,
             g_repaint_context,
             false,
@@ -6254,17 +6817,9 @@ bool __fastcall image_bind_detour(
         rectangle_values.data(), rectangle, sizeof(rectangle_values));
     const bool exact_pending_asset = !pending.direct_rgba8 ||
         (pending.rgba8_index < active_custom_tab_count() &&
-            resource_value ==
-                g_retained_rgba8_resources[pending.rgba8_index].load(
-                    std::memory_order_acquire) &&
-            resource_image_read && resource_image ==
-                g_retained_rgba8_images[pending.rgba8_index].load(
-                    std::memory_order_acquire) &&
-            g_retained_rgba8_ready[pending.rgba8_index].load(
-                std::memory_order_acquire) &&
-            pending.checksum ==
-                g_retained_rgba8_checksums[pending.rgba8_index].load(
-                    std::memory_order_acquire));
+            pending.resource && pending.image &&
+            resource_value == pending.resource &&
+            resource_image_read && resource_image == pending.image);
 
     bool fingerprint_consistent{};
     if (object_interface_read &&
@@ -6525,21 +7080,32 @@ bool __fastcall image_bind_detour(
             matching_rebind_transaction && !rebind_transaction.failed &&
             rebind_transaction.stage ==
                 InPlaceRgba8RebindStage::repainting;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        const bool pending_matches_stable_asset =
+            stable_custom_index_for_logical(pending.logical) ==
+                pending.rgba8_index;
+#else
+        const bool pending_matches_stable_asset = pending.logical ==
+            kStockLogicalTabCount + pending.rgba8_index;
+#endif
         const bool exact_shape_replacement =
             exact_rebind_transaction && exact_host_coordinate &&
             (rebind_transaction.expected_host_mask & host_mask) != 0 &&
             staging_fresh_host &&
             rebind_transaction.target_assets[host_bit] == desired_asset &&
+            rebind_transaction.target_resources[host_bit] ==
+                pending.resource &&
             (prior_injected_hosts & host_mask) == 0 &&
             (prior_rgba_hosts & host_mask) == 0 && prior_asset == 0U &&
             desired_asset > 0U &&
             desired_asset <= active_custom_tab_count() &&
-            pending.logical ==
-                kStockLogicalTabCount + pending.rgba8_index;
+            pending_matches_stable_asset;
         const bool exact_same_asset_repaint =
             exact_rebind_transaction && exact_host_coordinate &&
-            !staging_fresh_host &&
-            prior_asset != 0 && prior_asset == desired_asset;
+            !staging_fresh_host && prior_asset != 0 &&
+            prior_asset == desired_asset &&
+            rebind_transaction.source_resources[host_bit] ==
+                pending.resource;
         const bool host_transition_compatible = prior_host_consistent &&
             (prior_asset == 0 || prior_asset == desired_asset ||
                 exact_shape_replacement);
@@ -6563,18 +7129,23 @@ bool __fastcall image_bind_detour(
         bool rebind_pre_refs_exact{true};
         if (exact_shape_replacement) {
             const std::size_t fresh_asset_index = desired_asset - 1U;
-            fresh_refs_before =
-                snapshot_rgba8_references(fresh_asset_index);
+            const RetainedRgba8Resource fresh_resource{
+                .image = pending.image,
+                .resource = pending.resource,
+                .checksum = pending.checksum,
+                .ready = true,
+            };
+            fresh_refs_before = snapshot_rgba8_references(fresh_resource);
             const std::uint32_t fresh_expected =
-                1U + count_active_rgba8_asset_hosts(fresh_asset_index) +
-                g_rgba8_retirement_debt[fresh_asset_index].load(
-                    std::memory_order_acquire);
+                1U + count_rgba8_resource_hosts(pending.resource) +
+                rgba8_debt_for_resource(
+                    fresh_asset_index, pending.resource);
             rebind_pre_refs_exact = fresh_refs_before.resource_read &&
                 fresh_refs_before.resource == 3U &&
                 fresh_refs_before.raw_read &&
                 fresh_refs_before.raw == fresh_expected &&
-                g_rgba8_retirement_debt[fresh_asset_index].load(
-                    std::memory_order_acquire) == 0U;
+                rgba8_debt_for_resource(
+                    fresh_asset_index, pending.resource) == 0U;
             log_line(
                 "rgba8Replace pre transition=%llu layer=%u physical=%zu freshAsset=%u refs={resource:%u/%u raw:%u/%u expected:%u} exact=%u",
                 static_cast<unsigned long long>(
@@ -6646,8 +7217,12 @@ bool __fastcall image_bind_detour(
             !attachment.reused_existing_shape && attachment.cleanup_exact &&
             attachment.consume_seh == 0) {
             const std::size_t fresh_asset_index = desired_asset - 1U;
-            fresh_refs_after =
-                snapshot_rgba8_references(fresh_asset_index);
+            fresh_refs_after = snapshot_rgba8_references({
+                .image = pending.image,
+                .resource = pending.resource,
+                .checksum = pending.checksum,
+                .ready = true,
+            });
             exact_rebind_refs = fresh_refs_after.resource_read &&
                 fresh_refs_after.resource == 2U &&
                 fresh_refs_after.raw_read && fresh_refs_before.raw_read &&
@@ -6675,8 +7250,8 @@ bool __fastcall image_bind_detour(
                 static_cast<unsigned>(fresh_refs_after.raw),
                 static_cast<unsigned>(fresh_refs_before.raw),
                 static_cast<unsigned>(
-                    g_rgba8_retirement_debt[fresh_asset_index].load(
-                        std::memory_order_acquire)),
+                    rgba8_debt_for_resource(
+                        fresh_asset_index, pending.resource)),
                 exact_rebind_refs ? 1U : 0U);
             if (!exact_rebind_refs) {
                 g_in_place_rgba8_rebind_transaction.failed = true;
@@ -6773,8 +7348,7 @@ bool __fastcall image_bind_detour(
             exact_pending_asset &&
             host_transition_compatible &&
             pending.rgba8_index < active_custom_tab_count() &&
-            pending.logical ==
-                kStockLogicalTabCount + pending.rgba8_index &&
+            pending_matches_stable_asset &&
             attachment.resource_consumed &&
             ((attachment.raster_bind_attempted &&
                  attachment.raster_bound) ||
@@ -7322,8 +7896,17 @@ void run_raw_image_lifecycle_probe_one(
     std::size_t icon_index,
     RetainedRgba8Resource& retained) noexcept {
     retained = {};
-    if (!kEnableRawImageLifecycleProbe || !top || !g_runtime.active ||
-        g_runtime.top != top || !validate_top(top) ||
+    const bool staging_fresh_generation =
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        g_rgba8_staging_generation != nullptr;
+#else
+        false;
+#endif
+    const bool valid_context = staging_fresh_generation
+        ? top && validate_top(top)
+        : top && g_runtime.active && g_runtime.top == top &&
+            validate_top(top);
+    if (!kEnableRawImageLifecycleProbe || !valid_context ||
         icon_index >= active_custom_tab_count() ||
         !catalogue_icon_requires_raster(icon_index)) {
         return;
@@ -7880,34 +8463,57 @@ void run_raw_image_lifecycle_probe_one(
     }
 }
 
-void run_raw_image_lifecycle_probe(void* top) noexcept {
-    if (!kEnableRawImageLifecycleProbe || !top || !g_runtime.active ||
-        g_runtime.top != top || !validate_top(top)) {
-        return;
-    }
-    if (g_raw_image_lifecycle_probe_attempted.exchange(
-            true, std::memory_order_acq_rel)) {
-        return;
-    }
+[[nodiscard]] bool construct_rgba8_catalogue(
+    void* top,
+    bool require_active_runtime,
+    bool publish_ready,
+    bool disable_on_failure) noexcept {
+    const bool valid_context = require_active_runtime
+        ? top && g_runtime.active && g_runtime.top == top &&
+            validate_top(top)
+        : top && validate_top(top);
+    if (!kEnableRawImageLifecycleProbe || !valid_context) return false;
 
     const std::size_t custom_count = active_custom_tab_count();
     // These two vectors are private construction-transaction scratch, not
     // another runtime catalogue. Their exact registered size lets us retain
     // the all-or-nothing publication gate without imposing the public ceiling
     // on every process. All persistent state is owned by tabs[index].
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    auto& expected_checksums = g_rgba8_expected_checksums_scratch;
+    auto& staged = g_rgba8_staged_resources_scratch;
+    if (expected_checksums.size() != custom_count ||
+        staged.size() != custom_count) {
+        if (disable_on_failure) {
+            g_rgba8_catalogue_ready.store(false, std::memory_order_release);
+            g_rgba8_publication_disabled.store(
+                true, std::memory_order_release);
+        }
+        log_failure(
+            "RGBA8 catalogue scratch does not match the registered tab count (%zu/%zu expected=%zu); publication refused without allocating on the UI thread",
+            expected_checksums.size(), staged.size(), custom_count);
+        return false;
+    }
+    std::fill(expected_checksums.begin(), expected_checksums.end(), 0U);
+    std::fill(staged.begin(), staged.end(), RetainedRgba8Resource{});
+#else
     std::vector<std::uint64_t> expected_checksums;
     std::vector<RetainedRgba8Resource> staged;
     try {
         expected_checksums.resize(custom_count);
         staged.resize(custom_count);
     } catch (...) {
-        g_rgba8_catalogue_ready.store(false, std::memory_order_release);
-        g_rgba8_publication_disabled.store(true, std::memory_order_release);
+        if (disable_on_failure) {
+            g_rgba8_catalogue_ready.store(false, std::memory_order_release);
+            g_rgba8_publication_disabled.store(
+                true, std::memory_order_release);
+        }
         log_failure(
             "RGBA8 catalogue could not allocate an exact-sized %zu-tab construction transaction; raster publication remains disabled",
             custom_count);
-        return;
+        return false;
     }
+#endif
 
     const std::uint64_t catalogue_started_qpc = query_performance_ticks();
     std::uint64_t slowest_icon_microseconds{};
@@ -7976,8 +8582,11 @@ void run_raw_image_lifecycle_probe(void* top) noexcept {
         // rather than guessing teardown after a sibling failed. None becomes
         // visible to the lookup detour, so the whole catalogue falls back to
         // the proven vector icon as one atomic feature gate.
-        g_rgba8_catalogue_ready.store(false, std::memory_order_release);
-        g_rgba8_publication_disabled.store(true, std::memory_order_release);
+        if (disable_on_failure) {
+            g_rgba8_catalogue_ready.store(false, std::memory_order_release);
+            g_rgba8_publication_disabled.store(
+                true, std::memory_order_release);
+        }
         for (std::size_t icon = 0;
              icon < custom_count;
              ++icon) {
@@ -8001,7 +8610,7 @@ void run_raw_image_lifecycle_probe(void* top) noexcept {
             static_cast<unsigned long long>(average_icon_microseconds),
             static_cast<unsigned long long>(slowest_icon_microseconds),
             slowest_icon);
-        return;
+        return false;
     }
 
     // Publish every identity first, then release one all-ready flag. No
@@ -8019,7 +8628,9 @@ void run_raw_image_lifecycle_probe(void* top) noexcept {
             staged[icon].image,
             static_cast<unsigned long long>(staged[icon].checksum));
     }
-    g_rgba8_catalogue_ready.store(true, std::memory_order_release);
+    if (publish_ready) {
+        g_rgba8_catalogue_ready.store(true, std::memory_order_release);
+    }
     catalogue_microseconds = elapsed_qpc_microseconds(
         catalogue_started_qpc, query_performance_ticks());
     average_icon_microseconds = raster_count == 0
@@ -8034,6 +8645,19 @@ void run_raw_image_lifecycle_probe(void* top) noexcept {
         static_cast<unsigned long long>(slowest_icon_microseconds),
         slowest_icon);
     log_rgba8_lifecycle_snapshot("catalogue-published", top);
+    return true;
+}
+
+void run_raw_image_lifecycle_probe(void* top) noexcept {
+    if (!kEnableRawImageLifecycleProbe || !top || !g_runtime.active ||
+        g_runtime.top != top || !validate_top(top)) {
+        return;
+    }
+    if (g_raw_image_lifecycle_probe_attempted.exchange(
+            true, std::memory_order_acq_rel)) {
+        return;
+    }
+    (void)construct_rgba8_catalogue(top, true, true, true);
 }
 
 bool resolve_relative_call_target(
@@ -8150,6 +8774,7 @@ std::byte* record_at(void* top, std::size_t physical) noexcept {
 }
 
 struct LiveTabGeometry final {
+    std::size_t records{};
     std::size_t active{};
     std::size_t authored{};
     std::size_t selected{};
@@ -8191,6 +8816,7 @@ bool read_live_tab_geometry(
         return false;
     }
     geometry.active = validated.active_slot_count;
+    geometry.records = static_cast<std::size_t>(record_count);
     geometry.authored = validated.authored_cell_count;
     geometry.selected = validated.selected_slot;
     return true;
@@ -8399,7 +9025,11 @@ bool build_mapping_fields(
         }
         const LogicalTab* const tab = runtime_logical_tab(logical);
         if (!tab) return false;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        fields[physical].title = mapping_logical_title(*tab, logical);
+#else
         fields[physical].title = tab->title.data();
+#endif
         fields[physical].category = tab->category;
         fields[physical].presentation = tab->presentation;
         if (tab_overflow_indicator(viewport, physical) !=
@@ -8475,7 +9105,7 @@ bool exact_stock_layout_republished(void* top) noexcept {
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
     if (!g_logical_tab_catalogue ||
         g_logical_tab_catalogue->tabs.size() !=
-            active_logical_tab_count()) {
+            resource_logical_tab_count()) {
         return false;
     }
 #else
@@ -8518,7 +9148,9 @@ bool exact_stock_layout_republished(void* top) noexcept {
                 for (const LogicalTab& tab :
                      g_logical_tab_catalogue->tabs) {
                     if (candidate == reinterpret_cast<std::uintptr_t>(
-                            tab.title.data())) {
+                            tab.title.data()) ||
+                        candidate == reinterpret_cast<std::uintptr_t>(
+                            tab.alternate_title.data())) {
                         return true;
                     }
                 }
@@ -9018,7 +9650,7 @@ void append_graphics_records_at_construction_seam(
     context.movie = caller_movie;
     context.discovered_capacity = plan.discovered_slot_count;
     context.active_target = native_tab_active_slot_target(
-        context.discovered_capacity, active_logical_tab_count());
+        context.discovered_capacity, resource_logical_tab_count());
     context.live_cells_symmetric = symmetric;
 
     const bool competing_native_tweaks =
@@ -9057,7 +9689,7 @@ void append_graphics_records_at_construction_seam(
             "ERROR: physical tab growth refused before mutation: invalid active target %zu for authored capacity %zu and logical count %zu",
             context.active_target,
             context.discovered_capacity,
-            active_logical_tab_count());
+            resource_logical_tab_count());
         return;
     }
     if (context.active_target == kStockLogicalTabCount) return;
@@ -10662,19 +11294,27 @@ bool detach_rgba8_host_for_replacement(
     const std::size_t encoded_asset_before =
         g_rgba8_host_assets[bit].load(std::memory_order_acquire);
     const bool asset_index_exact = encoded_asset_before > 0U &&
-        encoded_asset_before <= active_custom_tab_count();
+        encoded_asset_before <= active_custom_tab_count() &&
+        encoded_asset_before == transaction.source_assets[bit];
     const std::size_t asset_index = asset_index_exact
         ? static_cast<std::size_t>(encoded_asset_before - 1U)
         : invalid_tab_index;
+    const RetainedRgba8Resource source_retained = asset_index_exact
+        ? current_retained_rgba8(asset_index)
+        : RetainedRgba8Resource{};
+    void* const source_resource = transaction.source_resources[bit];
+    const bool source_identity_exact = asset_index_exact &&
+        source_resource && source_retained.ready &&
+        source_retained.resource == source_resource &&
+        source_retained.image;
     const std::uint32_t active_before = asset_index_exact
-        ? count_active_rgba8_asset_hosts(asset_index)
+        ? count_rgba8_resource_hosts(source_resource)
         : 0U;
     const std::uint32_t debt_before = asset_index_exact
-        ? g_rgba8_retirement_debt[asset_index].load(
-            std::memory_order_acquire)
+        ? rgba8_debt_for_resource(asset_index, source_resource)
         : 0U;
-    const Rgba8ReferenceSnapshot refs_before = asset_index_exact
-        ? snapshot_rgba8_references(asset_index)
+    const Rgba8ReferenceSnapshot refs_before = source_identity_exact
+        ? snapshot_rgba8_references(source_retained)
         : Rgba8ReferenceSnapshot{};
     const auto source_retirement =
         plan_rgba8_retirement_reconciliation(
@@ -10684,7 +11324,7 @@ bool detach_rgba8_host_for_replacement(
             kRgba8RetirementLimits);
     const bool ownership_before_exact = reconciled_before &&
         (injected_before & mask) != 0 && (rgba_before & mask) != 0 &&
-        asset_index_exact && active_before > 0U &&
+        source_identity_exact && active_before > 0U &&
         debt_before < kMaximumRgba8RetirementDebt &&
         refs_before.resource_read && refs_before.resource == 1U &&
         refs_before.raw_read && source_retirement.accepted() &&
@@ -10699,8 +11339,8 @@ bool detach_rgba8_host_for_replacement(
             restore_authored)
         : InjectedIconDetachResult::failed;
     const Rgba8ReferenceSnapshot refs_after =
-        asset_index_exact
-        ? snapshot_rgba8_references(asset_index)
+        source_identity_exact
+        ? snapshot_rgba8_references(source_retained)
         : Rgba8ReferenceSnapshot{};
     const Rgba8HostRemovalPlan retirement =
         plan_rgba8_host_removal(
@@ -10718,8 +11358,9 @@ bool detach_rgba8_host_for_replacement(
     bool ledger_exact{};
     if (detach_transition_exact) {
         recorded_debt = retirement.retirement_debt_after;
-        const bool debt_published = set_rgba8_retirement_debt(
-            asset_index, recorded_debt);
+        const bool debt_published =
+            retained_rgba8_resource(asset_index) == source_resource &&
+            set_rgba8_retirement_debt(asset_index, recorded_debt);
         if (debt_published) {
             g_injected_icon_hosts.fetch_and(
                 ~mask,
@@ -10808,8 +11449,15 @@ bool detach_vector_host_for_replacement(
         std::memory_order_acquire);
     const std::size_t asset_before = g_rgba8_host_assets[bit].load(
         std::memory_order_acquire);
-    const bool refs_before_exact =
-        rgba8_references_match_tracked_hosts(
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    const bool immutable_bank_overlap = g_rgba8_staged_bank_ready;
+#else
+    constexpr bool immutable_bank_overlap = false;
+#endif
+    const bool refs_before_exact = immutable_bank_overlap
+        ? rgba8_rebind_overlap_references_match(
+            "shape-replacement-vector-detach-before")
+        : rgba8_references_match_tracked_hosts(
             "shape-replacement-vector-detach-before");
     const bool ownership_before_exact =
         (injected_before & mask) != 0 && (rgba_before & mask) == 0 &&
@@ -10836,8 +11484,11 @@ bool detach_vector_host_for_replacement(
                 0 &&
             (g_rgba8_icon_hosts.load(std::memory_order_acquire) & mask) == 0 &&
             g_rgba8_host_assets[bit].load(std::memory_order_acquire) == 0 &&
-            rgba8_references_match_tracked_hosts(
-                "shape-replacement-vector-detach-after");
+            (immutable_bank_overlap
+                ? rgba8_rebind_overlap_references_match(
+                    "shape-replacement-vector-detach-after")
+                : rgba8_references_match_tracked_hosts(
+                    "shape-replacement-vector-detach-after"));
         if (ledger_exact) {
             transaction.completed_clear_mask =
                 transaction.completed_clear_mask | mask;
@@ -10915,18 +11566,30 @@ InjectedIconsClearResult clear_injected_icons(
             const std::size_t asset_index = asset_index_exact
                 ? prior_asset - 1U
                 : invalid_tab_index;
-            const std::uint32_t active_before = asset_index_exact
-                ? count_active_rgba8_asset_hosts(asset_index)
+            RetainedRgba8Resource retained = asset_index_exact
+                ? current_retained_rgba8(asset_index)
+                : RetainedRgba8Resource{};
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            if (staged && asset_index_exact &&
+                g_rgba8_staged_bank_ready &&
+                asset_index < g_rgba8_staged_resources_scratch.size()) {
+                retained = g_rgba8_staged_resources_scratch[asset_index];
+            }
+#endif
+            const bool resource_identity_exact = asset_index_exact &&
+                retained.ready && retained.resource && retained.image;
+            const std::uint32_t active_before = resource_identity_exact
+                ? count_rgba8_resource_hosts(retained.resource)
                 : 0U;
-            std::uint32_t debt_before = asset_index_exact
-                ? rgba8_retirement_debt(asset_index)
+            std::uint32_t debt_before = resource_identity_exact && !staged
+                ? rgba8_debt_for_resource(asset_index, retained.resource)
                 : 0U;
             const Rgba8ReferenceSnapshot refs_before =
-                asset_index_exact
-                ? snapshot_rgba8_references(asset_index)
+                resource_identity_exact
+                ? snapshot_rgba8_references(retained)
                 : Rgba8ReferenceSnapshot{};
             bool epoch_source_exact = allow_already_absent &&
-                asset_index_exact && refs_before.resource_read &&
+                resource_identity_exact && refs_before.resource_read &&
                 refs_before.resource == 1U && refs_before.raw_read;
             if (epoch_source_exact) {
                 const auto reconciliation =
@@ -10936,7 +11599,7 @@ InjectedIconsClearResult clear_injected_icons(
                         refs_before.raw,
                         kRgba8RetirementLimits);
                 epoch_source_exact = reconciliation.accepted();
-                if (epoch_source_exact &&
+                if (epoch_source_exact && !staged &&
                     reconciliation.retirement_debt_after != debt_before) {
                     epoch_source_exact = set_rgba8_retirement_debt(
                         asset_index,
@@ -10955,9 +11618,9 @@ InjectedIconsClearResult clear_injected_icons(
                 clear_injected_icon_host(
                     top, layer, physical, property_bank);
             const Rgba8ReferenceSnapshot refs_after =
-                asset_index_exact &&
+                resource_identity_exact &&
                     result == InjectedIconDetachResult::removed
-                ? snapshot_rgba8_references(asset_index)
+                ? snapshot_rgba8_references(retained)
                 : Rgba8ReferenceSnapshot{};
             const Rgba8HostRemovalPlan epoch_retirement =
                 plan_rgba8_host_removal(
@@ -10966,30 +11629,54 @@ InjectedIconsClearResult clear_injected_icons(
                     refs_before.raw,
                     refs_after.raw,
                     kRgba8RetirementLimits);
-            const bool epoch_removed_ref_proven =
-                allow_already_absent && was_rgba && epoch_source_exact &&
+            const bool exact_removed_resource = was_rgba &&
+                resource_identity_exact &&
                 result == InjectedIconDetachResult::removed &&
                 refs_after.resource_read && refs_after.resource == 1U &&
-                refs_after.raw_read && epoch_retirement.accepted() &&
-                set_rgba8_retirement_debt(
-                    asset_index,
-                    epoch_retirement.retirement_debt_after);
+                refs_after.raw_read && epoch_retirement.accepted();
+            const bool retirement_debt_published = exact_removed_resource &&
+                (staged
+                    ? epoch_retirement.retirement_debt_after == 0U
+                    : set_rgba8_retirement_debt(
+                        asset_index,
+                        epoch_retirement.retirement_debt_after));
+            const bool epoch_removed_ref_proven =
+                allow_already_absent && was_rgba && epoch_source_exact &&
+                exact_removed_resource &&
+                retirement_debt_published;
+            const bool staged_removed_ref_proven = staged && was_rgba &&
+                exact_removed_resource &&
+                refs_before.resource_read && refs_before.resource == 1U &&
+                refs_before.raw_read &&
+                epoch_retirement.retirement_debt_after == 0U;
             const bool removed_ref_proven =
                 result == InjectedIconDetachResult::removed &&
                 (!was_rgba ||
                     (allow_already_absent
                         ? epoch_removed_ref_proven
-                        : rgba8_references_match_tracked_hosts(
+                        : (staged
+                            ? staged_removed_ref_proven
+                            : rgba8_references_match_tracked_hosts(
                             staged
                                 ? "post-remove-staged"
                                 : "post-remove",
                             bit,
                             0,
-                            staged)));
+                            staged))));
+            const Rgba8ReferenceSnapshot boundary_refs =
+                resource_identity_exact
+                ? snapshot_rgba8_references(retained)
+                : Rgba8ReferenceSnapshot{};
+            const bool exact_resource_root =
+                boundary_refs.resource_read &&
+                boundary_refs.resource == 1U &&
+                boundary_refs.raw_read && boundary_refs.raw == 1U;
             const bool absent_boundary_released =
                 allow_already_absent &&
                 result == InjectedIconDetachResult::already_absent &&
-                (!was_rgba || rgba8_resources_at_root_baseline());
+                (!was_rgba || (staged
+                    ? exact_resource_root
+                    : rgba8_resources_at_root_baseline()));
             const TabHostMask all_rgba_bits =
                 g_rgba8_icon_hosts.load(std::memory_order_acquire) |
                 g_staged_rgba8_icon_hosts.load(std::memory_order_acquire);
@@ -10997,7 +11684,9 @@ InjectedIconsClearResult clear_injected_icons(
                 allow_already_absent &&
                 result == InjectedIconDetachResult::different_movie &&
                 (!was_rgba || all_rgba_bits == 0 ||
-                    rgba8_resources_at_root_baseline());
+                    (staged
+                        ? exact_resource_root
+                        : rgba8_resources_at_root_baseline()));
             if (removed_ref_proven || absent_boundary_released ||
                 movie_boundary_released) {
                 if (staged) {
@@ -11037,7 +11726,7 @@ InjectedIconsClearResult clear_injected_icons(
                 const bool ledger_exact =
                     (injected_after & mask) == 0 &&
                     (rgba_after & mask) == 0 && asset_after == 0 &&
-                    (!epoch_removed_ref_proven ||
+                    (staged || !epoch_removed_ref_proven ||
                         rgba8_retirement_debt(asset_index) ==
                             epoch_retirement.retirement_debt_after);
                 if (was_rgba && ledger_exact) {
@@ -11326,8 +12015,18 @@ bool repaint_tab_cell(
     if (presented) {
         const bool retirement_exact =
             reconcile_rgba8_retirement_debt("post-present");
-        if (!retirement_exact ||
-            !rgba8_references_match_tracked_hosts("post-present")) {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        const bool immutable_bank_overlap =
+            g_in_place_rgba8_rebind_transaction.active &&
+            g_rgba8_staged_bank_ready;
+        const bool references_exact = immutable_bank_overlap
+            ? rgba8_rebind_overlap_references_match("post-present-overlap")
+            : rgba8_references_match_tracked_hosts("post-present");
+#else
+        const bool references_exact =
+            rgba8_references_match_tracked_hosts("post-present");
+#endif
+        if (!retirement_exact || !references_exact) {
             if (g_in_place_rgba8_rebind_transaction.active) {
                 g_in_place_rgba8_rebind_transaction.failed = true;
             } else {
@@ -11442,6 +12141,69 @@ bool invoke_selector_select(
     return selected;
 }
 
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+bool invoke_selector_active_count(
+    void* top,
+    std::size_t active) noexcept {
+    if (!top || !g_selector_set_active_count ||
+        active < kStockLogicalTabCount ||
+        active > kPhysicalTabCapacity ||
+        active > static_cast<std::size_t>(
+            (std::numeric_limits<std::int32_t>::max)())) {
+        return false;
+    }
+    auto* const selector = static_cast<std::byte*>(top) + kSelectorOffset;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        g_selector_set_active_count(
+            selector, static_cast<std::int32_t>(active));
+#if defined(_MSC_VER)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        log_failure(
+            "selector active-count update faulted (active=%zu seh=0x%08lX)",
+            active,
+            static_cast<unsigned long>(GetExceptionCode()));
+        return false;
+    }
+#endif
+    std::int32_t observed{-1};
+    return guarded_read(
+            selector + kSelectorActiveCountOffset, observed) &&
+        observed == static_cast<std::int32_t>(active);
+}
+
+bool normalize_selector_active_count_for_projection(void* top) noexcept {
+    if (!top) return false;
+    std::uint64_t record_count{};
+    std::int32_t active{-1};
+    std::int32_t selected{-1};
+    auto* const selector = static_cast<std::byte*>(top) + kSelectorOffset;
+    if (!guarded_read(
+            static_cast<std::byte*>(top) + kCategoryCountOffset,
+            record_count) ||
+        record_count < kStockLogicalTabCount ||
+        record_count > kPhysicalTabCapacity ||
+        !guarded_read(selector + kSelectorActiveCountOffset, active) ||
+        !guarded_read(selector + kSelectorSelectedIndexOffset, selected)) {
+        return false;
+    }
+    const std::size_t target = std::min(
+        static_cast<std::size_t>(record_count),
+        active_logical_tab_count());
+    if (target < kStockLogicalTabCount) return false;
+    if (active == static_cast<std::int32_t>(target) &&
+        selected >= 0 && selected < active) {
+        return true;
+    }
+    if (selected < 0 || selected >= static_cast<std::int32_t>(target)) {
+        ScopedBooleanTrue mutating{g_mutating_viewport};
+        if (!invoke_selector_select(top, 0U)) return false;
+    }
+    return invoke_selector_active_count(top, target);
+}
+#endif
+
 bool begin_panel_state_isolation(
     void* top,
     std::int32_t target_category,
@@ -11471,9 +12233,14 @@ bool is_custom_logical(std::size_t logical) noexcept {
 
 std::size_t graphics_route_for_logical(
     std::size_t logical) noexcept {
-    return logical == kNativeGraphicsLogical
-        ? native_graphics_route()
-        : logical - kStockLogicalTabCount;
+    if (logical == kNativeGraphicsLogical) {
+        return native_graphics_route();
+    }
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    return stable_custom_index_for_logical(logical);
+#else
+    return logical - kStockLogicalTabCount;
+#endif
 }
 
 // Called synchronously by the host only after exact identity, age and native
@@ -11742,7 +12509,13 @@ bool restore_previous_mapping(
             TabOverflowIndicator::none;
         std::size_t asset{};
         if (!vector && logical >= kStockLogicalTabCount) {
-            const std::size_t custom = logical - kStockLogicalTabCount;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            const std::size_t custom =
+                stable_custom_index_for_logical(logical);
+#else
+            const std::size_t custom =
+                logical - kStockLogicalTabCount;
+#endif
             if (custom >= active_custom_tab_count()) {
                 return false;
             }
@@ -11750,6 +12523,17 @@ bool restore_previous_mapping(
                 // Zero remains the empty-host sentinel. The encoded value is
                 // size_t so every public logical-tab index is representable.
                 asset = custom + 1U;
+                const RetainedRgba8Resource retained =
+                    effective_retained_rgba8(custom);
+                if (!retained.ready || !retained.resource ||
+                    !retained.image) {
+                    return false;
+                }
+                for (std::size_t layer = 0; layer < 2; ++layer) {
+                    const std::size_t bit = physical +
+                        layer * active_physical_tab_count();
+                    output.resources[bit] = retained.resource;
+                }
             } else {
                 vector = true;
             }
@@ -11805,6 +12589,8 @@ bool restore_previous_mapping(
             return false;
         }
         output.assets[bit] = encoded;
+        output.resources[bit] = retained_rgba8_resource(asset);
+        if (!output.resources[bit]) return false;
     }
     return output.injected_mask ==
             (output.rgba_mask | output.vector_mask) &&
@@ -11820,7 +12606,10 @@ bool restore_previous_mapping(
         return false;
     }
     for (std::size_t bit = 0; bit < active_tab_host_count(); ++bit) {
-        if (left.assets[bit] != right.assets[bit]) return false;
+        if (left.assets[bit] != right.assets[bit] ||
+            left.resources[bit] != right.resources[bit]) {
+            return false;
+        }
     }
     return true;
 }
@@ -11838,9 +12627,11 @@ bool restore_previous_mapping(
 
     for (std::size_t bit = 0; bit < active_tab_host_count(); ++bit) {
         const TabHostMask mask = TabHostMask{1} << bit;
-        if (source.assets[bit] != 0 ||
+        if (source.assets[bit] != 0 || source.resources[bit] != nullptr ||
             (((target.rgba_mask & mask) != 0) !=
-                (target.assets[bit] != 0))) {
+                (target.assets[bit] != 0)) ||
+            (((target.rgba_mask & mask) != 0) !=
+                (target.resources[bit] != nullptr))) {
             return false;
         }
     }
@@ -11860,15 +12651,36 @@ bool restore_previous_mapping(
             viewport.selected_logical();
 }
 
+[[nodiscard]] bool pending_requests_tab_projection_refresh(
+    void* top,
+    const TabViewport& viewport) noexcept {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    const PendingTransition& pending = g_runtime.pending;
+    return pending.active && pending.projection_refresh &&
+        pending.projection_generation && pending.top == top &&
+        g_runtime.active && g_runtime.top == top &&
+        pending.candidate.mapping_generation() ==
+            viewport.mapping_generation() &&
+        pending.candidate.window_start() == viewport.window_start() &&
+        pending.candidate.selected_logical() == viewport.selected_logical();
+#else
+    (void)top;
+    (void)viewport;
+    return false;
+#endif
+}
+
 [[nodiscard]] bool shape_replacement_plan(
     void* top,
     const TabViewport& viewport,
     Rgba8ReplacementPlan& output) noexcept {
     const bool catalogue_presentation_refresh =
         pending_requests_catalogue_presentation_refresh(top, viewport);
+    const bool tab_projection_refresh =
+        pending_requests_tab_projection_refresh(top, viewport);
     const bool transition_required = g_runtime.active &&
         g_runtime.top == top &&
-        (catalogue_presentation_refresh ||
+        (catalogue_presentation_refresh || tab_projection_refresh ||
             tab_overflow_indicators_changed(g_runtime.viewport, viewport) ||
             viewport.mapping_generation() !=
                 g_runtime.viewport.mapping_generation());
@@ -11916,7 +12728,9 @@ bool restore_previous_mapping(
         const bool same_raster = (source.rgba_mask & mask) != 0 &&
             (target.rgba_mask & mask) != 0 &&
             source.assets[bit] != 0 &&
-            source.assets[bit] == target.assets[bit];
+            source.assets[bit] == target.assets[bit] &&
+            erui::detail::rgba8_resource_identity_preserved(
+                source.resources[bit], target.resources[bit]);
         if (same_vector || same_raster) {
             output.preserved_host_mask |= mask;
         }
@@ -11933,6 +12747,8 @@ bool restore_previous_mapping(
     output.audit_mask = active_tab_host_mask();
     output.source_assets = source.assets;
     output.target_assets = target.assets;
+    output.source_resources = source.resources;
+    output.target_resources = target.resources;
     return true;
 }
 
@@ -11953,6 +12769,7 @@ bool apply_mapping(
     const bool transition_required = g_runtime.active &&
         g_runtime.top == top &&
         (pending_requests_catalogue_presentation_refresh(top, viewport) ||
+            pending_requests_tab_projection_refresh(top, viewport) ||
             tab_overflow_indicators_changed(g_runtime.viewport, viewport) ||
             viewport.mapping_generation() !=
                 g_runtime.viewport.mapping_generation());
@@ -11983,6 +12800,11 @@ bool apply_mapping(
                 assets_exact = assets_exact &&
                     g_rgba8_host_assets[bit].load(
                         std::memory_order_acquire) == expected;
+                if (expected != 0U) {
+                    assets_exact = assets_exact &&
+                        retained_rgba8_resource(expected - 1U) ==
+                            replacement_plan.source_resources[bit];
+                }
             }
             bool debts_zero = all_rgba8_retirement_debts_zero();
             InjectedMovieFingerprint current_fingerprint{};
@@ -12162,6 +12984,10 @@ bool apply_mapping(
                 replacement_plan.preserved_host_mask;
             transaction.source_assets = replacement_plan.source_assets;
             transaction.target_assets = replacement_plan.target_assets;
+            transaction.source_resources =
+                replacement_plan.source_resources;
+            transaction.target_resources =
+                replacement_plan.target_resources;
 
             // Debt from an earlier, already-committed bank may outlive its
             // display object for a renderer frame.  Wait before staging a new
@@ -12220,6 +13046,12 @@ bool apply_mapping(
                 g_rgba8_host_assets[bit].load(
                     std::memory_order_acquire) ==
                     transaction.source_assets[bit];
+            if (transaction.source_assets[bit] != 0U) {
+                source_assets_exact = source_assets_exact &&
+                    retained_rgba8_resource(
+                        transaction.source_assets[bit] - 1U) ==
+                        transaction.source_resources[bit];
+            }
             staged_assets_empty = staged_assets_empty &&
                 g_staged_rgba8_host_assets[bit].load(
                     std::memory_order_acquire) == 0;
@@ -12239,6 +13071,13 @@ bool apply_mapping(
                 std::memory_order_acquire) ||
             (transaction.source_rgba_mask |
                 transaction.target_rgba_mask) == 0;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        const bool resource_bank_publishable =
+            !g_runtime.pending.icon_resource_refresh ||
+            staged_rgba8_bank_publishable();
+#else
+        constexpr bool resource_bank_publishable = true;
+#endif
         const bool ready_ledger_exact = matching_ready_transaction &&
             injected == transaction.source_injected_mask &&
             rgba == transaction.source_rgba_mask && source_assets_exact &&
@@ -12247,7 +13086,7 @@ bool apply_mapping(
             g_staged_rgba8_icon_hosts.load(
                 std::memory_order_acquire) == 0 && staged_assets_empty &&
             fingerprint_exact && refs_exact &&
-            publication_state_compatible;
+            publication_state_compatible && resource_bank_publishable;
         TabHostMask property_state_mask{};
         if (ready_ledger_exact) {
             const auto preflight = [&property_state_mask, top](
@@ -12317,7 +13156,7 @@ bool apply_mapping(
             g_runtime.destructive_transition_failed = true;
             destroy_tab_layers(layers);
             log_failure(
-                "atomic RGBA8 handoff preflight failed (ready:%u injected:0x%04X rgba:0x%04X sourceAssets:%u stagedEmpty:%u debtsZero:%u fingerprint:%u refs:%u properties:0x%04X/0x%04X)",
+                "atomic RGBA8 handoff preflight failed (ready:%u injected:0x%04X rgba:0x%04X sourceAssets:%u stagedEmpty:%u debtsZero:%u fingerprint:%u refs:%u resourceBank:%u properties:0x%04X/0x%04X)",
                 matching_ready_transaction ? 1U : 0U,
                 static_cast<unsigned>(injected),
                 static_cast<unsigned>(rgba),
@@ -12326,6 +13165,7 @@ bool apply_mapping(
                 debts_zero ? 1U : 0U,
                 fingerprint_exact ? 1U : 0U,
                 refs_exact ? 1U : 0U,
+                resource_bank_publishable ? 1U : 0U,
                 static_cast<unsigned>(property_state_mask),
                 static_cast<unsigned>(transaction.audit_mask));
             return false;
@@ -12360,6 +13200,17 @@ bool apply_mapping(
             staged_assets_exact = staged_assets_exact &&
                 g_staged_rgba8_host_assets[bit].load(
                     std::memory_order_acquire) == expected;
+            #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            if (expected != 0U && g_runtime.pending.icon_resource_refresh) {
+                staged_assets_exact = staged_assets_exact &&
+                    g_rgba8_staged_bank_ready &&
+                    expected - 1U <
+                        g_rgba8_staged_resources_scratch.size() &&
+                    g_rgba8_staged_resources_scratch[expected - 1U]
+                            .resource ==
+                        transaction.target_resources[bit];
+            }
+            #endif
         }
         const bool staged_exact = repainted && !transaction.failed &&
             g_staged_injected_icon_hosts.load(
@@ -12420,6 +13271,19 @@ bool apply_mapping(
         // no renderer boundary can observe an authored-icon-only state.
         if (handoff_exact && transaction.completed_clear_mask ==
                 transaction.expected_clear_mask) {
+            const bool icon_bank_published =
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+                !g_runtime.pending.icon_resource_refresh ||
+                publish_staged_rgba8_bank_after_handoff();
+#else
+                true;
+#endif
+            if (!icon_bank_published) {
+                handoff_exact = false;
+            }
+        }
+        if (handoff_exact && transaction.completed_clear_mask ==
+                transaction.expected_clear_mask) {
             TabHostMask bank_b = g_icon_bank_b_hosts.load(
                 std::memory_order_acquire);
             for (std::size_t bit = 0;
@@ -12452,6 +13316,11 @@ bool apply_mapping(
                     0, std::memory_order_release);
             }
             g_icon_bank_b_hosts.store(bank_b, std::memory_order_release);
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            if (g_runtime.pending.icon_resource_refresh) {
+                finish_staged_rgba8_bank_publication();
+            }
+#endif
         } else {
             handoff_exact = false;
         }
@@ -12533,6 +13402,11 @@ bool apply_mapping(
             target_assets_exact = target_assets_exact &&
                 g_rgba8_host_assets[bit].load(std::memory_order_acquire) ==
                     expected;
+            if (expected != 0U) {
+                target_assets_exact = target_assets_exact &&
+                    retained_rgba8_resource(expected - 1U) ==
+                        completed.target_resources[bit];
+            }
         }
         const bool final_refs_exact =
             rgba8_references_match_tracked_hosts(
@@ -13273,7 +14147,11 @@ bool restore_preserved_stock_records(void* top) noexcept {
             logical.title[0] == L'\0') {
             return false;
         }
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        stock[physical].title = active_logical_title(logical);
+#else
         stock[physical].title = logical.title.data();
+#endif
         stock[physical].category = logical.category;
         stock[physical].presentation = logical.presentation;
     }
@@ -13282,7 +14160,11 @@ bool restore_preserved_stock_records(void* top) noexcept {
     for (std::size_t physical = kStockLogicalTabCount;
          physical < active_physical_tab_count();
          ++physical) {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        stock[physical].title = active_logical_title(graphics);
+#else
         stock[physical].title = graphics.title.data();
+#endif
         stock[physical].category = graphics.category;
         stock[physical].presentation = graphics.presentation;
     }
@@ -13347,11 +14229,26 @@ bool acknowledge_exact_carrier_teardown() noexcept {
         return false;
     }
     const bool recovered = g_research_failed;
+    const bool destructive_projection_boundary = recovered &&
+        g_runtime.active && g_runtime.destructive_transition_failed &&
+        g_runtime.frozen_projection_retained_target;
     g_research_carrier_teardown_generation = carrier_teardown_generation;
     g_research_failed = false;
+    if (destructive_projection_boundary) {
+        // The carrier counter proves that the failed category-8 page is gone,
+        // but it does not prove that the surrounding tab-strip movie or its
+        // borrowed record pointers were rebuilt. Keep the retained target and
+        // its process-owned title/icon storage pinned. A later ensure_runtime
+        // call must still validate a new movie/stock epoch, reconcile both
+        // overlay banks, and restore pristine stock records before reset.
+        log_line(
+            "Frozen tab projection observed exact Graphics carrier teardown generation=%llu; retained target ownership remains pinned pending validated tab-strip reconciliation",
+            static_cast<unsigned long long>(
+                carrier_teardown_generation));
+    }
     if (recovered) {
         log_line(
-            "Graphics carrier fault cleared after exact native teardown generation=%llu; the new Configuration epoch may construct native Graphics again",
+            "Graphics carrier fault cleared after exact native teardown generation=%llu; native tab recovery may resume",
             static_cast<unsigned long long>(
                 carrier_teardown_generation));
     }
@@ -13363,8 +14260,12 @@ bool acknowledge_exact_carrier_teardown() noexcept {
 
 bool initialize_runtime(
     void* top,
-    bool use_preserved_stock = false) noexcept {
+    bool use_preserved_stock = false,
+    std::size_t requested_initial_logical = invalid_tab_index) noexcept {
     if (!validate_top(top)) return false;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    if (!normalize_selector_active_count_for_projection(top)) return false;
+#endif
     LiveTabGeometry live_geometry{};
     if (!read_live_tab_geometry(top, live_geometry)) {
         return false;
@@ -13471,7 +14372,7 @@ bool initialize_runtime(
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
     if (!g_logical_tab_catalogue ||
         g_logical_tab_catalogue->tabs.size() !=
-            active_logical_tab_count()) {
+            resource_logical_tab_count()) {
         log_failure("pinned logical tab catalogue is unavailable");
         return false;
     }
@@ -13516,8 +14417,12 @@ bool initialize_runtime(
     for (std::size_t icon = 0;
          icon < active_custom_tab_count();
          ++icon) {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        LogicalTab* const tab = runtime_stable_custom_logical_tab(icon);
+#else
         LogicalTab* const tab = initialization_tab(
             kStockLogicalTabCount + icon);
+#endif
         if (!tab) return false;
         if (!make_synthetic_icon_descriptor(
                 tab->presentation, kRgba8IconIds[icon])) {
@@ -13537,25 +14442,21 @@ bool initialize_runtime(
     for (std::size_t logical = kStockLogicalTabCount;
          logical < active_logical_tab_count();
          ++logical) {
-        const std::size_t extra = logical - kStockLogicalTabCount;
         LogicalTab* const destination = initialization_tab(logical);
         if (!destination) return false;
 #if defined(ER_NATIVE_UI_PRODUCTION_TABS)
-        const auto custom = g_native_tab_catalogue
-            ? g_native_tab_catalogue->custom_entries()
-            : std::span<const erui::detail::NativeTabCatalogueEntry>{};
-        erui::detail::RuntimeState& host_runtime =
-            erui::detail::runtime_state();
-        const wchar_t* const title =
-            extra < custom.size() && host_runtime.menu
-            ? host_runtime.menu->texts.lookup(
-                  static_cast<int>(custom[extra].title_id))
+        const std::size_t stable =
+            stable_custom_index_for_logical(logical);
+        const wchar_t* const title = g_tab_projection_generation &&
+                stable < g_tab_projection_generation->entries.size()
+            ? g_tab_projection_generation->entries[stable].title.c_str()
             : nullptr;
-        if (!copy_title(title, destination->title)) {
+        if (!copy_title(
+                title, active_logical_title_storage(*destination))) {
             log_failure(
                 "custom-tab title %zu is unavailable or exceeds %zu UTF-16 code units",
-                extra,
-                destination->title.size() - 1U);
+                stable,
+                kTitleCapacity - 1U);
             return false;
         }
 #else
@@ -13563,7 +14464,7 @@ bool initialize_runtime(
             destination->title.data(),
             destination->title.size(),
             L"[Probe] Client Page %02zu",
-            extra + 1);
+            logical - kStockLogicalTabCount + 1);
         if (title_length <= 0 ||
             static_cast<std::size_t>(title_length) >=
                 destination->title.size()) {
@@ -13576,17 +14477,24 @@ bool initialize_runtime(
     }
 
     std::uint32_t selected{};
-    if (!read_selected_physical(top, selected) ||
-        !next.viewport.initialize(
+    if (!read_selected_physical(top, selected)) return false;
+    const bool explicit_initial =
+        requested_initial_logical != invalid_tab_index;
+    const std::size_t initial_logical = explicit_initial
+        ? requested_initial_logical
+        : 0U;
+    if (!next.viewport.initialize(
             active_logical_tab_count(),
             active_physical_tab_count(),
             g_navigation_margin,
-            0)) {
+            initial_logical)) {
         return false;
     }
-    const TabViewportChange initial_selection =
-        next.viewport.select_physical(selected);
-    if (!initial_selection.valid) return false;
+    if (!explicit_initial) {
+        const TabViewportChange initial_selection =
+            next.viewport.select_physical(selected);
+        if (!initial_selection.valid) return false;
+    }
 
     // Publish the catalogue before build_mapping_fields() reads it. No hook
     // can interleave here because all menu callbacks execute on this UI thread.
@@ -13616,6 +14524,16 @@ bool initialize_runtime(
         }
         reset_runtime();
         return false;
+    }
+    if (explicit_initial) {
+        const std::size_t desired_physical =
+            g_runtime.viewport.selected_physical();
+        if (desired_physical >= active_physical_tab_count() ||
+            !invoke_selector_select(
+                top, static_cast<std::uint32_t>(desired_physical))) {
+            reset_runtime();
+            return false;
+        }
     }
     g_runtime.active = true;
 
@@ -13695,11 +14613,616 @@ bool initialize_runtime(
             tab->category,
             static_cast<unsigned>(token),
             resource_id,
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            active_logical_title(*tab));
+#else
             tab->title.data());
+#endif
     }
     log_rgba8_lifecycle_snapshot("epoch-initialized", top);
     return true;
 }
+
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+enum class TabProjectionRefreshResult : std::uint8_t {
+    none,
+    retiring,
+    deferred_epoch,
+    committed,
+    failed,
+};
+
+struct StableTabSelection final {
+    bool custom{};
+    std::size_t index{invalid_tab_index};
+};
+
+[[nodiscard]] StableTabSelection selected_stable_tab() noexcept {
+    StableTabSelection result{};
+    if (!g_runtime.active || !g_runtime.viewport.initialized()) return result;
+    const std::size_t logical = g_runtime.viewport.selected_logical();
+    if (logical < kStockLogicalTabCount) {
+        result.index = logical;
+        return result;
+    }
+    const LogicalTab* const tab = runtime_logical_tab(logical);
+    if (!tab || !tab->custom_runtime) return result;
+    result.custom = true;
+    result.index = tab->custom_runtime->index();
+    return result;
+}
+
+[[nodiscard]] bool generation_has_icon_change(
+    const erui::detail::TabRuntimeGeneration& generation) noexcept {
+    if (!g_tab_projection_generation ||
+        generation.entries.size() !=
+            g_tab_projection_generation->entries.size()) {
+        return true;
+    }
+    for (std::size_t index = 0; index < generation.entries.size(); ++index) {
+        if (generation.entries[index].icon_revision !=
+            g_tab_projection_generation->entries[index].icon_revision) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool validate_projection_generation(
+    const erui::detail::TabRuntimeGeneration& generation) noexcept {
+    if (!g_logical_tab_catalogue ||
+        generation.entries.size() != active_custom_tab_count() ||
+        g_logical_tab_catalogue->tabs.size() !=
+            resource_logical_tab_count()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < generation.entries.size(); ++index) {
+        const erui::detail::TabRuntimeEntry& entry =
+            generation.entries[index];
+        if (entry.stable_index >= generation.entries.size() ||
+            entry.stable_index != index || entry.title.empty() ||
+            entry.title.size() >= kTitleCapacity) {
+            return false;
+        }
+    }
+    for (std::size_t ordinal = 0;
+         ordinal < generation.visible_order.size();
+         ++ordinal) {
+        const std::size_t stable = generation.visible_order[ordinal];
+        if (stable >= generation.entries.size()) {
+            return false;
+        }
+        for (std::size_t prior = 0; prior < ordinal; ++prior) {
+            if (generation.visible_order[prior] == stable) return false;
+        }
+    }
+    return true;
+}
+
+// All allocation and sorting already happened in TabRuntimeGeneration.
+// Publishing the process-pinned title storage is a bounded no-throw copy.
+[[nodiscard]] bool apply_projection_generation(
+    const std::shared_ptr<const erui::detail::TabRuntimeGeneration>&
+        generation) noexcept {
+    if (!generation || !validate_projection_generation(*generation)) {
+        return false;
+    }
+    for (const erui::detail::TabRuntimeEntry& entry : generation->entries) {
+        LogicalTab* const tab =
+            runtime_stable_custom_logical_tab(entry.stable_index);
+        if (!tab) return false;
+    }
+    for (const erui::detail::TabRuntimeEntry& entry : generation->entries) {
+        LogicalTab* const tab =
+            runtime_stable_custom_logical_tab(entry.stable_index);
+        if (!copy_title(
+                entry.title.c_str(), active_logical_title_storage(*tab))) {
+            return false;
+        }
+    }
+    g_tab_projection_generation = generation;
+    return true;
+}
+
+// Prepare a projection's title pointers without touching the buffers borrowed
+// by the visible source records.  No active flag is changed until the target
+// Shape bank has attached and the old bank has retired exactly.
+[[nodiscard]] bool stage_projection_titles(
+    const erui::detail::TabRuntimeGeneration& generation) noexcept {
+    if (!validate_projection_generation(generation)) return false;
+    for (const erui::detail::TabRuntimeEntry& entry : generation.entries) {
+        if (!runtime_stable_custom_logical_tab(entry.stable_index)) {
+            return false;
+        }
+    }
+    for (const erui::detail::TabRuntimeEntry& entry : generation.entries) {
+        LogicalTab* const tab =
+            runtime_stable_custom_logical_tab(entry.stable_index);
+        if (!copy_title(
+                entry.title.c_str(), inactive_logical_title(*tab))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void commit_staged_projection_titles() noexcept {
+    for (std::size_t stable = 0;
+         stable < active_custom_tab_count();
+         ++stable) {
+        if (LogicalTab* const tab =
+                runtime_stable_custom_logical_tab(stable)) {
+            tab->alternate_title_active = !tab->alternate_title_active;
+        }
+    }
+}
+
+struct TabGenerationPublication final {
+    bool accepted{};
+    bool latest{};
+};
+
+[[nodiscard]] TabGenerationPublication publish_tab_generation(
+    const std::shared_ptr<const erui::detail::TabRuntimeGeneration>&
+        generation) noexcept {
+    TabGenerationPublication result{};
+    if (!generation) return result;
+    result.latest =
+        erui::detail::publish_applied_tab_generation(generation);
+    const auto applied = erui::detail::acquire_applied_tab_generation();
+    result.accepted = applied && applied.get() == generation.get() &&
+        applied->revision == generation->revision;
+    return result;
+}
+
+[[nodiscard]] bool stage_live_rgba8_generation(
+    void* top,
+    const std::shared_ptr<const erui::detail::TabRuntimeGeneration>&
+        generation) noexcept {
+    if (!generation || !top || !g_runtime.active ||
+        g_runtime.top != top || !validate_top(top) ||
+        !validate_projection_generation(*generation)) {
+        return false;
+    }
+    if (g_rgba8_staged_bank_ready) {
+        return g_rgba8_staged_tab_generation.get() == generation.get();
+    }
+    if (g_rgba8_staging_failed_epoch != 0U &&
+        g_rgba8_staging_failed_epoch == g_runtime.presentation_epoch) {
+        return false;
+    }
+    if (!all_rgba8_retirement_debts_zero()) return false;
+
+    const std::size_t count = active_custom_tab_count();
+    if (!g_tab_projection_generation ||
+        generation->entries.size() != count ||
+        g_rgba8_staged_resources_scratch.size() != count ||
+        g_rgba8_staged_changed_scratch.size() != count) {
+        return false;
+    }
+    std::fill(
+        g_rgba8_staged_resources_scratch.begin(),
+        g_rgba8_staged_resources_scratch.end(),
+        RetainedRgba8Resource{});
+    std::fill(
+        g_rgba8_staged_changed_scratch.begin(),
+        g_rgba8_staged_changed_scratch.end(),
+        std::uint8_t{0});
+
+    g_rgba8_staging_generation = generation.get();
+    bool exact{true};
+    for (std::size_t index = 0; index < count; ++index) {
+        const bool changed = generation->entries[index].icon_revision !=
+            g_tab_projection_generation->entries[index].icon_revision;
+        g_rgba8_staged_changed_scratch[index] = changed ? 1U : 0U;
+        if (!changed) {
+            g_rgba8_staged_resources_scratch[index] =
+                current_retained_rgba8(index);
+            continue;
+        }
+        run_raw_image_lifecycle_probe_one(
+            top, index, g_rgba8_staged_resources_scratch[index]);
+        const RetainedRgba8Resource& staged =
+            g_rgba8_staged_resources_scratch[index];
+        exact = exact && staged.ready && staged.image && staged.resource &&
+            staged.checksum == rgba8_probe_icon_checksum(index);
+    }
+    g_rgba8_staging_generation = nullptr;
+
+    for (std::size_t index = 0; index < count && exact; ++index) {
+        const RetainedRgba8Resource& entry =
+            g_rgba8_staged_resources_scratch[index];
+        exact = entry.ready && entry.image && entry.resource;
+        for (std::size_t prior = 0; prior < index && exact; ++prior) {
+            const RetainedRgba8Resource& other =
+                g_rgba8_staged_resources_scratch[prior];
+            exact = entry.image != other.image &&
+                entry.resource != other.resource;
+        }
+    }
+    if (!exact) {
+        // Native image roots are intentionally process-retained. Do not
+        // overwrite the uncertain scratch and allocate another complete bank
+        // on every composite frame. A genuinely fresh movie epoch may retry
+        // once with its own validated bridge.
+        g_rgba8_staging_failed_epoch = g_runtime.presentation_epoch;
+        log_failure(
+            "live tab icon resource generation revision=%llu failed its immutable identity gate; source bank remains authoritative and this movie epoch will not retry",
+            static_cast<unsigned long long>(generation->revision));
+        return false;
+    }
+    g_rgba8_staged_tab_generation = generation;
+    g_rgba8_staged_bank_ready = true;
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "NativeTabs live icon resource bank staged: revision=%llu stableCustom=%zu",
+        static_cast<unsigned long long>(generation->revision),
+        count);
+    return true;
+}
+
+[[nodiscard]] bool staged_rgba8_bank_publishable() noexcept {
+    if (!g_rgba8_staged_bank_ready ||
+        !g_rgba8_staged_tab_generation ||
+        !g_native_tab_runtime ||
+        g_rgba8_staged_tab_generation->entries.size() !=
+            active_custom_tab_count() ||
+        g_rgba8_staged_resources_scratch.size() !=
+            active_custom_tab_count() ||
+        g_rgba8_staged_changed_scratch.size() !=
+            active_custom_tab_count() ||
+        g_rgba8_retired_resources_scratch.size() !=
+            active_custom_tab_count() ||
+        g_rgba8_retired_debts_scratch.size() !=
+            active_custom_tab_count() ||
+        g_rgba8_retired_bank_active) {
+        return false;
+    }
+
+    for (std::size_t index = 0;
+         index < active_custom_tab_count();
+         ++index) {
+        if (!runtime_custom_tab(index)) return false;
+        const RetainedRgba8Resource current = current_retained_rgba8(index);
+        const RetainedRgba8Resource& staged =
+            g_rgba8_staged_resources_scratch[index];
+        if (!current.ready || !current.resource || !current.image ||
+            !staged.ready || !staged.resource || !staged.image) {
+            return false;
+        }
+        const bool changed = g_rgba8_staged_changed_scratch[index] != 0U;
+        if (changed == (current.resource == staged.resource) ||
+            changed == (current.image == staged.image)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool publish_staged_rgba8_bank_after_handoff() noexcept {
+    if (!staged_rgba8_bank_publishable()) return false;
+
+    bool retired_pending{};
+    for (std::size_t index = 0;
+         index < active_custom_tab_count();
+         ++index) {
+        if (g_rgba8_staged_changed_scratch[index] == 0U) continue;
+        g_rgba8_retired_resources_scratch[index] =
+            current_retained_rgba8(index);
+        g_rgba8_retired_debts_scratch[index] =
+            rgba8_retirement_debt(index);
+        retired_pending = retired_pending ||
+            g_rgba8_retired_debts_scratch[index] != 0U;
+    }
+    // Make the old immutable roots discoverable before moving their debt out
+    // of the current runtime entries.  The publishability preflight proves all
+    // tab entries and sparse-worklist capacity before the irreversible source
+    // Shape detach, so these UI-thread updates are allocation-free.
+    g_rgba8_retired_bank_active = retired_pending;
+    for (std::size_t index = 0;
+         index < active_custom_tab_count();
+         ++index) {
+        if (g_rgba8_staged_changed_scratch[index] != 0U) {
+            (void)set_rgba8_retirement_debt(index, 0U);
+        }
+    }
+
+    // No callback is forwarded between publication and the host-ledger flip.
+    // Close the ordinary lookup gate so an unrelated presenter cannot observe
+    // a partially published table even if this code is later made reentrant.
+    g_rgba8_catalogue_ready.store(false, std::memory_order_release);
+    for (std::size_t index = 0;
+         index < active_custom_tab_count();
+         ++index) {
+        if (g_rgba8_staged_changed_scratch[index] != 0U) {
+            publish_retained_rgba8(
+                index, g_rgba8_staged_resources_scratch[index]);
+        }
+        if (auto* const tab = runtime_custom_tab(index)) {
+            tab->icon().raster_requested =
+                erui::native::custom_tab_icon_requests_raster(
+                    g_rgba8_staged_tab_generation->entries[index]
+                        .icon.source);
+        }
+    }
+    // Keep lookup closed until the caller flips every staged host ledger and
+    // property-bank bit. finish_staged_rgba8_bank_publication() reopens it at
+    // that exact commit boundary.
+    return true;
+}
+
+void finish_staged_rgba8_bank_publication() noexcept {
+    g_rgba8_staged_bank_ready = false;
+    g_rgba8_staged_tab_generation.reset();
+    std::fill(
+        g_rgba8_staged_changed_scratch.begin(),
+        g_rgba8_staged_changed_scratch.end(),
+        std::uint8_t{0});
+    g_rgba8_catalogue_ready.store(true, std::memory_order_release);
+}
+
+// A RawImage/ImageResource is immutable after native publication. An icon edit
+// therefore builds a complete replacement bank, proves the old Shapes have
+// detached, and publishes the resource/property ledgers at one commit boundary.
+// The same transaction runs in an active movie or after fresh initialization.
+// Old roots deliberately keep their process-lifetime reference and are never
+// mutated or released.
+[[nodiscard]] bool adopt_pending_tab_generation_for_fresh_epoch(
+    void* top) noexcept {
+    (void)top;
+    if (!erui::detail::tab_updates_pending()) return true;
+    const auto desired = erui::detail::acquire_desired_tab_generation();
+    if (!desired || !validate_projection_generation(*desired)) return false;
+
+    const bool icon_change = generation_has_icon_change(*desired);
+    if (!icon_change) {
+        const auto previous_generation = g_tab_projection_generation;
+        if (!apply_projection_generation(desired)) return false;
+        const TabGenerationPublication publication =
+            publish_tab_generation(desired);
+        if (!publication.accepted) {
+            (void)apply_projection_generation(previous_generation);
+            return false;
+        }
+        if (!publication.latest) {
+            log_line(
+                "fresh Configuration epoch adopted tab revision=%llu while a newer desired generation remained queued",
+                static_cast<unsigned long long>(desired->revision));
+        }
+        return true;
+    }
+
+    // A fast reopen can arrive while the previous movie's renderer debt is
+    // still retiring. Initialize this movie from the last applied generation
+    // and leave the desired revision queued. The unified live transaction
+    // retries automatically in this same movie once ownership is exact.
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "NativeTabs icon revision=%llu queued for same-movie live adoption after fresh initialization (active=0x%04X staged=0x%04X retired=%u runtimeRetiring=%u)",
+        static_cast<unsigned long long>(desired->revision),
+        static_cast<unsigned>(g_injected_icon_hosts.load(
+            std::memory_order_acquire)),
+        static_cast<unsigned>(g_staged_injected_icon_hosts.load(
+            std::memory_order_acquire)),
+        g_rgba8_retired_bank_active ? 1U : 0U,
+        g_native_tab_runtime &&
+                !g_native_tab_runtime->retiring_tab_indices().empty()
+            ? 1U
+            : 0U);
+    return true;
+}
+
+[[nodiscard]] std::size_t projected_logical_for_selection(
+    const StableTabSelection& selection,
+    const erui::detail::TabRuntimeGeneration& generation) noexcept {
+    if (selection.index == invalid_tab_index) return 0U;
+    if (!selection.custom) {
+        return selection.index < kStockLogicalTabCount
+            ? selection.index
+            : 0U;
+    }
+    const auto found = std::find(
+        generation.visible_order.begin(),
+        generation.visible_order.end(),
+        selection.index);
+    return found == generation.visible_order.end()
+        ? 0U
+        : kStockLogicalTabCount + static_cast<std::size_t>(
+              found - generation.visible_order.begin());
+}
+
+TabProjectionRefreshResult apply_pending_tab_projection(
+    void* top) noexcept {
+    if (!erui::detail::tab_updates_pending()) {
+        return TabProjectionRefreshResult::none;
+    }
+    auto desired = g_rgba8_staged_bank_ready
+        ? g_rgba8_staged_tab_generation
+        : erui::detail::acquire_desired_tab_generation();
+    if (!desired || desired.get() == g_tab_projection_generation.get()) {
+        return TabProjectionRefreshResult::none;
+    }
+    if (!top || !g_runtime.active || g_runtime.top != top ||
+        g_runtime.pending.active || g_mutating_viewport ||
+        g_in_place_rgba8_rebind_transaction.active ||
+        g_runtime.destructive_transition_failed || g_research_failed ||
+        !validate_projection_generation(*desired) ||
+        !records_match_mapping(top, g_runtime.viewport)) {
+        return TabProjectionRefreshResult::none;
+    }
+
+    InjectedMovieFingerprint current_fingerprint{};
+    const bool fingerprint_known =
+        g_injected_movie_fingerprint.object_interface &&
+        g_injected_movie_fingerprint.owner_link &&
+        g_injected_movie_fingerprint.movie_root;
+    if (fingerprint_known &&
+        (!sample_current_movie_fingerprint(top, current_fingerprint) ||
+            !same_movie_fingerprint(
+                current_fingerprint,
+                g_injected_movie_fingerprint))) {
+        // ensure_runtime() owns same-address movie reconciliation. Never
+        // construct a target resource bank against a stale movie identity.
+        return TabProjectionRefreshResult::none;
+    }
+
+    const bool icon_change = generation_has_icon_change(*desired);
+    if (icon_change && !g_rgba8_staged_bank_ready) {
+        if (!all_rgba8_retirement_debts_zero()) {
+            if (g_rgba8_retirement_wait_logged_epoch !=
+                    g_runtime.presentation_epoch ||
+                g_rgba8_retirement_wait_logged_revision !=
+                    desired->revision) {
+                erui::detail::logf(
+                    erui::LogLevel::info,
+                    "NativeTabs live icon revision=%llu waiting in this movie for prior resource retirement (active=0x%04X staged=0x%04X retired=%u)",
+                    static_cast<unsigned long long>(desired->revision),
+                    static_cast<unsigned>(g_injected_icon_hosts.load(
+                        std::memory_order_acquire)),
+                    static_cast<unsigned>(g_staged_injected_icon_hosts.load(
+                        std::memory_order_acquire)),
+                    g_rgba8_retired_bank_active ? 1U : 0U);
+                g_rgba8_retirement_wait_logged_epoch =
+                    g_runtime.presentation_epoch;
+                g_rgba8_retirement_wait_logged_revision = desired->revision;
+            }
+            return TabProjectionRefreshResult::retiring;
+        }
+        g_rgba8_retirement_wait_logged_epoch = 0U;
+        g_rgba8_retirement_wait_logged_revision = 0U;
+        if (!stage_live_rgba8_generation(top, desired)) {
+            return TabProjectionRefreshResult::none;
+        }
+        desired = g_rgba8_staged_tab_generation;
+    }
+
+    if (g_tab_projection_generation &&
+        desired->visible_order ==
+            g_tab_projection_generation->visible_order &&
+        !icon_change) {
+        // Title edits, idempotent visibility edits, and preferred-order edits
+        // whose effective ordering is unchanged need no selector or carrier
+        // reconstruction.  Keeping the active page intact also preserves its
+        // native row focus and continuation stack.
+        const auto previous_generation = g_tab_projection_generation;
+        if (!apply_projection_generation(desired)) {
+            (void)apply_projection_generation(previous_generation);
+            return TabProjectionRefreshResult::failed;
+        }
+        const TabGenerationPublication publication =
+            publish_tab_generation(desired);
+        if (!publication.accepted) {
+            (void)apply_projection_generation(previous_generation);
+            g_research_failed = true;
+            log_failure(
+                "NativeTabs refused a non-destructive generation whose applied-state acknowledgement was lost; tab mutation is frozen until native teardown");
+            return TabProjectionRefreshResult::failed;
+        }
+        invoke_refresh_title(top);
+        erui::detail::logf(
+            erui::LogLevel::info,
+            "NativeTabs non-destructive generation committed: revision=%llu visibleCustom=%zu latest=%u",
+            static_cast<unsigned long long>(desired->revision),
+            desired->visible_order.size(),
+            publication.latest ? 1U : 0U);
+        return TabProjectionRefreshResult::committed;
+    }
+
+    const StableTabSelection prior_selection = selected_stable_tab();
+    const std::size_t physical_count = active_physical_tab_count();
+    LiveTabGeometry live_geometry{};
+    const std::size_t target_logical_count =
+        kStockLogicalTabCount + desired->visible_order.size();
+    if (prior_selection.index == invalid_tab_index ||
+        !read_live_tab_geometry(top, live_geometry) ||
+        live_geometry.active != physical_count ||
+        live_geometry.selected != g_runtime.viewport.selected_physical()) {
+        return TabProjectionRefreshResult::none;
+    }
+
+    // The native selector's D0/record geometry is immutable for the validated
+    // movie epoch.  Most installations expose eight physical cells, so hiding
+    // or reordering custom tabs changes only their logical projection.  If a
+    // 9/10-cell movie would require a different physical count, defer the
+    // complete generation to the next exact movie boundary instead of briefly
+    // publishing a mismatched selector layout.
+    if (target_logical_count < physical_count ||
+        std::min(live_geometry.records, target_logical_count) !=
+            physical_count) {
+        return TabProjectionRefreshResult::deferred_epoch;
+    }
+
+    const std::size_t target_logical =
+        projected_logical_for_selection(prior_selection, *desired);
+    const bool selected_was_hidden = prior_selection.custom &&
+        target_logical == 0U;
+    TabViewport candidate{};
+    if (!candidate.initialize(
+            target_logical_count,
+            physical_count,
+            g_navigation_margin,
+            target_logical) ||
+        candidate.visible_slot_count() != physical_count ||
+        candidate.selected_physical() >= physical_count ||
+        !stage_projection_titles(*desired)) {
+        return TabProjectionRefreshResult::failed;
+    }
+
+    const std::size_t source_logical =
+        g_runtime.viewport.selected_logical();
+    const LogicalTab* const source_tab =
+        runtime_logical_tab(source_logical);
+    const LogicalTab* target_tab{};
+    InjectedHostLayout target_layout{};
+    {
+        ScopedTargetTabProjectionGeneration target_generation{desired.get()};
+        target_tab = runtime_logical_tab(target_logical);
+        if (!target_tab ||
+            !derive_injected_host_layout(candidate, target_layout)) {
+            return TabProjectionRefreshResult::failed;
+        }
+    }
+    if (!source_tab) return TabProjectionRefreshResult::failed;
+
+    PendingTransition refresh{};
+    refresh.active = true;
+    refresh.top = top;
+    refresh.candidate = candidate;
+    refresh.native_physical =
+        static_cast<std::uint32_t>(live_geometry.selected);
+    refresh.desired_physical = static_cast<std::uint32_t>(
+        candidate.selected_physical());
+    refresh.provisional_logical = source_logical;
+    refresh.desired_logical = target_logical;
+    refresh.previous_logical = source_logical;
+    refresh.provisional_category = source_tab->category;
+    refresh.desired_category = target_tab->category;
+    refresh.requested_qpc = query_performance_ticks();
+    refresh.projection_refresh = true;
+    refresh.icon_resource_refresh = icon_change;
+    refresh.projection_selected_hidden = selected_was_hidden;
+    refresh.projection_generation = desired;
+    g_runtime.pending = std::move(refresh);
+    erui::detail::logf(
+        erui::LogLevel::info,
+        "NativeTabs atomic projection armed: revision=%llu visibleCustom=%zu sourceLogical=%zu targetLogical=%zu hiddenFallback=%u sourcePhysical=%zu targetPhysical=%zu",
+        static_cast<unsigned long long>(desired->revision),
+        desired->visible_order.size(),
+        source_logical,
+        target_logical,
+        selected_was_hidden ? 1U : 0U,
+        live_geometry.selected,
+        candidate.selected_physical());
+    return TabProjectionRefreshResult::none;
+}
+#endif
+
+#if !defined(ER_NATIVE_UI_PRODUCTION_TABS)
+[[nodiscard]] bool adopt_pending_tab_generation_for_fresh_epoch(
+    void*) noexcept {
+    return true;
+}
+#endif
 
 bool ensure_runtime(void* top) noexcept {
     if (!validate_top(top)) {
@@ -13712,19 +15235,17 @@ bool ensure_runtime(void* top) noexcept {
         return false;
     }
     if (g_runtime.active) {
-        if (g_runtime.destructive_transition_failed) {
-            // The active flag can be a lifetime guard after an unprovable
-            // initial rollback. Keep all borrowed catalogue storage alive but
-            // perform no further viewport reads, writes, or navigation.
-            return false;
-        }
         if (g_runtime.top == top) {
             if (records_match_mapping(top, g_runtime.viewport)) {
                 const bool fingerprint_known =
                     g_injected_movie_fingerprint.object_interface &&
                     g_injected_movie_fingerprint.owner_link &&
                     g_injected_movie_fingerprint.movie_root;
-                if (!fingerprint_known) return true;
+                if (!fingerprint_known) {
+                    // Without an exact movie identity there is no teardown
+                    // proof that can release a failed target mapping.
+                    return !g_runtime.destructive_transition_failed;
+                }
 
                 InjectedMovieFingerprint current_fingerprint{};
                 if (!sample_current_movie_fingerprint(
@@ -13742,7 +15263,7 @@ bool ensure_runtime(void* top) noexcept {
                 if (same_movie_fingerprint(
                         g_injected_movie_fingerprint,
                         current_fingerprint)) {
-                    return true;
+                    return !g_runtime.destructive_transition_failed;
                 }
 
                 // Records can survive while Scaleform recreates its movie at
@@ -13778,9 +15299,17 @@ bool ensure_runtime(void* top) noexcept {
                         "same-address movie change could not restore the process-stable stock records before reinitialization");
                     return false;
                 }
+                if (g_runtime.frozen_projection_retained_target) {
+                    log_line(
+                        "Frozen tab projection recovered at a validated same-address movie boundary after overlay reconciliation and pristine stock restoration (top=%p)",
+                        top);
+                }
                 log_line(
                     "same-address movie change restored all eight stock records from the preserved pristine catalogue before reinitialization");
                 reset_runtime();
+                if (!adopt_pending_tab_generation_for_fresh_epoch(top)) {
+                    return false;
+                }
                 return initialize_runtime(top, true);
             }
             if (exact_stock_layout_republished(top)) {
@@ -13806,10 +15335,18 @@ bool ensure_runtime(void* top) noexcept {
                     }
                     return false;
                 }
+                if (g_runtime.frozen_projection_retained_target) {
+                    log_line(
+                        "Frozen tab projection recovered after exact stock republication and overlay reconciliation (top=%p)",
+                        top);
+                }
                 log_line(
                     "Exact stock tab layout republished at the same Configuration address; starting a new viewport epoch (top=%p)",
                     top);
                 reset_runtime();
+                if (!adopt_pending_tab_generation_for_fresh_epoch(top)) {
+                    return false;
+                }
                 return initialize_runtime(top);
             }
             // Live records borrow title pointers from catalogue. Keep that
@@ -13853,11 +15390,21 @@ bool ensure_runtime(void* top) noexcept {
                 "Configuration instance changed but its records could not be restored from the process-stable stock catalogue");
             return false;
         }
+        if (g_runtime.frozen_projection_retained_target) {
+            log_line(
+                "Frozen tab projection recovered at a validated Configuration-instance boundary after overlay reconciliation and pristine stock restoration (oldTop=%p newTop=%p)",
+                g_runtime.top,
+                top);
+        }
         log_line(
             "Reconciled retained or already-absent tab-strip icons and restored pristine stock records through the new Configuration top before rebuilding viewport state");
         reset_runtime();
+        if (!adopt_pending_tab_generation_for_fresh_epoch(top)) {
+            return false;
+        }
         return initialize_runtime(top, true);
     }
+    if (!adopt_pending_tab_generation_for_fresh_epoch(top)) return false;
     return initialize_runtime(top);
 }
 
@@ -14706,6 +16253,10 @@ void abandon_pending_to_native_selection() noexcept {
 PendingTransitionCommitResult commit_pending_transition(
     void* top) noexcept {
     PendingTransition& pending = g_runtime.pending;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    bool projection_post_attach_failure{};
+    bool projection_selector_target_exact{true};
+#endif
     const auto freeze_destructive_transaction =
         [&pending](const char* reason) noexcept {
             if (!g_in_place_rgba8_rebind_transaction.active) return false;
@@ -14717,8 +16268,18 @@ PendingTransitionCommitResult commit_pending_transition(
         };
     if (!pending.active || pending.top != top || !validate_top(top) ||
         !records_match_mapping(top, g_runtime.viewport)) {
-        (void)freeze_destructive_transaction(
+        const bool frozen = freeze_destructive_transaction(
             "pending transition validation or source mapping failed");
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        if (!frozen && pending.projection_refresh) {
+            // No target record or Shape was touched, so dropping only the
+            // captured transaction is exact. The immutable desired generation
+            // remains queued and may be re-armed after source validation.
+            pending = {};
+        }
+#else
+        (void)frozen;
+#endif
         return PendingTransitionCommitResult::failed;
     }
     if (g_in_place_rgba8_rebind_transaction.active &&
@@ -14730,6 +16291,9 @@ PendingTransitionCommitResult commit_pending_transition(
 
     const bool repaint_required =
         pending.presentation_refresh ||
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        pending.projection_refresh ||
+#endif
         pending.candidate.mapping_generation() !=
             g_runtime.viewport.mapping_generation() ||
         pending.candidate.window_start() !=
@@ -14761,7 +16325,11 @@ PendingTransitionCommitResult commit_pending_transition(
                     InPlaceRgba8RebindStage::ready_to_repaint ||
                 g_in_place_rgba8_rebind_transaction.stage ==
                     InPlaceRgba8RebindStage::repainting);
-        if (!selector_already_relocated &&
+        if (
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            !pending.projection_refresh &&
+#endif
+            !selector_already_relocated &&
             pending.desired_physical != pending.native_physical &&
             !invoke_selector_select(top, pending.desired_physical)) {
             g_mutating_viewport = false;
@@ -14776,7 +16344,22 @@ PendingTransitionCommitResult commit_pending_transition(
             abandon_pending_to_native_selection();
             return PendingTransitionCommitResult::failed;
         }
-        if (!apply_mapping(top, pending.candidate, layers)) {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        const bool destructive_failure_before_mapping =
+            g_runtime.destructive_transition_failed;
+#endif
+        const bool mapping_applied = [&]() noexcept {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            if (pending.projection_refresh) {
+                if (!pending.projection_generation) return false;
+                ScopedTargetTabProjectionGeneration target_generation{
+                    pending.projection_generation.get()};
+                return apply_mapping(top, pending.candidate, layers);
+            }
+#endif
+            return apply_mapping(top, pending.candidate, layers);
+        }();
+        if (!mapping_applied) {
             if (freeze_destructive_transaction(
                     "two-phase Shape detach/target repaint failed")) {
                 g_mutating_viewport = false;
@@ -14798,6 +16381,45 @@ PendingTransitionCommitResult commit_pending_transition(
             g_mutating_viewport = false;
             return PendingTransitionCommitResult::waiting;
         }
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        if (pending.projection_refresh &&
+            !destructive_failure_before_mapping &&
+            g_runtime.destructive_transition_failed) {
+            // apply_mapping deliberately retains the target records/ownership
+            // after a postflight failure because undoing a partially retired
+            // Shape bank is unsafe. Treat that retained target as failed, not
+            // as a successful projection generation.
+            projection_post_attach_failure = true;
+            g_research_failed = true;
+            log_failure(
+                "atomic tab projection retained its target mapping after an inexact final Shape handoff; target ownership will be published coherently, but mutation is frozen until teardown");
+        }
+        if (pending.projection_refresh) {
+            const bool selector_call =
+                pending.desired_physical == pending.native_physical ||
+                invoke_selector_select(top, pending.desired_physical);
+            std::uint32_t observed_physical{};
+            const bool selector_read = read_selected_physical(
+                top, observed_physical);
+            projection_selector_target_exact = selector_call &&
+                selector_read &&
+                observed_physical == pending.desired_physical;
+            if (!projection_selector_target_exact) {
+                // The complete target bank is already attached and its source
+                // bank retired. It is no longer safe to repaint the source
+                // over it. Retain its ownership below, then freeze mutation.
+                g_runtime.destructive_transition_failed = true;
+                g_research_failed = true;
+                projection_post_attach_failure = true;
+                log_failure(
+                    "atomic tab projection attached its target mapping, but selector relocation was not exact (call=%u read=%u observed=%u expected=%u); target ownership is retained and mutation is frozen until teardown",
+                    selector_call ? 1U : 0U,
+                    selector_read ? 1U : 0U,
+                    static_cast<unsigned>(observed_physical),
+                    static_cast<unsigned>(pending.desired_physical));
+            }
+        }
+#endif
     } else {
         // A content-only route transaction must leave every record and icon
         // byte untouched. The native selector already points at its target.
@@ -14831,9 +16453,22 @@ PendingTransitionCommitResult commit_pending_transition(
         pending.previous_logical != pending.desired_logical &&
         (logical_uses_graphics_carrier(pending.previous_logical) ||
             logical_uses_graphics_carrier(pending.desired_logical));
-    if (pending.provisional_category != pending.desired_category ||
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    const bool projection_route_transition = pending.projection_refresh &&
+        pending.projection_selected_hidden &&
+        projection_selector_target_exact;
+    const bool ordinary_route_transition = !pending.projection_refresh &&
+        (pending.provisional_category != pending.desired_category ||
+            route_transition ||
+            pending.previous_logical != pending.desired_logical);
+#else
+    const bool projection_route_transition = false;
+    const bool ordinary_route_transition =
+        pending.provisional_category != pending.desired_category ||
         route_transition ||
-        pending.previous_logical != pending.desired_logical) {
+        pending.previous_logical != pending.desired_logical;
+#endif
+    if (projection_route_transition || ordinary_route_transition) {
         const bool custom_route_transition =
             is_custom_logical(pending.previous_logical) ||
             is_custom_logical(pending.desired_logical);
@@ -14842,6 +16477,20 @@ PendingTransitionCommitResult commit_pending_transition(
                 ? PanelStateIsolationReason::corrective
                 : PanelStateIsolationReason::none);
         if (!g_research_switch_succeeded) {
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            if (pending.projection_refresh) {
+                // As with a post-attach selector failure, the target Shape
+                // bank and records are already authoritative and cannot be
+                // rolled back safely. Retain/publish their ownership and stop
+                // every later mutation until exact native teardown.
+                projection_post_attach_failure = true;
+                g_runtime.destructive_transition_failed = true;
+                g_research_failed = true;
+                log_failure(
+                    "atomic tab projection attached its target mapping, but the stock fallback carrier switch failed; target ownership is retained and mutation is frozen until teardown");
+            } else
+#endif
+            {
             const std::uint64_t ticket = pending.pointer_dwell_ticket;
             if (repaint_required) {
                 // Records/icons/selector now describe the candidate. Publish
@@ -14871,8 +16520,87 @@ PendingTransitionCommitResult commit_pending_transition(
                 restored ? 1u : 0u, static_cast<unsigned>(observed),
                 exact ? 1u : 0u);
             return PendingTransitionCommitResult::failed;
+            }
         }
     }
+
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    if (pending.projection_refresh) {
+        const auto committed_generation = pending.projection_generation;
+        bool target_records_exact{};
+        if (committed_generation) {
+            ScopedTargetTabProjectionGeneration target_generation{
+                committed_generation.get()};
+            target_records_exact = records_match_mapping(
+                top, pending.candidate);
+        }
+        if (!target_records_exact) {
+            projection_post_attach_failure = true;
+            g_runtime.destructive_transition_failed = true;
+            g_research_failed = true;
+            log_failure(
+                "atomic tab projection target records did not match the staged desired generation after Shape handoff; target ownership is retained and mutation is frozen until teardown");
+        }
+
+        // From this point the native records and target Shape bank borrow the
+        // staged title/resource mapping. Flip the process-owned title bank and
+        // projection pointer before acknowledging the immutable generation;
+        // no renderer callback is forwarded between these publication steps.
+        commit_staged_projection_titles();
+        g_tab_projection_generation = committed_generation;
+        TabGenerationPublication publication{};
+        if (!projection_post_attach_failure) {
+            publication = publish_tab_generation(committed_generation);
+            if (!publication.accepted) {
+                projection_post_attach_failure = true;
+                g_runtime.destructive_transition_failed = true;
+                g_research_failed = true;
+                log_failure(
+                    "atomic tab projection lost its applied-generation acknowledgement after target Shape handoff; target ownership is retained, the desired generation remains pending, and mutation is frozen until teardown");
+            }
+        }
+
+        const std::uint64_t committed_revision = committed_generation
+            ? committed_generation->revision
+            : 0U;
+        const std::size_t committed_visible = committed_generation
+            ? committed_generation->visible_order.size()
+            : 0U;
+        const bool selected_hidden = pending.projection_selected_hidden;
+        if (projection_post_attach_failure) {
+            // Distinguish this retained-target projection freeze from every
+            // other destructive runtime fault. Only this exact state may be
+            // released by the native Graphics-carrier teardown generation.
+            g_runtime.frozen_projection_retained_target = true;
+        }
+        g_runtime.viewport = pending.candidate;
+        pending = {};
+        g_mutating_viewport = false;
+        if (!projection_post_attach_failure && publication.accepted) {
+            // Selector labels and tab main/continuation headings now resolve
+            // through the same applied generation. Refresh only after that
+            // acknowledgement so no callback can observe a split revision.
+            invoke_refresh_title(top);
+        }
+        erui::detail::logf(
+            projection_post_attach_failure
+                ? erui::LogLevel::error
+                : erui::LogLevel::info,
+            "NativeTabs atomic projection %s: revision=%llu visibleCustom=%zu logical=%zu physical=%zu selectedLogical=%zu hiddenFallback=%u acknowledged=%u latest=%u",
+            projection_post_attach_failure ? "frozen" : "committed",
+            static_cast<unsigned long long>(committed_revision),
+            committed_visible,
+            active_logical_tab_count(),
+            active_physical_tab_count(),
+            g_runtime.viewport.selected_logical(),
+            selected_hidden ? 1U : 0U,
+            publication.accepted ? 1U : 0U,
+            publication.latest ? 1U : 0U);
+        return projection_post_attach_failure
+            ? PendingTransitionCommitResult::failed
+            : PendingTransitionCommitResult::committed;
+    }
+#endif
 
     if (!pending.presentation_refresh) {
         log_research_carrier_selection(top, "commit",
@@ -14979,7 +16707,11 @@ void __fastcall selection_callback_detour(
         const InPlaceRgba8RebindTransaction& transaction =
             g_in_place_rgba8_rebind_transaction;
         const bool target_relocated = transaction.active &&
-            transaction.top == top;
+            transaction.top == top
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+            && !pending.projection_refresh
+#endif
+            ;
         const std::uint32_t anchor = tab_transition_selector_anchor(
             target_relocated
                 ? TabTransitionSelectorAnchor::target
@@ -15368,10 +17100,17 @@ void progress_two_phase_rgba8_retirement(
     }
 
     std::uint32_t selected_physical{};
+    const std::uint32_t expected_pending_physical =
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+        g_runtime.pending.active && g_runtime.pending.projection_refresh
+        ? g_runtime.pending.native_physical
+        :
+#endif
+        g_runtime.pending.desired_physical;
     const bool selected_exact = read_selected_physical(
             top, selected_physical) &&
         g_runtime.pending.active &&
-        selected_physical == g_runtime.pending.desired_physical;
+        selected_physical == expected_pending_physical;
     const bool coordinates_exact = top && transaction.top == top &&
         g_runtime.active && g_runtime.top == top &&
         transaction.presentation_epoch == g_runtime.presentation_epoch &&
@@ -15518,6 +17257,31 @@ void __fastcall composite_frame_detour(
         g_in_place_rgba8_rebind_transaction.stage !=
             InPlaceRgba8RebindStage::none;
     bool force_blocked_input = transaction_active_at_entry;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    TabProjectionRefreshResult projection_refresh{
+        TabProjectionRefreshResult::none};
+    // Tab batches are isolated from ROW/SUBMENU batches by the host parser.
+    // Do not hold the non-recursive row-publication mutex across native calls:
+    // selector/panel callbacks can synchronously re-enter client code.
+    projection_refresh = apply_pending_tab_projection(top);
+    if (projection_refresh == TabProjectionRefreshResult::retiring ||
+        projection_refresh == TabProjectionRefreshResult::committed ||
+        projection_refresh == TabProjectionRefreshResult::failed) {
+        std::uint8_t blocked_input{};
+        {
+            ScopedBooleanTrue blocking{g_blocking_composite_input};
+            original(composite, frame_value, &blocked_input);
+        }
+        void* const post_top = composite
+            ? static_cast<std::byte*>(composite) - kCompositeOffset
+            : nullptr;
+        (void)reconcile_rgba8_retirement_debt(
+            "post-tab-generation-refresh");
+        progress_two_phase_rgba8_retirement(
+            post_top, frame_sequence);
+        return;
+    }
+#endif
     if (!g_mutating_viewport && top) {
         if (!ensure_runtime(top)) {
             // Quietly retry on later frames while Configuration construction
@@ -15530,6 +17294,12 @@ void __fastcall composite_frame_detour(
                 g_runtime.pending.top == top) {
                 const bool catalogue_presentation_refresh =
                     g_runtime.pending.presentation_refresh;
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+                const bool tab_projection_refresh =
+                    g_runtime.pending.projection_refresh;
+#else
+                const bool tab_projection_refresh = false;
+#endif
                 const bool diagnose_wrap =
                     g_runtime.pending.diagnose_wrap;
                 const std::size_t previous_logical =
@@ -15558,7 +17328,8 @@ void __fastcall composite_frame_detour(
                 }
                 if (input_action ==
                     TabTransitionInputAction::invoke_with_live_input) {
-                    if (catalogue_presentation_refresh) {
+                    if (catalogue_presentation_refresh ||
+                        tab_projection_refresh) {
                         // This internal repair was not initiated by native
                         // selection input. Keep its commit frame free of a
                         // simultaneous L1/R1 or pointer callback; ordinary
@@ -16163,6 +17934,11 @@ bool install_hooks_and_interfaces(
 
     g_selector_select = reinterpret_cast<SelectorSelectFn>(
         g_game.base + kSelectorSelectRva);
+#if defined(ER_NATIVE_UI_PRODUCTION_TABS)
+    g_selector_set_active_count =
+        reinterpret_cast<SelectorSetActiveCountFn>(
+            g_game.base + kSelectorSetActiveCountRva);
+#endif
     g_get_pointer_position = native_pointer_poll_helpers_match
         ? reinterpret_cast<GetPointerPositionFn>(
               g_game.base + kGetPointerPositionRva)
@@ -16603,6 +18379,15 @@ bool install_native_tabs(
     detail::RuntimeState& host_runtime = detail::runtime_state();
     if (!host_runtime.menu) return false;
     const auto custom = catalogue.custom_entries();
+    const std::shared_ptr<const detail::TabRuntimeGeneration>
+        tab_generation = detail::acquire_applied_tab_generation();
+    if (!tab_generation ||
+        tab_generation->entries.size() != custom.size()) {
+        detail::logf(
+            LogLevel::error,
+            "NativeTabs rejected an unavailable or mismatched runtime tab generation");
+        return false;
+    }
     const std::size_t configured_minimum =
         catalogue.navigation_settings().minimum_tab_slots;
     if (configured_minimum < kStockLogicalTabCount ||
@@ -16628,10 +18413,17 @@ bool install_native_tabs(
     try {
         logical_candidate = std::make_unique<PinnedLogicalTabCatalogue>();
         logical_candidate->tabs.resize(catalogue.entries().size());
+        g_rgba8_expected_checksums_scratch.assign(custom.size(), 0U);
+        g_rgba8_staged_resources_scratch.assign(
+            custom.size(), RetainedRgba8Resource{});
+        g_rgba8_staged_changed_scratch.assign(custom.size(), 0U);
+        g_rgba8_retired_resources_scratch.assign(
+            custom.size(), RetainedRgba8Resource{});
+        g_rgba8_retired_debts_scratch.assign(custom.size(), 0U);
     } catch (...) {
         detail::logf(
             LogLevel::error,
-            "NativeTabs could not allocate the exact-sized logical catalogue");
+            "NativeTabs could not allocate the exact-sized logical catalogue and icon-generation scratch");
         return false;
     }
     const auto entries = catalogue.entries();
@@ -16639,8 +18431,9 @@ bool install_native_tabs(
         logical_candidate->tabs[logical].source = &entries[logical];
     }
     for (std::size_t index = 0; index < custom.size(); ++index) {
-        const wchar_t* const title = host_runtime.menu->texts.lookup(
-            static_cast<int>(custom[index].title_id));
+        const detail::TabRuntimeEntry& runtime_source =
+            tab_generation->entries[index];
+        const wchar_t* const title = runtime_source.title.c_str();
         if (!title || title[0] == L'\0' ||
             wcsnlen_s(title, kTitleCapacity) >= kTitleCapacity) {
             detail::logf(
@@ -16669,7 +18462,7 @@ bool install_native_tabs(
             L"ERNativeUI.TabProbe.RawRGBA8.",
             static_cast<std::uint32_t>(index + 1U),
             4U);
-        const auto& icon = custom[index].icon;
+        const auto& icon = runtime_source.icon;
         if (icon.source == TabIconSource::fallback) {
             if (!icon.rgba8_pixels.empty()) return false;
             icon_runtime.raster_requested =
@@ -16687,6 +18480,7 @@ bool install_native_tabs(
     g_native_tab_catalogue = &catalogue;
     g_native_tab_runtime = std::move(runtime_candidate);
     g_logical_tab_catalogue = std::move(logical_candidate);
+    g_tab_projection_generation = tab_generation;
     // The configuration catalogue is immutable after registration freezes.
     // Constructor callbacks read only this process-lifetime scalar floor;
     // the exact live movie may safely raise the constructor-local target to a
@@ -16716,6 +18510,18 @@ bool install_native_tabs(
         g_native_tab_catalogue = nullptr;
         g_native_tab_runtime.reset();
         g_logical_tab_catalogue.reset();
+        g_tab_projection_generation.reset();
+        g_rgba8_expected_checksums_scratch.clear();
+        g_rgba8_staged_resources_scratch.clear();
+        g_rgba8_staged_changed_scratch.clear();
+        g_rgba8_retired_resources_scratch.clear();
+        g_rgba8_retired_debts_scratch.clear();
+        g_rgba8_staged_tab_generation.reset();
+        g_rgba8_staged_bank_ready = false;
+        g_rgba8_retired_bank_active = false;
+        g_rgba8_staging_failed_epoch = 0U;
+        g_rgba8_retirement_wait_logged_epoch = 0U;
+        g_rgba8_retirement_wait_logged_revision = 0U;
         return false;
     }
     g_native_tabs_installed.store(true, std::memory_order_release);

@@ -6,7 +6,9 @@
       <a href="capabilities.md#what-a-capability-is"><img src="../assets/images/badges/capabilities.svg" alt="Capabilities" width="112" height="22" align="top"></a>
     </td>
     <td valign="middle">
-      <a href="capabilities.md#custom-tabs"><code>custom_tabs</code></a>
+      <a href="capabilities.md#custom-tabs"><code>custom_tabs</code></a> ·
+      <a href="capabilities.md#updates"><code>updates</code></a> ·
+      <a href="capabilities.md#tab-updates"><code>tab_updates</code></a>
     </td>
   </tr>
 </table>
@@ -14,7 +16,8 @@
 API 1.3 lets a client mod add its own top-level tab to Elden Ring's
 **System** screen. The tab receives an ordinary ERNativeUI page, so it can
 contain the same settings controls and automatic pagination as a submenu or a
-built-in page.
+built-in page. API 1.4 can retain that tab after registration and atomically
+edit its title, icon, visibility, and preferred order at runtime.
 
 ![Custom ERNativeUI tabs moving through Elden Ring's System tab strip.](../assets/images/menus/custom-tabs-navigation.gif)
 
@@ -33,15 +36,17 @@ requiring any knowledge of Elden Ring's UI objects or ERNativeUI's hooks.
 | Use a PNG or another existing image | [Convert an existing image](#convert-an-existing-image) |
 | Connect and register the menu safely | [Check capabilities and register](#check-capabilities-and-register) |
 | Add settings controls to the tab | [Add controls to the tab](#add-controls-to-the-tab) |
+| Change a committed tab at runtime | [Edit a committed tab](#edit-a-committed-tab) |
 | Translate the title and rows | [Localize player-facing text](#localize-player-facing-text) |
 | Choose stable IDs and tab order | [Choose identity and ordering](#choose-identity-and-ordering) |
 | Understand overflow and mouse navigation | [Overflow navigation](#overflow-navigation) |
 | Diagnose a problem | [Troubleshooting](#troubleshooting) |
 | Study how the native implementation was recovered | [Reverse-engineering case study](../research/case-studies/custom-tabs.md) |
 
-Custom tabs require ERUI API 1.3, first shipped by ERNativeUI 1.3.0. Package
-versions and ERUI API versions are independent; a later compatible 1.x release
-may retain API 1.3 unchanged. See [Versioning](../versioning.md).
+Creating custom tabs requires ERUI API 1.3. Runtime tab editing requires API
+1.4. Package versions and ERUI API versions are independent; always negotiate
+the intended API and check the relevant capability bits. See
+[Versioning](../versioning.md).
 
 ## Create a custom tab
 
@@ -53,14 +58,14 @@ other ERNativeUI page:
 
 void build_menu(erui::Menu& menu) noexcept
 {
-    erui::TabOptions tab{};
-    tab.tab_id = "settings";
-    tab.title = L"My Mod Settings";
+    erui::TabOptions options{};
+    options.tab_id = "settings";
+    options.title = L"My Mod Settings";
 
-    erui::Page page = menu.add_tab(tab);
-    if (!page.valid()) return;
+    erui::Tab tab = menu.add_tab(options);
+    if (!tab.valid()) return;
 
-    page.add_toggle(
+    tab.add_toggle(
         L"Enable My Feature",
         L"Turn this mod feature on or off.",
         1);
@@ -72,7 +77,8 @@ That is the complete tab declaration:
 - `tab_id` is the stable name ERNativeUI uses to identify this tab inside the
   provider;
 - `title` is the text shown to the player; and
-- `menu.add_tab` returns the page that receives the mod's controls.
+- `menu.add_tab` returns an `erui::Tab`, which is also the page builder that
+  receives the mod's controls and can be retained for API 1.4 edits.
 
 With no icon supplied, ERNativeUI uses its default triangle icon. The next
 section adds a custom image without introducing an image-loading dependency.
@@ -153,7 +159,7 @@ tab.icon = {
     kTriangleIcon.size(),
     erui::TabIconFormat::rgba8};
 
-erui::Page page = menu.add_tab(tab);
+erui::Tab page = menu.add_tab(tab);
 ```
 
 `TabIconFormat::rgba8` supports every opacity value, including a completely
@@ -268,16 +274,104 @@ do not connect or register while Windows holds the loader lock. The
 [client-mod template](../../examples/template/README.md) provides that complete
 worker and module setup.
 
-Retain the successful `Registration` for later row reads, writes and alerts.
+Retain the successful `Registration` for later row reads, writes, alerts, and
+capability-gated tab edits.
 Registration is transactional: if the builder fails, ERNativeUI publishes
 none of that provider's draft tabs or rows.
+
+## Edit a committed tab
+
+Retain the `erui::Tab` returned during registration. It contains opaque host
+identity and negotiated API context; it is not a pointer to a Scaleform object.
+This complete example makes every value explicit:
+
+```cpp
+erui::Tab g_settings_tab{};
+erui::Registration g_registration{};
+
+void build_menu(erui::Menu& menu) noexcept
+{
+    erui::TabOptions options{};
+    options.tab_id = "settings";
+    options.title = L"My Mod Settings";
+    options.preferred_order = 100;
+
+    g_settings_tab = menu.add_tab(options);
+    if (!g_settings_tab.valid()) return;
+
+    g_settings_tab.add_toggle(
+        L"Enable My Feature",
+        L"Turn this mod feature on or off.",
+        1);
+}
+
+ERUI_Result show_connection_state(bool server_connected) noexcept
+{
+    if (!g_registration.supports(erui::Capability::updates) ||
+        !g_registration.supports(erui::Capability::tab_updates)) {
+        return ERUI_NOT_SUPPORTED;
+    }
+
+    auto edit = g_settings_tab.edit();
+    edit.title(server_connected
+            ? L"My Mod — Online"
+            : L"My Mod — Offline")
+        .visible(true)
+        .preferred_order(server_connected ? 20 : 120);
+
+    if (server_connected) {
+        edit.icon({
+            kTriangleIcon.data(),
+            kTriangleIcon.size(),
+            erui::TabIconFormat::rgba8});
+    } else {
+        edit.default_icon();
+    }
+
+    return edit.commit();
+}
+```
+
+Here `server_connected` is an ordinary `bool` owned by the client mod.
+`kTriangleIcon` is the 4,096-byte array built in
+[Create the icon in code](#create-the-icon-in-code). The successful
+`Registration` must be assigned to `g_registration` after `register_menu`
+returns, as shown in [Check capabilities and register](#check-capabilities-and-register).
+
+Each `TabEdit` is a move-only, one-shot draft. Calling `commit()` validates and
+copies the supplied data synchronously; destroying an uncommitted draft does
+nothing. Fields omitted from the draft preserve their current values:
+
+| Method | Effect |
+|---|---|
+| `.title(text)` | Changes the selector title and the tab's base page title |
+| `.icon(view)` | Copies and publishes one exact 32x32 RGBA8 icon |
+| `.default_icon()` | Restores ERNativeUI's shared triangle icon |
+| `.visible(bool)` | Shows or hides the top-level selector without deleting its page or rows |
+| `.preferred_order(value)` | Changes the host ordering hint; a player's explicit `TabOrder` override remains authoritative |
+
+Edits publish atomically at a safe UI boundary and normally update the open
+System menu live. If the active tab is hidden, ERNativeUI transfers selection
+to a valid surviving tab. A visibility/order projection that would require a
+different immutable physical strip geometry is deferred to the next System
+movie rather than rebuilt unsafely. If System closes during an icon handoff,
+the desired generation remains queued and settles automatically in the first
+reopened movie; the player does not need to reopen twice. A custom page-title
+formatter can remain authoritative over `.title()`, in which case `commit()`
+returns `ERUI_NOT_SUPPORTED`.
+
+Icon updates are intended for occasional state or configuration changes, not
+animation. Scaleform image roots are immutable and retained for process safety,
+so do not submit icon changes every frame. `commit()` may be called from an
+ERNativeUI callback. Check its `ERUI_Result`; see
+[Error handling](../reference/error-handling.md).
 
 ## Add controls to the tab
 
 The page returned by `menu.add_tab` supports the ordinary control builders:
 
 ```cpp
-erui::Page page = menu.add_tab(tab);
+erui::Tab page = menu.add_tab(tab);
 if (!page.valid()) return;
 
 page.add_button<&apply_settings>(
@@ -412,8 +506,9 @@ Players can tune the navigation margin and mouse-dwell timing in
 ## Registration, limits and lifetime
 
 - Tab/page topology and row descriptors are registered once during startup
-  and cannot be changed after commit. Supported row values remain readable and
-  writable through the retained `Registration`.
+  and cannot be replaced after commit. API 1.4 may edit a retained tab's
+  presentation and placement, while supported row values remain readable and
+  writable through retained typed handles or the `Registration`.
 - A title is required and may contain at most 95 UTF-16 code units.
 - IDs and visible text must not contain embedded NULs.
 - The process-wide ceiling is 1,024 committed custom tabs across all
@@ -435,7 +530,7 @@ for the complete ownership and error contract.
 
 ## Strict-C equivalent
 
-The C11 surface uses `ERUI_TabIconDesc`, `ERUI_TabDesc` and
+The C11 registration surface uses `ERUI_TabIconDesc`, `ERUI_TabDesc` and
 `ERUI_Api::add_tab`. Zero-initialize every descriptor, set its `size`, leave
 flags and reserved fields at zero, and test `ERUI_CAP_CUSTOM_TABS` first. This
 fragment assumes the API, provider, pixel buffer and localized title are ready:
@@ -470,6 +565,13 @@ Set `tab.icon` to `NULL` for the default triangle icon. As in C++, the host
 copies the descriptor and pixels before `add_tab` returns. The strict-C header
 is the normative ABI contract.
 
+For a runtime edit, submit an `ERUI_UPDATE_KIND_TAB` item whose payload is an
+`ERUI_TabUpdateDesc`, and require `ERUI_CAP_UPDATES | ERUI_CAP_TAB_UPDATES`.
+Its `fields` bits distinguish an omitted field from an explicit zero value;
+for example, `ERUI_TAB_UPDATE_FIELD_ICON` with `icon == NULL` restores the
+default triangle. One `commit_updates` batch may atomically contain several
+distinct tab updates, but it cannot mix tab items with row or Submenu items.
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -480,6 +582,7 @@ is the normative ABI contract.
 | The icon has an unexpected solid background | Verify that the generated or decoded opacity bytes are not all `255` |
 | Two tabs collide | Give them distinct provider-local `tab_id` values |
 | Order differs from the hint | Check the player's `[TabOrder]` entries and `ERNativeUI-tabs.log` |
+| A runtime edit returns `ERUI_NOT_SUPPORTED` | Check `updates`, `tab_updates`, and `custom_tabs`; a custom page-title formatter can also own the title |
 | A long page has multiple slices | This is automatic pagination; do not add client-owned Previous/Next rows |
 
 Enable ordinary logging while diagnosing registration. Detailed diagnostics

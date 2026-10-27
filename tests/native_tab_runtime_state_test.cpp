@@ -128,8 +128,17 @@ void test_live_geometry_requires_one_dimensional_trailing_capacity() {
         8, 8, -1, 9, 1, geometry));
     ERUI_TEST_CHECK(!validate_native_tab_live_geometry(
         8, 8, 8, 9, 1, geometry));
-    ERUI_TEST_CHECK(!validate_native_tab_live_geometry(
+    // Rich-tab visibility changes can reduce the active selector projection
+    // without deleting the already-authored records. One hidden custom tab,
+    // and even an all-hidden two-tab custom set, therefore remain valid.
+    ERUI_TEST_CHECK(validate_native_tab_live_geometry(
         9, 8, 0, 9, 1, geometry));
+    ERUI_TEST_CHECK(geometry.active_slot_count == 8);
+    ERUI_TEST_CHECK(geometry.authored_cell_count == 9);
+    ERUI_TEST_CHECK(validate_native_tab_live_geometry(
+        10, 8, 7, 11, 1, geometry));
+    ERUI_TEST_CHECK(geometry.active_slot_count == 8);
+    ERUI_TEST_CHECK(geometry.authored_cell_count == 11);
     ERUI_TEST_CHECK(!validate_native_tab_live_geometry(
         7, 7, 0, 8, 1, geometry));
     ERUI_TEST_CHECK(!validate_native_tab_live_geometry(

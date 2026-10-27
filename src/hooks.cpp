@@ -21,6 +21,7 @@
 #include "submenu_navigation.hpp"
 #include "submenu_runtime.hpp"
 #include "submenu_update_state.hpp"
+#include "tab_update_state.hpp"
 #include "color_picker.hpp"
 
 #include <Windows.h>
@@ -1579,10 +1580,21 @@ bool resolve_submenu_title_override(
     std::uint64_t& revision) noexcept {
     revision = 0;
     erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
-    if (route.kind != erui::detail::PageRouteKind::submenu ||
-        !runtime.menu || route.logical_page_index >= runtime.menu->pages.size()) {
+    if (!runtime.menu ||
+        route.logical_page_index >= runtime.menu->pages.size()) {
         return false;
     }
+    if (route.kind == erui::detail::PageRouteKind::tab_main ||
+        route.kind == erui::detail::PageRouteKind::tab_continuation) {
+        return erui::detail::format_applied_tab_page_title(
+            route.logical_page_index,
+            route.slice_index,
+            slice_count,
+            buffer.data(),
+            buffer.size(),
+            revision);
+    }
+    if (route.kind != erui::detail::PageRouteKind::submenu) return false;
     const erui::detail::CompiledPage& page =
         runtime.menu->pages[route.logical_page_index];
     if (page.submenu_update_slot == erui::detail::invalid_compiled_index) {
@@ -1612,7 +1624,11 @@ void bind_active_submenu_title(
     const erui::detail::PageRoute& route,
     std::size_t slice_count,
     std::uint64_t applied_revision) noexcept {
-    if (!page || route.kind != erui::detail::PageRouteKind::submenu ||
+    const bool live_title_route =
+        route.kind == erui::detail::PageRouteKind::submenu ||
+        route.kind == erui::detail::PageRouteKind::tab_main ||
+        route.kind == erui::detail::PageRouteKind::tab_continuation;
+    if (!page || !live_title_route ||
         slice_count == 0) {
         retire_active_submenu_title(page);
         return;
