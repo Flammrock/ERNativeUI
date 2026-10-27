@@ -48,6 +48,8 @@ public:
     // native label/help presentation paths have been live validated.
     [[nodiscard]] bool enable_updates_backend() noexcept;
     [[nodiscard]] bool updates_backend_available() const noexcept;
+    [[nodiscard]] bool enable_submenu_updates_backend() noexcept;
+    [[nodiscard]] bool submenu_updates_backend_available() const noexcept;
     // Typed-row runtime interaction/appearance is advertised independently
     // from text updates and only after every admitted native controller and
     // Scaleform presentation seam passes exact-build validation.
@@ -340,6 +342,7 @@ private:
         ERUI_PageTitleFormatter title_formatter{};
         void* title_formatter_user_data{};
         std::atomic_bool formatter_fallback_logged{false};
+        ERUI_RowHandle submenu_opener{ERUI_INVALID_ROW};
         erui::detail::BuiltinPage builtin_page{
             erui::detail::BuiltinPage::count};
         bool custom_tab{};
@@ -457,6 +460,7 @@ private:
     bool custom_tabs_backend_available_{};
     bool title_screen_text_backend_available_{};
     bool updates_backend_available_{};
+    bool submenu_updates_backend_available_{};
     bool row_availability_backend_available_{};
     bool row_visibility_backend_available_{};
     bool open_{};

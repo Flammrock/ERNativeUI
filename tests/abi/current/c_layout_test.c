@@ -428,8 +428,12 @@ _Static_assert(ERUI_CAP_ROW_AVAILABILITY == (UINT64_C(1) << 21),
     "row-availability capability bit drift");
 _Static_assert(ERUI_CAP_ROW_VISIBILITY == (UINT64_C(1) << 22),
     "row-visibility capability bit drift");
+_Static_assert(ERUI_CAP_SUBMENU_UPDATES == (UINT64_C(1) << 23),
+    "submenu-updates capability bit drift");
 _Static_assert(ERUI_UPDATE_KIND_ROW == 1u,
     "row update kind drift");
+_Static_assert(ERUI_UPDATE_KIND_SUBMENU == 2u,
+    "submenu update kind drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_LABEL == (1u << 0),
     "row-label field bit drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_HELP == (1u << 1),
@@ -504,6 +508,38 @@ _Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,
     "row-update availability-appearance offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172u,
     "row-update visible offset drift");
+_Static_assert(ERUI_SUBMENU_UPDATE_FIELD_LABEL == (1u << 0),
+    "submenu-label field bit drift");
+_Static_assert(ERUI_SUBMENU_UPDATE_FIELD_HELP == (1u << 1),
+    "submenu-help field bit drift");
+_Static_assert(ERUI_SUBMENU_UPDATE_FIELD_CAPTION == (1u << 2),
+    "submenu-caption field bit drift");
+_Static_assert(ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE == (1u << 3),
+    "submenu-page-title field bit drift");
+_Static_assert(ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP == (1u << 4),
+    "submenu-page-help field bit drift");
+_Static_assert(sizeof(ERUI_SubmenuUpdateDesc) == 216u,
+    "submenu-update descriptor size drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, row) == 8u,
+    "submenu-update row offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, page) == 16u,
+    "submenu-update page offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, fields) == 24u,
+    "submenu-update fields offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, reserved0) == 28u,
+    "submenu-update reserved0 offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, label) == 32u,
+    "submenu-update label offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, help) == 80u,
+    "submenu-update help offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, caption) == 128u,
+    "submenu-update caption offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, page_title) == 176u,
+    "submenu-update page-title offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, page_help) == 192u,
+    "submenu-update page-help offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, reserved) == 208u,
+    "submenu-update reserved offset drift");
 _Static_assert(sizeof(ERUI_UpdateDesc) == 24u,
     "update-envelope descriptor size drift");
 _Static_assert(offsetof(ERUI_UpdateDesc, payload) == 8u,

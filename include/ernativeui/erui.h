@@ -126,7 +126,8 @@ enum {
     ERUI_CAP_TITLE_SCREEN_TEXT = UINT64_C(1) << 19,
     ERUI_CAP_UPDATES = UINT64_C(1) << 20,
     ERUI_CAP_ROW_AVAILABILITY = UINT64_C(1) << 21,
-    ERUI_CAP_ROW_VISIBILITY = UINT64_C(1) << 22
+    ERUI_CAP_ROW_VISIBILITY = UINT64_C(1) << 22,
+    ERUI_CAP_SUBMENU_UPDATES = UINT64_C(1) << 23
 };
 
 /*
@@ -794,7 +795,8 @@ typedef struct ERUI_StyledTextView {
 
 typedef uint32_t ERUI_UpdateKind;
 enum {
-    ERUI_UPDATE_KIND_ROW = 1u
+    ERUI_UPDATE_KIND_ROW = 1u,
+    ERUI_UPDATE_KIND_SUBMENU = 2u
 };
 
 typedef uint32_t ERUI_RowUpdateFields;
@@ -846,7 +848,49 @@ typedef struct ERUI_RowUpdateDesc {
 } ERUI_RowUpdateDesc;
 
 /*
- * When its field bit is present, interactive must be exactly 0 or 1 and
+ * API 1.4 rich submenu update. row identifies the opener and page identifies
+ * its child page; the host rejects a pair that does not describe one exact
+ * registered submenu. Keeping both identities in one payload lets opener and
+ * child-page text publish atomically.
+ *
+ * A page_title update returns ERUI_NOT_SUPPORTED when the child page was
+ * registered with a custom title formatter, because that formatter remains
+ * the authoritative owner of the page title.
+ *
+ * Opener label, help, and caption use the same Scaleform styled-text contract
+ * as ordinary row updates. page_title and page_help are plain UTF-16 because
+ * they update the logical child-page metadata established by add_submenu.
+ * page_title must be non-empty when present. label and caption must likewise
+ * be non-empty when present; help and page_help may be empty. A present,
+ * empty page_help explicitly clears the child page's help text.
+ */
+typedef uint32_t ERUI_SubmenuUpdateFields;
+enum {
+    ERUI_SUBMENU_UPDATE_FIELD_LABEL = 1u << 0,
+    ERUI_SUBMENU_UPDATE_FIELD_HELP = 1u << 1,
+    ERUI_SUBMENU_UPDATE_FIELD_CAPTION = 1u << 2,
+    ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE = 1u << 3,
+    ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP = 1u << 4
+};
+
+typedef struct ERUI_SubmenuUpdateDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_RowHandle row;
+    ERUI_PageHandle page;
+    ERUI_SubmenuUpdateFields fields;
+    uint32_t reserved0;
+    ERUI_StyledTextView label;
+    ERUI_StyledTextView help;
+    ERUI_StyledTextView caption;
+    ERUI_Utf16View page_title;
+    ERUI_Utf16View page_help;
+    uint32_t reserved[2];
+} ERUI_SubmenuUpdateDesc;
+
+/*
+ * For ERUI_UPDATE_KIND_ROW, when its field bit is present, interactive must
+ * be exactly 0 or 1 and
  * availability_appearance must name a declared value, and visible must be
  * exactly 0 or 1. When the corresponding bit is absent, each scalar must be
  * zero. Availability fields additionally require ERUI_CAP_ROW_AVAILABILITY
@@ -861,6 +905,12 @@ typedef struct ERUI_RowUpdateDesc {
  * validated separately. Construction-disabled Button and ColorPicker rows
  * are omitted by the host and therefore rejected. A batch is also rejected
  * if its final projection would leave any logical page empty.
+ *
+ * ERUI_UPDATE_KIND_SUBMENU requires ERUI_CAP_SUBMENU_UPDATES. Every field
+ * whose bit is absent must contain its canonical zero value. The row and page
+ * handles must belong to the provider passed to commit_updates and must name
+ * the opener and child page of the same submenu. One opener or child page may
+ * occur at most once in a batch.
  */
 
 typedef struct ERUI_UpdateDesc {

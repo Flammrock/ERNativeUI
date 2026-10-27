@@ -356,7 +356,7 @@ static_assert(std::is_same_v<
     decltype(std::declval<erui::Page&>().add_submenu(
         std::declval<std::wstring_view>(),
         std::declval<std::wstring_view>())),
-    erui::Page>);
+    erui::Submenu>);
 
 static_assert(!std::is_polymorphic_v<erui::RowRef>);
 static_assert(!std::has_virtual_destructor_v<erui::RowRef>);
@@ -722,12 +722,16 @@ static_assert(!has_legacy_title_screen_text_overload<erui::Menu>::value);
 static_assert(sizeof(ERUI_TextStyleSpan) == 32);
 static_assert(sizeof(ERUI_StyledTextView) == 48);
 static_assert(sizeof(ERUI_RowUpdateDesc) == 176);
+static_assert(sizeof(ERUI_SubmenuUpdateDesc) == 216);
 static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172);
+static_assert(offsetof(ERUI_SubmenuUpdateDesc, page_title) == 176);
+static_assert(offsetof(ERUI_SubmenuUpdateDesc, reserved) == 208);
 static_assert(sizeof(ERUI_UpdateDesc) == 24);
 static_assert(sizeof(ERUI_UpdateBatchDesc) == 32);
 static_assert(std::is_trivially_copyable_v<ERUI_TextStyleSpan>);
 static_assert(std::is_trivially_copyable_v<ERUI_StyledTextView>);
 static_assert(std::is_trivially_copyable_v<ERUI_RowUpdateDesc>);
+static_assert(std::is_trivially_copyable_v<ERUI_SubmenuUpdateDesc>);
 static_assert(std::is_trivially_copyable_v<ERUI_UpdateDesc>);
 static_assert(std::is_trivially_copyable_v<ERUI_UpdateBatchDesc>);
 static_assert(static_cast<ERUI_Capabilities>(erui::Capability::updates) ==
@@ -736,6 +740,58 @@ static_assert(static_cast<ERUI_Capabilities>(
     erui::Capability::row_availability) == ERUI_CAP_ROW_AVAILABILITY);
 static_assert(static_cast<ERUI_Capabilities>(
     erui::Capability::row_visibility) == ERUI_CAP_ROW_VISIBILITY);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::submenu_updates) == ERUI_CAP_SUBMENU_UPDATES);
+static_assert(std::is_base_of_v<erui::Page, erui::Submenu>);
+static_assert(std::is_convertible_v<erui::Submenu, erui::Page>);
+static_assert(std::is_assignable_v<erui::Page&, erui::Submenu>);
+static_assert(std::is_same_v<
+    decltype(std::declval<erui::Page&>().add_submenu(
+        std::declval<std::wstring_view>(),
+        std::declval<std::wstring_view>())),
+    erui::Submenu>);
+static_assert(std::is_same_v<
+    decltype(std::declval<const erui::Submenu&>().edit()),
+    erui::SubmenuEdit>);
+static_assert(row_edit_value_contract<erui::SubmenuEdit>);
+static_assert(caption_edit_value_contract<erui::SubmenuEdit>);
+static_assert(std::is_same_v<
+    decltype(std::declval<erui::SubmenuEdit&>().page_title(
+        std::declval<std::wstring_view>())),
+    erui::SubmenuEdit&>);
+static_assert(std::is_same_v<
+    decltype(std::declval<erui::SubmenuEdit&&>().page_title(
+        std::declval<std::wstring_view>())),
+    erui::SubmenuEdit&&>);
+static_assert(std::is_same_v<
+    decltype(std::declval<erui::SubmenuEdit&>().page_help(
+        std::declval<std::wstring_view>())),
+    erui::SubmenuEdit&>);
+static_assert(std::is_same_v<
+    decltype(std::declval<erui::SubmenuEdit&&>().page_help(
+        std::declval<std::wstring_view>())),
+    erui::SubmenuEdit&&>);
+static_assert(noexcept(std::declval<erui::SubmenuEdit&>().page_title(
+    std::declval<std::wstring_view>())));
+static_assert(noexcept(std::declval<erui::SubmenuEdit&>().page_help(
+    std::declval<std::wstring_view>())));
+static_assert(std::is_same_v<
+    decltype(static_cast<bool>(std::declval<const erui::Submenu&>())),
+    bool>);
+static_assert(std::is_same_v<
+    decltype(std::declval<const erui::Submenu&>().valid()),
+    bool>);
+static_assert(noexcept(std::declval<const erui::Submenu&>().valid()));
+static_assert(std::is_same_v<
+    decltype(std::declval<const erui::Submenu&>().opener_handle()),
+    erui::RowHandle>);
+static_assert(std::is_same_v<
+    decltype(std::declval<const erui::Submenu&>().page_handle()),
+    erui::PageHandle>);
+static_assert(has_caption<erui::SubmenuEdit>::value);
+static_assert(!has_interactive<erui::SubmenuEdit>::value);
+static_assert(!has_availability_appearance<erui::SubmenuEdit>::value);
+static_assert(!has_visible<erui::SubmenuEdit>::value);
 static_assert(static_cast<ERUI_AvailabilityAppearance>(
     erui::AvailabilityAppearance::follow_interactivity) ==
     ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY);

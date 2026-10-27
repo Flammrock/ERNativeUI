@@ -23,10 +23,15 @@ std::atomic<std::uint8_t> g_popup_preset{1};
 std::atomic<std::uint8_t> g_popup_binary{0};
 std::atomic<std::uint8_t> g_popup_extended{3};
 std::array<std::uint32_t, 32> g_action_numbers{};
+std::array<std::uint32_t, 15> g_rich_submenu_action_numbers{};
 erui::Registration g_registration{};
 erui::ToggleRow g_enabled_row{};
 erui::SliderRow g_intensity_row{};
 erui::ButtonRow g_root_label_help_button{};
+erui::Submenu g_rich_submenu{};
+erui::Submenu g_nested_rich_submenu{};
+std::atomic<std::uint8_t> g_rich_submenu_variant{0};
+std::atomic<std::uint8_t> g_nested_rich_submenu_variant{0};
 
 struct LabelHelpRows {
     erui::ButtonRow button{};
@@ -79,6 +84,8 @@ constexpr std::array<std::wstring_view, 3> kLabelHelpChoiceValues{
     L"VALUE ZERO", L"VALUE ONE", L"VALUE TWO"};
 constexpr std::array<std::wstring_view, 3> kAvailabilityAppearanceValues{
     L"Follow", L"Normal", L"Disabled"};
+constexpr std::array<std::wstring_view, 2> kRichSubmenuVariantValues{
+    L"Variant A", L"Variant B"};
 
 struct ShowcaseActionState {
     explicit ShowcaseActionState(const wchar_t* name) noexcept
@@ -357,6 +364,57 @@ erui::StyledText make_variant_caption(
         .append(L" ")
         .append(marker, caption_style);
     return caption;
+}
+
+ERUI_Result commit_rich_submenu_presentation(
+    const erui::Submenu& submenu,
+    bool nested,
+    std::uint8_t variant) noexcept {
+    if (!submenu.valid()) return ERUI_INVALID_HANDLE;
+    if (variant >= kRichSubmenuVariantValues.size()) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    const bool alternate = variant != 0u;
+    const std::wstring_view row_type = nested
+        ? L"NESTED SUBMENU"
+        : L"RICH SUBMENU";
+    return submenu.edit()
+        .label(make_variant_label(row_type, variant))
+        .caption(make_variant_caption(
+            nested ? L"NESTED" : L"OPEN", variant))
+        .help(make_variant_help(row_type, variant))
+        .page_title(alternate
+            ? (nested ? L"Nested Rich Submenu B" : L"Rich Submenu Page B")
+            : (nested ? L"Nested Rich Submenu A" : L"Rich Submenu Page A"))
+        .page_help(alternate
+            ? L"Variant B was published atomically from this page callback."
+            : L"Variant A was published atomically from this page callback.")
+        .commit();
+}
+
+void ERUI_CALL rich_submenu_variant_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (!g_registration.supports(erui::Capability::submenu_updates)) return;
+
+    if (commit_rich_submenu_presentation(
+            g_rich_submenu, false, value) != ERUI_OK) {
+        debug(L"Could not update the rich Submenu presentation.");
+    }
+}
+
+void ERUI_CALL nested_rich_submenu_variant_changed(
+    void* context,
+    std::uint8_t value) noexcept {
+    value_changed(context, value);
+    if (!g_registration.supports(erui::Capability::submenu_updates)) return;
+
+    if (commit_rich_submenu_presentation(
+            g_nested_rich_submenu, true, value) != ERUI_OK) {
+        debug(L"Could not update the nested rich Submenu presentation.");
+    }
 }
 
 template <typename Row>
@@ -1227,6 +1285,66 @@ DWORD WINAPI initialize(void*) noexcept {
             }
         }
 
+        if (menu.supports(erui::Capability::submenu_updates)) {
+            // A retained Submenu is both the child-page builder used here and
+            // a runtime reference to its parent navigation row and logical
+            // child page. Changing the choice from inside the open child
+            // publishes all five text fields as one atomic update.
+            g_rich_submenu = root.add_submenu(
+                L"Rich Submenu [A]",
+                L"Variant A - rich Submenu help text.",
+                L"Rich Submenu Page A",
+                L"Variant A was registered with the child page.");
+
+            erui::ChoiceOptions rich_variant{};
+            rich_variant.values = kRichSubmenuVariantValues.data();
+            rich_variant.count = kRichSubmenuVariantValues.size();
+            rich_variant.initial_index =
+                g_rich_submenu_variant.load(std::memory_order_acquire);
+            g_rich_submenu.add_inline_choice(
+                L"Main presentation variant",
+                L"Changes the open page now and its parent navigation row after Back.",
+                rich_variant,
+                &rich_submenu_variant_changed,
+                &g_rich_submenu_variant);
+
+            g_nested_rich_submenu = g_rich_submenu.add_submenu(
+                L"Nested Submenu [A]",
+                L"Variant A - nested Submenu help text.",
+                L"Nested Rich Submenu A",
+                L"Variant A was registered with the nested child page.");
+
+            rich_variant.initial_index =
+                g_nested_rich_submenu_variant.load(
+                    std::memory_order_acquire);
+            g_nested_rich_submenu.add_inline_choice(
+                L"Nested presentation variant",
+                L"Changes this nested page now and its opener after Back.",
+                rich_variant,
+                &nested_rich_submenu_variant_changed,
+                &g_nested_rich_submenu_variant);
+            g_nested_rich_submenu.add_button<&show_native_alert>(
+                L"Nested sentinel",
+                L"This row must remain usable after every nested text update.");
+
+            // The main child deliberately spans more than one physical page.
+            // Its generated rows make title regeneration, Previous/Next, Back,
+            // and retained-focus behavior part of the same live regression.
+            for (std::size_t index = 0;
+                 index < g_rich_submenu_action_numbers.size();
+                 ++index) {
+                g_rich_submenu_action_numbers[index] =
+                    static_cast<std::uint32_t>(index + 1u);
+                const std::wstring label = L"Rich Submenu action " +
+                    std::to_wstring(index + 1u);
+                g_rich_submenu.add_button(
+                    label,
+                    L"A pagination filler owned by the rich Submenu test.",
+                    &action_pressed,
+                    &g_rich_submenu_action_numbers[index]);
+            }
+        }
+
         if (menu.supports(erui::Capability::updates)) {
             // Keep one action-row test directly on Game Options. Its movie
             // uses a different left-label binding from logical subpages.
@@ -1794,6 +1912,22 @@ DWORD WINAPI initialize(void*) noexcept {
     }
     g_registration = result.value();
 
+    if (g_registration.supports(erui::Capability::submenu_updates)) {
+        if (commit_rich_submenu_presentation(
+                g_rich_submenu,
+                false,
+                g_rich_submenu_variant.load(std::memory_order_acquire)) !=
+            ERUI_OK) {
+            debug(L"Could not apply the initial rich Submenu presentation.");
+        }
+        if (commit_rich_submenu_presentation(
+                g_nested_rich_submenu,
+                true,
+                g_nested_rich_submenu_variant.load(
+                    std::memory_order_acquire)) != ERUI_OK) {
+            debug(L"Could not apply the initial nested Submenu presentation.");
+        }
+    }
     if (g_registration.supports(erui::Capability::updates)) {
         if (commit_intensity_presentation(
                 g_intensity.load(std::memory_order_acquire)) != ERUI_OK) {

@@ -1157,6 +1157,15 @@ DWORD run_host() noexcept {
             }
             log::write(
                 "Runtime row-presentation backend preflight passed; API 1.4 label/help updates are available");
+            if (!registry().enable_submenu_updates_backend()) {
+                log::write(
+                    erui::LogLevel::fatal,
+                    "Runtime title bridge passed preflight but rich submenu updates could not be published before registration opened");
+                set_api_state(ApiState::failed);
+                return 1;
+            }
+            log::write(
+                "Runtime title bridge preflight passed; API 1.4 rich submenu updates are available");
             if (erui::native::native_row_availability_build_supported(
                     row_update_game)) {
                 if (!registry().enable_row_availability_backend()) {

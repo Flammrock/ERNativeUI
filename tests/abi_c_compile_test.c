@@ -143,6 +143,14 @@ _Static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4),
     "ERUI row-appearance field bit drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_VISIBLE == (1u << 5),
     "ERUI row-visible field bit drift");
+_Static_assert(ERUI_CAP_SUBMENU_UPDATES == (UINT64_C(1) << 23),
+    "ERUI submenu-updates capability drift");
+_Static_assert(ERUI_UPDATE_KIND_SUBMENU == 2u,
+    "ERUI submenu-update kind drift");
+_Static_assert(ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE == (1u << 3),
+    "ERUI submenu page-title field drift");
+_Static_assert(ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP == (1u << 4),
+    "ERUI submenu page-help field drift");
 _Static_assert(ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY == 0u,
     "ERUI follow-interactivity appearance drift");
 _Static_assert(ERUI_AVAILABILITY_APPEARANCE_NORMAL == 1u,
@@ -151,6 +159,12 @@ _Static_assert(ERUI_AVAILABILITY_APPEARANCE_DISABLED == 2u,
     "ERUI disabled appearance drift");
 _Static_assert(sizeof(ERUI_RowUpdateDesc) == 176u,
     "ERUI row-update descriptor ABI drift");
+_Static_assert(sizeof(ERUI_SubmenuUpdateDesc) == 216u,
+    "ERUI submenu-update descriptor ABI drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, page_title) == 176u,
+    "ERUI submenu-update page-title offset drift");
+_Static_assert(offsetof(ERUI_SubmenuUpdateDesc, reserved) == 208u,
+    "ERUI submenu-update reserved offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, interactive) == 20u,
     "ERUI row-update interactive offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,

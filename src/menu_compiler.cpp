@@ -263,6 +263,8 @@ std::unique_ptr<CompiledMenu> MenuCompiler::compile(Menu& menu) {
 
         CompiledPage output{};
         output.kind = page->kind_;
+        output.provider = page->provider_;
+        output.page = page->page_;
         const std::wstring_view effective_page_title =
             page->presentation_.page_title.empty()
                 ? std::wstring_view(page->title_)

@@ -291,6 +291,14 @@ public:
         ERUI_RowHandle row,
         bool visibility_editable = false);
 
+    // Internal host bridge: associates a provider-owned logical page with
+    // its stable public ABI identity. Core-only pages retain invalid handles.
+    // Rich submenu updates use this identity after compilation without
+    // retaining Registry::Page pointers in the native runtime.
+    Page& identify_page(
+        ERUI_ProviderHandle provider,
+        ERUI_PageHandle page);
+
     [[nodiscard]] PageKind kind() const noexcept { return kind_; }
     [[nodiscard]] std::wstring_view title() const noexcept { return title_; }
     [[nodiscard]] std::wstring_view help() const noexcept { return help_; }
@@ -344,6 +352,8 @@ private:
     std::wstring help_{};
     PagePresentationSpec presentation_{};
     std::optional<TabMetadata> tab_metadata_{};
+    ERUI_ProviderHandle provider_{ERUI_INVALID_PROVIDER};
+    ERUI_PageHandle page_{ERUI_INVALID_PAGE};
     std::vector<RowDefinition> rows_{};
 };
 

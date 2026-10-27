@@ -39,6 +39,8 @@ struct Rows {
     erui::PopupChoiceRow popup_choice{};
     erui::TextInputRow text{};
     erui::ColorPickerRow color{};
+    erui::Submenu submenu{};
+    erui::ToggleRow submenu_toggle{};
 };
 
 void ERUI_CALL button_pressed(void* user_data) noexcept {
@@ -108,7 +110,10 @@ int main(int argc, char** argv) {
     ERUI_Result pending_set_result{ERUI_INTERNAL_ERROR};
     ERUI_Result pending_get_result{ERUI_INTERNAL_ERROR};
     ERUI_Result pending_edit_result{ERUI_INTERNAL_ERROR};
+    ERUI_Result pending_submenu_edit_result{ERUI_INTERNAL_ERROR};
     bool pending_get_output{true};
+    bool pending_submenu_builder_valid{};
+    bool converted_submenu_page_valid{};
 
     {
         erui::ProviderOptions provider{};
@@ -213,6 +218,22 @@ int main(int argc, char** argv) {
                     &color_changed,
                     &callbacks.color);
 
+                rows.submenu = root.add_submenu(
+                    L"Advanced",
+                    L"Open advanced settings",
+                    L"Advanced Settings",
+                    L"Advanced page help");
+                pending_submenu_builder_valid = rows.submenu.valid();
+                erui::Page submenu_page =
+                    static_cast<erui::Page>(rows.submenu);
+                converted_submenu_page_valid = submenu_page.valid();
+                rows.submenu_toggle = submenu_page.add_toggle(
+                    L"Nested toggle",
+                    L"Registered through the explicit Page conversion",
+                    1u,
+                    &byte_value_changed,
+                    &callbacks.byte_value);
+
                 pending_rows_were_inactive =
                     !rows.button.valid() && !rows.toggle.valid() &&
                     !rows.slider.valid() && !rows.numeric.valid() &&
@@ -224,6 +245,9 @@ int main(int argc, char** argv) {
                     rows.toggle.get_value(pending_get_output);
                 pending_edit_result = rows.toggle.edit()
                     .label(L"Not published")
+                    .commit();
+                pending_submenu_edit_result = rows.submenu.edit()
+                    .page_title(L"Not published")
                     .commit();
             });
 
@@ -237,6 +261,9 @@ int main(int argc, char** argv) {
     CHECK(pending_set_result == ERUI_INVALID_HANDLE);
     CHECK(pending_get_result == ERUI_INVALID_HANDLE);
     CHECK(pending_edit_result == ERUI_INVALID_HANDLE);
+    CHECK(pending_submenu_builder_valid);
+    CHECK(converted_submenu_page_valid);
+    CHECK(pending_submenu_edit_result == ERUI_INVALID_HANDLE);
     CHECK(pending_get_output);
     CHECK(registration.valid());
     CHECK(rows.button.valid());
@@ -248,6 +275,37 @@ int main(int argc, char** argv) {
     CHECK(rows.popup_choice.valid());
     CHECK(rows.text.valid());
     CHECK(rows.color.valid());
+    CHECK(rows.submenu.valid());
+    CHECK(rows.submenu.opener_handle() != ERUI_INVALID_ROW);
+    CHECK(rows.submenu.page_handle() != ERUI_INVALID_PAGE);
+    CHECK(rows.submenu_toggle.valid());
+
+    erui::StyledText submenu_label{};
+    submenu_label
+        .append(L"Advanced ")
+        .append(
+            L"updated",
+            erui::TextStyle{}
+                .color(erui::Color{96u, 220u, 128u})
+                .underline());
+    erui::StyledText submenu_help{};
+    submenu_help.append(L"Updated submenu help");
+    erui::StyledText submenu_caption{};
+    submenu_caption
+        .append(L"Open ")
+        .append(
+            L"now",
+            erui::TextStyle{}.color(erui::Color{220u, 180u, 96u}));
+    CHECK(rows.submenu.edit()
+        .label(std::move(submenu_label))
+        .help(std::move(submenu_help))
+        .caption(std::move(submenu_caption))
+        .page_title(L"Updated Advanced Settings")
+        .page_help(L"Updated advanced page help")
+        .commit() == ERUI_OK);
+    auto empty_submenu_edit = rows.submenu.edit();
+    CHECK(empty_submenu_edit.commit() == ERUI_INVALID_ARGUMENT);
+    CHECK(empty_submenu_edit.commit() == ERUI_ALREADY_COMMITTED);
 
     erui::StyledText styled_label{};
     styled_label
@@ -477,6 +535,7 @@ int main(int argc, char** argv) {
     CHECK(callbacks.color == 0u);
 
     erui::ToggleRow aborted_row{};
+    erui::Submenu aborted_submenu{};
     {
         erui::ProviderOptions provider{};
         provider.provider_id = "tests.current-typed-rows-aborted-cpp";
@@ -492,6 +551,12 @@ int main(int argc, char** argv) {
                     1u,
                     &byte_value_changed,
                     &callbacks.byte_value);
+                aborted_submenu = menu.root().add_submenu(
+                    L"Captured submenu",
+                    L"This submenu must be invalidated by abort",
+                    L"Aborted child");
+                aborted_submenu.add_toggle(
+                    L"Child sentinel", L"Never published", 1u);
 
                 erui::TextInputOptions invalid{};
                 invalid.maximum_length = ERUI_TEXT_INPUT_MAX_LENGTH + 1u;
@@ -511,12 +576,24 @@ int main(int argc, char** argv) {
     bool unchanged{true};
     CHECK(aborted_row.get_value(unchanged) == ERUI_INVALID_HANDLE);
     CHECK(unchanged);
+    CHECK(aborted_submenu.opener_handle() != ERUI_INVALID_ROW);
+    CHECK(aborted_submenu.page_handle() != ERUI_INVALID_PAGE);
+    CHECK(!aborted_submenu.valid());
+    CHECK(aborted_submenu.edit().page_title(L"Rejected").commit() ==
+        ERUI_INVALID_HANDLE);
 
     erui::ToggleRow empty{};
     CHECK(!empty.valid());
     CHECK(empty == ERUI_INVALID_ROW);
     CHECK(ERUI_INVALID_ROW == empty);
     CHECK(empty.set_value(true) == ERUI_INVALID_HANDLE);
+
+    erui::Submenu empty_submenu{};
+    CHECK(!empty_submenu.valid());
+    CHECK(empty_submenu.opener_handle() == ERUI_INVALID_ROW);
+    CHECK(empty_submenu.page_handle() == ERUI_INVALID_PAGE);
+    CHECK(empty_submenu.edit().label(L"Rejected").commit() ==
+        ERUI_INVALID_HANDLE);
 
     erui_unload_test_host(&host);
     return 0;

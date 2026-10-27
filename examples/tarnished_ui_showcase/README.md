@@ -20,6 +20,10 @@
   editable row types; its first row alternates every label and help message,
   plus the supported Button and Popup Choice captions, between unmistakable
   A/B variants;
+- a retained API 1.4 **Rich Submenu** whose A/B choice atomically changes its
+  opener label, caption, and help together with the currently open child-page
+  title and help; the same surface includes a nested retained Submenu and
+  enough rows to validate regenerated pagination titles;
 - an API 1.4 **Row Interaction Matrix** covering Button, Toggle, byte Slider,
   Numeric Slider, Custom Slider, Inline Choice, Popup Choice, TextInput, and
   ColorPicker, with an additional red-to-green styled Intensity row that
@@ -73,6 +77,22 @@ System tab and back, and close/reopen System. Open and close the Popup Choice,
 select each of its three values, and open the TextInput and ColorPicker editors
 as well. Labels, captions, and focused help must keep the active A/B variant
 throughout those frame updates and reconstructions.
+
+The **Rich Submenu** row is the focused runtime Submenu test. Open it and
+change **Main presentation variant** between A and B. The currently open page
+must immediately change its title without closing, flashing, or losing focus.
+Navigate through Next and Previous and verify every slice uses the selected
+title with a correct `(n/t)` suffix. Back out once and verify the opener's
+label, framed caption, and focused help all use the same variant. The same
+atomic commit also changes the child page's logical help metadata; the current
+settings movie has no independent page-help field to inspect visually, so that
+part of the contract is covered by the automated host tests.
+
+Open **Nested Submenu**, change **Nested presentation variant**, and perform
+the same title/opener checks one level deeper. Repeat both changes after
+switching System tabs and after closing and reopening System. Each A/B change
+is one atomic `SubmenuEdit::commit()`; a mixed generation must never be
+visible.
 
 This matrix also documents the font boundary visible in the effective game
 movie. Color and underline work with the vanilla settings presentation. The
@@ -148,8 +168,9 @@ button.edit().caption(std::move(caption)).commit();
 
 Existing `label(L"...")`, `caption(L"...")`, and `help(L"...")` calls are
 literal-text APIs; the host escapes their contents before sending them to
-Scaleform. Caption editing is available only on `ButtonRowEdit` and
-`PopupChoiceRowEdit` in this milestone.
+Scaleform. Caption editing is available on `ButtonRowEdit`,
+`PopupChoiceRowEdit`, and the opener portion of `SubmenuEdit` in this
+milestone.
 
 For a focused mod-author explanation of the same surface, including
 capability checks, commit semantics, interaction versus appearance, visibility

@@ -8,6 +8,8 @@
 #include "runtime_requirements.hpp"
 #include "runtime_state.hpp"
 #include "row_presentation_state.hpp"
+#include "row_update_state.hpp"
+#include "submenu_update_state.hpp"
 #include "row_visibility_state.hpp"
 #include "native_input_bindings.hpp"
 #include "native_row_visibility.hpp"
@@ -58,6 +60,7 @@ InstallResult fail_install(InstallError error) noexcept {
     erui::native::remove_native_menu_hooks();
     erui::native::reset_native_text_inputs();
     detail::reset_row_presentation_state();
+    detail::reset_submenu_update_state();
     detail::reset_row_visibility_state();
     detail::runtime_state().tab_catalogue.reset();
     detail::runtime_state().menu.reset();
@@ -270,13 +273,40 @@ InstallResult install_impl(
         return fail_install(InstallError::menu_compile_failed);
     }
 
-    if (!detail::configure_row_presentation_state(*runtime.menu)) {
+    bool row_presentation_configured{};
+    bool submenu_updates_configured{};
+    bool row_visibility_configured{};
+    {
+        // Registration-time updates and compiled identity publication form
+        // one epoch. Do not let a client batch prepare against the
+        // preconfiguration maps while installation moves only part of that
+        // epoch into compiled slots.
+        const detail::RowUpdatePublicationLock publication_lock =
+            detail::lock_row_update_publication();
+        row_presentation_configured =
+            detail::configure_row_presentation_state(*runtime.menu);
+        if (row_presentation_configured) {
+            submenu_updates_configured =
+                detail::configure_submenu_update_state(*runtime.menu);
+        }
+        if (submenu_updates_configured) {
+            row_visibility_configured =
+                detail::configure_row_visibility_state(*runtime.menu);
+        }
+    }
+    if (!row_presentation_configured) {
         detail::logf(
             LogLevel::error,
             "Runtime row-presentation state could not index the compiled menu");
         return fail_install(InstallError::menu_compile_failed);
     }
-    if (!detail::configure_row_visibility_state(*runtime.menu)) {
+    if (!submenu_updates_configured) {
+        detail::logf(
+            LogLevel::error,
+            "Compiled submenu-update state could not be configured");
+        return fail_install(InstallError::menu_compile_failed);
+    }
+    if (!row_visibility_configured) {
         detail::logf(
             LogLevel::error,
             "Runtime row-visibility state could not index the compiled menu");
@@ -658,6 +688,7 @@ void uninstall() noexcept {
     erui::native::remove_native_menu_hooks();
     erui::native::reset_native_text_inputs();
     detail::reset_row_presentation_state();
+    detail::reset_submenu_update_state();
     detail::reset_row_visibility_state();
     runtime.button_action_hits.store(0, std::memory_order_release);
     runtime.diagnostic_button_action_logs.store(0, std::memory_order_release);

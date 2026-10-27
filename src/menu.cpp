@@ -77,6 +77,22 @@ Page& Page::identify_last_row(
     return *this;
 }
 
+Page& Page::identify_page(
+    ERUI_ProviderHandle provider,
+    ERUI_PageHandle page) {
+    ensure_mutable();
+    if (provider == ERUI_INVALID_PROVIDER || page == ERUI_INVALID_PAGE) {
+        throw std::invalid_argument("page identity is invalid");
+    }
+    if ((provider_ != ERUI_INVALID_PROVIDER && provider_ != provider) ||
+        (page_ != ERUI_INVALID_PAGE && page_ != page)) {
+        throw std::logic_error("page identity was already assigned");
+    }
+    provider_ = provider;
+    page_ = page;
+    return *this;
+}
+
 Page& Page::add_toggle(
     std::wstring label,
     std::wstring help,

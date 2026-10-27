@@ -142,6 +142,9 @@ static_assert(
 
 struct CompiledPage {
     PageKind kind{PageKind::root};
+    ERUI_ProviderHandle provider{ERUI_INVALID_PROVIDER};
+    ERUI_PageHandle page{ERUI_INVALID_PAGE};
+    std::size_t submenu_update_slot{invalid_compiled_index};
     BuiltinPage builtin_page{BuiltinPage::count};
     TextId title_id{};
     TextId help_id{};

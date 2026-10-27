@@ -4,10 +4,12 @@
 #include "row_update_state.hpp"
 #include "row_visibility_state.hpp"
 #include "steam_language.hpp"
+#include "submenu_update_state.hpp"
 
 #include <Windows.h>
 
 #include "test_assertions.hpp"
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -3174,6 +3176,512 @@ void verify_api_1_4_row_visibility_contract() {
     erui::detail::reset_row_visibility_state();
 }
 
+void verify_api_1_4_submenu_update_contract() {
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_submenu_update_state();
+
+    const auto submit = [](
+        erui::host::Registry& registry,
+        ERUI_ProviderHandle provider,
+        const ERUI_UpdateDesc* updates,
+        std::uint32_t count) {
+        ERUI_UpdateBatchDesc batch{};
+        batch.size = sizeof(batch);
+        batch.updates = updates;
+        batch.update_count = count;
+        batch.update_stride = sizeof(ERUI_UpdateDesc);
+        return registry.commit_updates(provider, &batch);
+    };
+    const auto wrap_submenu = [](const ERUI_SubmenuUpdateDesc& submenu) {
+        ERUI_UpdateDesc update{};
+        update.size = sizeof(update);
+        update.kind = ERUI_UPDATE_KIND_SUBMENU;
+        update.payload = &submenu;
+        return update;
+    };
+
+    // API 1.4 text updates remain separately capability-gated from the
+    // ordinary update transport.
+    {
+        erui::host::Registry registry{};
+        ERUI_TEST_CHECK(registry.enable_updates_backend());
+        registry.open_registration();
+
+        ERUI_ProviderDesc provider{};
+        provider.size = sizeof(provider);
+        provider.api_version = ERUI_API_VERSION_1_4;
+        provider.owner_module = GetModuleHandleW(nullptr);
+        provider.provider_id = ascii("submenu-updates.unavailable");
+        provider.display_name = utf16(L"Unavailable submenu updates");
+        ERUI_ProviderHandle provider_handle{};
+        ERUI_PageHandle root{};
+        ERUI_TEST_CHECK(registry.register_provider(
+            ERUI_API_VERSION_1_4,
+            &provider,
+            &provider_handle,
+            &root) == ERUI_OK);
+        ERUI_SubmenuDesc submenu{};
+        submenu.size = sizeof(submenu);
+        submenu.label = utf16(L"Submenu");
+        submenu.help = utf16(L"Open child");
+        submenu.page_title = utf16(L"Child");
+        submenu.enabled = 1u;
+        ERUI_PageHandle child{};
+        ERUI_RowHandle opener{};
+        ERUI_TEST_CHECK(registry.add_submenu(
+            provider_handle, root, &submenu, &child, &opener) == ERUI_OK);
+        ERUI_ToggleDesc sentinel{};
+        sentinel.size = sizeof(sentinel);
+        sentinel.label = utf16(L"Sentinel");
+        sentinel.help = utf16(L"Keeps the child page non-empty");
+        sentinel.enabled = 1u;
+        ERUI_TEST_CHECK(registry.add_toggle(
+            provider_handle, child, &sentinel, nullptr) == ERUI_OK);
+        ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
+
+        ERUI_SubmenuUpdateDesc submenu_update{};
+        submenu_update.size = sizeof(submenu_update);
+        submenu_update.row = opener;
+        submenu_update.page = child;
+        submenu_update.fields = ERUI_SUBMENU_UPDATE_FIELD_LABEL;
+        submenu_update.label = styled_text(L"Rejected");
+        const ERUI_UpdateDesc update = wrap_submenu(submenu_update);
+        ERUI_TEST_CHECK(submit(
+            registry, provider_handle, &update, 1u) == ERUI_NOT_SUPPORTED);
+    }
+
+    erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_custom_tabs_backend());
+    ERUI_TEST_CHECK(registry.enable_updates_backend());
+    ERUI_TEST_CHECK(registry.enable_submenu_updates_backend());
+    registry.open_registration();
+
+    ERUI_ProviderDesc provider{};
+    provider.size = sizeof(provider);
+    provider.api_version = ERUI_API_VERSION_1_4;
+    provider.owner_module = GetModuleHandleW(nullptr);
+    provider.provider_id = ascii("submenu-updates.contract");
+    provider.display_name = utf16(L"Submenu update contract");
+    ERUI_ProviderHandle provider_handle{};
+    ERUI_PageHandle root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4,
+        &provider,
+        &provider_handle,
+        &root) == ERUI_OK);
+
+    ERUI_ToggleDesc rollback_toggle{};
+    rollback_toggle.size = sizeof(rollback_toggle);
+    rollback_toggle.label = utf16(L"Rollback sentinel");
+    rollback_toggle.help = utf16(L"Rollback original help");
+    rollback_toggle.enabled = 1u;
+    ERUI_RowHandle rollback_row{};
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, root, &rollback_toggle, &rollback_row) == ERUI_OK);
+
+    const auto add_submenu = [&](
+        ERUI_PageHandle parent,
+        const wchar_t* label,
+        const wchar_t* title,
+        ERUI_PageHandle& child,
+        ERUI_RowHandle& opener) {
+        ERUI_SubmenuDesc description{};
+        description.size = sizeof(description);
+        description.label = utf16(label);
+        description.help = utf16(L"Original opener help");
+        description.page_title = utf16(title);
+        description.page_help = utf16(L"Original child help");
+        description.enabled = 1u;
+        ERUI_TEST_CHECK(registry.add_submenu(
+            provider_handle,
+            parent,
+            &description,
+            &child,
+            &opener) == ERUI_OK);
+    };
+    const auto add_child_toggle = [&](ERUI_PageHandle page) {
+        ERUI_ToggleDesc toggle{};
+        toggle.size = sizeof(toggle);
+        toggle.label = utf16(L"Child row");
+        toggle.help = utf16(L"Child row help");
+        toggle.enabled = 1u;
+        ERUI_TEST_CHECK(registry.add_toggle(
+            provider_handle, page, &toggle, nullptr) == ERUI_OK);
+    };
+
+    ERUI_PageHandle child{};
+    ERUI_RowHandle opener{};
+    add_submenu(root, L"Original opener", L"Original child", child, opener);
+    for (unsigned index = 0;
+         index < erui::detail::native_subpage_capacity + 1u;
+         ++index) {
+        add_child_toggle(child);
+    }
+
+    ERUI_PageHandle other_child{};
+    ERUI_RowHandle other_opener{};
+    add_submenu(
+        root, L"Other opener", L"Other child", other_child, other_opener);
+    add_child_toggle(other_child);
+
+    ERUI_PageHandle formatter_child{};
+    ERUI_RowHandle formatter_opener{};
+    add_submenu(
+        root,
+        L"Formatter opener",
+        L"Formatter child",
+        formatter_child,
+        formatter_opener);
+    add_child_toggle(formatter_child);
+    FormatterObservation formatter_observation{};
+    ERUI_PagePresentationDesc formatter_presentation{};
+    formatter_presentation.size = sizeof(formatter_presentation);
+    formatter_presentation.page_title = utf16(L"Formatter base");
+    formatter_presentation.formatter = &format_page_title;
+    formatter_presentation.user_data = &formatter_observation;
+    ERUI_TEST_CHECK(registry.set_page_presentation(
+        provider_handle,
+        formatter_child,
+        &formatter_presentation) == ERUI_OK);
+
+    ERUI_PageHandle sound_page{};
+    ERUI_TEST_CHECK(registry.get_builtin_page(
+        provider_handle, ERUI_BUILTIN_PAGE_SOUND, &sound_page) == ERUI_OK);
+    ERUI_ToggleDesc sound_sentinel = rollback_toggle;
+    sound_sentinel.label = utf16(L"Sound sentinel");
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, sound_page, &sound_sentinel, nullptr) == ERUI_OK);
+
+    ERUI_TabDesc tab{};
+    tab.size = sizeof(tab);
+    tab.tab_id = ascii("submenu-update-tab");
+    tab.title = utf16(L"Update Tab");
+    ERUI_PageHandle tab_page{};
+    ERUI_TEST_CHECK(registry.add_tab(
+        provider_handle, &tab, &tab_page) == ERUI_OK);
+    ERUI_ToggleDesc tab_sentinel = rollback_toggle;
+    tab_sentinel.label = utf16(L"Tab sentinel");
+    ERUI_TEST_CHECK(registry.add_toggle(
+        provider_handle, tab_page, &tab_sentinel, nullptr) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
+
+    ERUI_ProviderDesc foreign_provider = provider;
+    foreign_provider.provider_id = ascii("submenu-updates.foreign");
+    foreign_provider.display_name = utf16(L"Foreign submenu provider");
+    ERUI_ProviderHandle foreign_handle{};
+    ERUI_PageHandle foreign_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4,
+        &foreign_provider,
+        &foreign_handle,
+        &foreign_root) == ERUI_OK);
+    ERUI_SubmenuDesc foreign_submenu{};
+    foreign_submenu.size = sizeof(foreign_submenu);
+    foreign_submenu.label = utf16(L"Foreign opener");
+    foreign_submenu.help = utf16(L"Foreign opener help");
+    foreign_submenu.page_title = utf16(L"Foreign child");
+    foreign_submenu.enabled = 1u;
+    ERUI_PageHandle foreign_child{};
+    ERUI_RowHandle foreign_opener{};
+    ERUI_TEST_CHECK(registry.add_submenu(
+        foreign_handle,
+        foreign_root,
+        &foreign_submenu,
+        &foreign_child,
+        &foreign_opener) == ERUI_OK);
+    ERUI_ToggleDesc foreign_sentinel = rollback_toggle;
+    foreign_sentinel.label = utf16(L"Foreign sentinel");
+    ERUI_TEST_CHECK(registry.add_toggle(
+        foreign_handle,
+        foreign_child,
+        &foreign_sentinel,
+        nullptr) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.commit_provider(foreign_handle) == ERUI_OK);
+
+    ERUI_ProviderDesc stale_provider = provider;
+    stale_provider.provider_id = ascii("submenu-updates.stale");
+    stale_provider.display_name = utf16(L"Aborted submenu provider");
+    ERUI_ProviderHandle stale_provider_handle{};
+    ERUI_PageHandle stale_root{};
+    ERUI_TEST_CHECK(registry.register_provider(
+        ERUI_API_VERSION_1_4,
+        &stale_provider,
+        &stale_provider_handle,
+        &stale_root) == ERUI_OK);
+    ERUI_SubmenuDesc stale_submenu = foreign_submenu;
+    stale_submenu.label = utf16(L"Stale opener");
+    ERUI_PageHandle stale_child{};
+    ERUI_RowHandle stale_opener{};
+    ERUI_TEST_CHECK(registry.add_submenu(
+        stale_provider_handle,
+        stale_root,
+        &stale_submenu,
+        &stale_child,
+        &stale_opener) == ERUI_OK);
+    ERUI_TEST_CHECK(registry.abort_provider(stale_provider_handle) == ERUI_OK);
+
+    ERUI_SubmenuUpdateDesc base{};
+    base.size = sizeof(base);
+    base.row = opener;
+    base.page = child;
+    base.fields = ERUI_SUBMENU_UPDATE_FIELD_LABEL;
+    base.label = styled_text(L"Candidate opener");
+
+    unsigned expectation_index{};
+    const auto expect = [&](ERUI_SubmenuUpdateDesc candidate,
+                            ERUI_Result expected) {
+        ++expectation_index;
+        const ERUI_UpdateDesc update = wrap_submenu(candidate);
+        const ERUI_Result result = submit(
+            registry, provider_handle, &update, 1u);
+        if (result != expected) {
+            std::fprintf(
+                stderr,
+                "submenu expectation %u: expected %d, got %d\n",
+                expectation_index,
+                static_cast<int>(expected),
+                static_cast<int>(result));
+        }
+        ERUI_TEST_CHECK(result == expected);
+    };
+
+    ERUI_SubmenuUpdateDesc invalid = base;
+    invalid.page = other_child;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.row = rollback_row;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    for (const ERUI_PageHandle invalid_page :
+         std::array{root, tab_page, sound_page}) {
+        invalid = base;
+        invalid.page = invalid_page;
+        expect(invalid, ERUI_INVALID_ARGUMENT);
+    }
+    invalid = base;
+    invalid.row = foreign_opener;
+    invalid.page = foreign_child;
+    expect(invalid, ERUI_INVALID_HANDLE);
+    invalid = base;
+    invalid.row = stale_opener;
+    invalid.page = stale_child;
+    expect(invalid, ERUI_INVALID_HANDLE);
+    invalid = base;
+    invalid.row = UINT64_C(0xF0F0F0F0F0F0F0F0);
+    invalid.page = UINT64_C(0xE0E0E0E0E0E0E0E0);
+    expect(invalid, ERUI_INVALID_HANDLE);
+
+    invalid = base;
+    invalid.fields = ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE;
+    invalid.label = styled_text(L"Noncanonical hidden label");
+    invalid.page_title = utf16(L"New child");
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.page_title = utf16(L"Noncanonical hidden title");
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.size = sizeof(invalid) - 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.flags = 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.reserved0 = 1u;
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = 0u;
+    invalid.label = {};
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    invalid = base;
+    invalid.fields = ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE;
+    invalid.label = {};
+    invalid.page_title = utf16(L"");
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+    ERUI_TextStyleSpan malformed_span = text_style_span(
+        0u, 4u, ERUI_TEXT_STYLE_UNDERLINE);
+    malformed_span.reserved[0] = 1u;
+    invalid = base;
+    invalid.label = styled_text(L"Bad!", &malformed_span, 1u);
+    expect(invalid, ERUI_INVALID_ARGUMENT);
+
+    invalid = base;
+    invalid.row = formatter_opener;
+    invalid.page = formatter_child;
+    invalid.fields = ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE;
+    invalid.label = {};
+    invalid.page_title = utf16(L"Formatter replacement");
+    expect(invalid, ERUI_NOT_SUPPORTED);
+
+    const ERUI_UpdateDesc duplicate_update = wrap_submenu(base);
+    const std::array duplicate_updates{duplicate_update, duplicate_update};
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        duplicate_updates.data(),
+        static_cast<std::uint32_t>(duplicate_updates.size())) ==
+        ERUI_INVALID_ARGUMENT);
+
+    ERUI_RowUpdateDesc opener_row_update{};
+    opener_row_update.size = sizeof(opener_row_update);
+    opener_row_update.row = opener;
+    opener_row_update.fields = ERUI_ROW_UPDATE_FIELD_LABEL;
+    opener_row_update.label = styled_text(L"Cross-kind duplicate");
+    ERUI_UpdateDesc opener_update{};
+    opener_update.size = sizeof(opener_update);
+    opener_update.kind = ERUI_UPDATE_KIND_ROW;
+    opener_update.payload = &opener_row_update;
+    const std::array cross_kind_updates{opener_update, duplicate_update};
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        cross_kind_updates.data(),
+        static_cast<std::uint32_t>(cross_kind_updates.size())) ==
+        ERUI_INVALID_ARGUMENT);
+
+    // A valid ordinary row update preceding an invalid submenu relationship
+    // must not leak through the failed atomic batch.
+    ERUI_RowUpdateDesc rollback_update{};
+    rollback_update.size = sizeof(rollback_update);
+    rollback_update.row = rollback_row;
+    rollback_update.fields = ERUI_ROW_UPDATE_FIELD_HELP;
+    rollback_update.help = styled_text(L"Must not publish");
+    ERUI_UpdateDesc rollback_item{};
+    rollback_item.size = sizeof(rollback_item);
+    rollback_item.kind = ERUI_UPDATE_KIND_ROW;
+    rollback_item.payload = &rollback_update;
+    ERUI_SubmenuUpdateDesc wrong_relationship = base;
+    wrong_relationship.page = other_child;
+    const ERUI_UpdateDesc wrong_item = wrap_submenu(wrong_relationship);
+    const std::array atomic_updates{rollback_item, wrong_item};
+    ERUI_TEST_CHECK(submit(
+        registry,
+        provider_handle,
+        atomic_updates.data(),
+        static_cast<std::uint32_t>(atomic_updates.size())) ==
+        ERUI_INVALID_ARGUMENT);
+
+    ERUI_SubmenuUpdateDesc all_fields{};
+    all_fields.size = sizeof(all_fields);
+    all_fields.row = opener;
+    all_fields.page = child;
+    all_fields.fields = ERUI_SUBMENU_UPDATE_FIELD_LABEL |
+        ERUI_SUBMENU_UPDATE_FIELD_HELP |
+        ERUI_SUBMENU_UPDATE_FIELD_CAPTION |
+        ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE |
+        ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP;
+    all_fields.label = styled_text(L"Updated <opener>");
+    all_fields.help = styled_text(L"Updated opener & help");
+    all_fields.caption = styled_text(L"Open >");
+    all_fields.page_title = utf16(L"Updated child title");
+    all_fields.page_help = utf16(L"Updated child help");
+    const ERUI_UpdateDesc all_fields_update = wrap_submenu(all_fields);
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &all_fields_update, 1u) == ERUI_OK);
+
+    std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
+    ERUI_TEST_CHECK(menu != nullptr);
+    std::unique_ptr<erui::detail::CompiledMenu> compiled =
+        erui::detail::MenuCompiler::compile(*menu);
+    ERUI_TEST_CHECK(compiled != nullptr);
+
+    const auto compiled_opener = std::find_if(
+        compiled->root_page().rows.begin(),
+        compiled->root_page().rows.end(),
+        [&](const erui::detail::CompiledRow& row) {
+            return row.provider == provider_handle && row.row == opener;
+        });
+    ERUI_TEST_CHECK(compiled_opener != compiled->root_page().rows.end());
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_opener->label_id)) == L"Updated &lt;opener&gt;");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_opener->help_id)) == L"Updated opener &amp; help");
+
+    const auto compiled_rollback = std::find_if(
+        compiled->root_page().rows.begin(),
+        compiled->root_page().rows.end(),
+        [&](const erui::detail::CompiledRow& row) {
+            return row.provider == provider_handle && row.row == rollback_row;
+        });
+    ERUI_TEST_CHECK(compiled_rollback != compiled->root_page().rows.end());
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_rollback->help_id)) == L"Rollback original help");
+
+    const auto compiled_child = std::find_if(
+        compiled->pages.begin(),
+        compiled->pages.end(),
+        [&](const erui::detail::CompiledPage& page) {
+            return page.provider == provider_handle && page.page == child;
+        });
+    ERUI_TEST_CHECK(compiled_child != compiled->pages.end());
+    const std::size_t child_index = static_cast<std::size_t>(
+        std::distance(compiled->pages.begin(), compiled_child));
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_child->title_id)) == L"Updated child title");
+    ERUI_TEST_CHECK(std::wstring(compiled->texts.lookup(
+        compiled_child->help_id)) == L"Updated child help");
+    ERUI_TEST_CHECK(child_index < compiled->page_plans.size());
+    const std::size_t slice_count =
+        compiled->page_plans[child_index].slices.size();
+    ERUI_TEST_CHECK(slice_count > 1u);
+
+    ERUI_TEST_CHECK(erui::detail::configure_row_presentation_state(
+        *compiled));
+    ERUI_TEST_CHECK(erui::detail::configure_submenu_update_state(
+        *compiled));
+    erui::detail::synchronize_pending_row_presentations();
+    erui::detail::synchronize_pending_submenu_updates();
+    const erui::detail::RowPresentationView opener_presentation =
+        erui::detail::row_presentation_view(
+            compiled_opener->presentation_slot);
+    ERUI_TEST_CHECK(opener_presentation);
+    ERUI_TEST_CHECK(std::wstring(opener_presentation.label) ==
+        L"Updated &lt;opener&gt;");
+    ERUI_TEST_CHECK(std::wstring(opener_presentation.help) ==
+        L"Updated opener &amp; help");
+    ERUI_TEST_CHECK(opener_presentation.caption != nullptr);
+    ERUI_TEST_CHECK(std::wstring(opener_presentation.caption) ==
+        L"Open &gt;");
+
+    std::array<wchar_t, ERUI_PAGE_TITLE_BUFFER_CAPACITY> title_buffer{};
+    std::uint64_t title_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_submenu_page_title(
+        compiled_child->submenu_update_slot,
+        0u,
+        slice_count,
+        title_buffer.data(),
+        title_buffer.size(),
+        title_revision));
+    ERUI_TEST_CHECK(title_revision != 0u);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Updated child title (1/" + std::to_wstring(slice_count) + L")");
+
+    ERUI_SubmenuUpdateDesc live_title{};
+    live_title.size = sizeof(live_title);
+    live_title.row = opener;
+    live_title.page = child;
+    live_title.fields = ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE;
+    live_title.page_title = utf16(L"Live child title");
+    const ERUI_UpdateDesc live_title_update = wrap_submenu(live_title);
+    ERUI_TEST_CHECK(submit(
+        registry, provider_handle, &live_title_update, 1u) == ERUI_OK);
+    ERUI_TEST_CHECK(erui::detail::submenu_updates_pending());
+    erui::detail::synchronize_pending_submenu_updates();
+    std::uint64_t live_revision{};
+    ERUI_TEST_CHECK(erui::detail::format_submenu_page_title(
+        compiled_child->submenu_update_slot,
+        slice_count - 1u,
+        slice_count,
+        title_buffer.data(),
+        title_buffer.size(),
+        live_revision));
+    ERUI_TEST_CHECK(live_revision > title_revision);
+    ERUI_TEST_CHECK(std::wstring(title_buffer.data()) ==
+        L"Live child title (" + std::to_wstring(slice_count) + L"/" +
+            std::to_wstring(slice_count) + L")");
+
+    erui::detail::reset_row_presentation_state();
+    erui::detail::reset_submenu_update_state();
+}
+
 } // namespace
 
 int main() {
@@ -3192,6 +3700,7 @@ int main() {
     verify_api_1_4_row_availability_contract();
     verify_api_1_4_row_visibility_admission_edges();
     verify_api_1_4_row_visibility_contract();
+    verify_api_1_4_submenu_update_contract();
 
     ERUI_Api early_v1{};
     early_v1.size = ERUI_API_V1_0_SIZE;

@@ -36,7 +36,8 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_INPUT_BINDINGS | ERUI_CAP_STORAGE |
     ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
     ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT | ERUI_CAP_UPDATES |
-    ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY;
+    ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY |
+    ERUI_CAP_SUBMENU_UPDATES;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
@@ -909,6 +910,20 @@ ERUI_Result ERUI_CALL commit_updates(
             view.span_count == 0 && view.span_stride == 0 &&
             view.reserved[0] == 0 && view.reserved[1] == 0;
     };
+    const auto canonical_zero_utf16 = [](
+        const ERUI_Utf16View& view) noexcept {
+        return view.data == nullptr && view.length == 0 &&
+            view.reserved == 0;
+    };
+    const auto valid_utf16 = [](
+        const ERUI_Utf16View& view,
+        bool allow_empty) noexcept {
+        if (view.reserved != 0) return false;
+        if (view.length == 0) {
+            return allow_empty && view.data == nullptr;
+        }
+        return view.data != nullptr;
+    };
     const auto valid_view = [](
         const ERUI_StyledTextView& view,
         bool allow_empty) noexcept {
@@ -970,7 +985,14 @@ ERUI_Result ERUI_CALL commit_updates(
         ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
         ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE |
         ERUI_ROW_UPDATE_FIELD_VISIBLE;
+    constexpr ERUI_SubmenuUpdateFields kKnownSubmenuFields =
+        ERUI_SUBMENU_UPDATE_FIELD_LABEL |
+        ERUI_SUBMENU_UPDATE_FIELD_HELP |
+        ERUI_SUBMENU_UPDATE_FIELD_CAPTION |
+        ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE |
+        ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP;
     std::unordered_set<ERUI_RowHandle> rows{};
+    std::unordered_set<ERUI_PageHandle> submenu_pages{};
     std::vector<ERUI_TestRowUpdateObservation> observations{};
     try {
         rows.reserve(description->update_count);
@@ -988,9 +1010,63 @@ ERUI_Result ERUI_CALL commit_updates(
             bytes + static_cast<std::size_t>(index) *
                 description->update_stride,
             sizeof(update));
-        if (update.size != sizeof(update) ||
-            update.kind != ERUI_UPDATE_KIND_ROW || !update.payload ||
+        if (update.size != sizeof(update) || !update.payload ||
             update.reserved[0] != 0 || update.reserved[1] != 0) {
+            return ERUI_INVALID_ARGUMENT;
+        }
+
+        if (update.kind == ERUI_UPDATE_KIND_SUBMENU) {
+            std::uint32_t submenu_size{};
+            std::memcpy(
+                &submenu_size, update.payload, sizeof(submenu_size));
+            if (submenu_size != sizeof(ERUI_SubmenuUpdateDesc)) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            ERUI_SubmenuUpdateDesc submenu{};
+            std::memcpy(&submenu, update.payload, sizeof(submenu));
+            if (submenu.flags != 0 ||
+                submenu.row == ERUI_INVALID_ROW ||
+                submenu.page == ERUI_INVALID_PAGE ||
+                submenu.fields == 0 ||
+                (submenu.fields & ~kKnownSubmenuFields) != 0 ||
+                submenu.reserved0 != 0 || submenu.reserved[0] != 0 ||
+                submenu.reserved[1] != 0) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            try {
+                if (!rows.insert(submenu.row).second ||
+                    !submenu_pages.insert(submenu.page).second) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+            } catch (...) {
+                return ERUI_OUT_OF_MEMORY;
+            }
+            const bool label = (submenu.fields &
+                ERUI_SUBMENU_UPDATE_FIELD_LABEL) != 0;
+            const bool help = (submenu.fields &
+                ERUI_SUBMENU_UPDATE_FIELD_HELP) != 0;
+            const bool caption = (submenu.fields &
+                ERUI_SUBMENU_UPDATE_FIELD_CAPTION) != 0;
+            const bool page_title = (submenu.fields &
+                ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE) != 0;
+            const bool page_help = (submenu.fields &
+                ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP) != 0;
+            if ((!label && !canonical_zero_view(submenu.label)) ||
+                (!help && !canonical_zero_view(submenu.help)) ||
+                (!caption && !canonical_zero_view(submenu.caption)) ||
+                (label && !valid_view(submenu.label, false)) ||
+                (help && !valid_view(submenu.help, true)) ||
+                (caption && !valid_view(submenu.caption, false)) ||
+                (!page_title &&
+                    !canonical_zero_utf16(submenu.page_title)) ||
+                (!page_help && !canonical_zero_utf16(submenu.page_help)) ||
+                (page_title && !valid_utf16(submenu.page_title, false)) ||
+                (page_help && !valid_utf16(submenu.page_help, true))) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            continue;
+        }
+        if (update.kind != ERUI_UPDATE_KIND_ROW) {
             return ERUI_INVALID_ARGUMENT;
         }
 
@@ -1121,7 +1197,8 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
         api.commit_updates = &commit_updates;
     } else {
         api.capabilities &= ~(ERUI_CAP_UPDATES |
-            ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY);
+            ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY |
+            ERUI_CAP_SUBMENU_UPDATES);
     }
     if ((g_disabled_features.load(std::memory_order_relaxed) &
             ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0) {
@@ -1134,6 +1211,10 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
     if ((g_disabled_features.load(std::memory_order_relaxed) &
             ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY) != 0) {
         api.capabilities &= ~ERUI_CAP_ROW_VISIBILITY;
+    }
+    if ((g_disabled_features.load(std::memory_order_relaxed) &
+            ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES) != 0) {
+        api.capabilities &= ~ERUI_CAP_SUBMENU_UPDATES;
     }
     return api;
 }
@@ -1148,7 +1229,8 @@ ERUI_TestConfigureConnection(
         (configuration->reserved[0] &
             ~(ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT |
                 ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY |
-                ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY)) != 0 ||
+                ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY |
+                ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES)) != 0 ||
         configuration->reserved[1] != 0 ||
         configuration->reserved[2] != 0) {
         return ERUI_INVALID_ARGUMENT;

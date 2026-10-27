@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
         CHECK(capability_gated.commit_updates != nullptr);
         capability_gated.capabilities &=
             ~(ERUI_CAP_UPDATES | ERUI_CAP_ROW_AVAILABILITY |
-                ERUI_CAP_ROW_VISIBILITY);
+                ERUI_CAP_ROW_VISIBILITY | ERUI_CAP_SUBMENU_UPDATES);
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities |= ERUI_CAP_ROW_AVAILABILITY;
@@ -113,6 +113,13 @@ int main(int argc, char** argv) {
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities &= ~ERUI_CAP_UPDATES;
         capability_gated.capabilities |= ERUI_CAP_ROW_VISIBILITY;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_UPDATES;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities &= ~ERUI_CAP_UPDATES;
+        capability_gated.capabilities |= ERUI_CAP_SUBMENU_UPDATES;
         CHECK(!erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities |= ERUI_CAP_UPDATES;
@@ -181,6 +188,35 @@ int main(int argc, char** argv) {
 
     {
         const auto config = configuration(0, ERUI_OK, ERUI_OK,
+            ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES);
+        CHECK(configure(&config) == ERUI_OK);
+        auto connected = erui::connect(0ms);
+        CHECK(connected.success());
+        CHECK(connected.value().supports(erui::Capability::updates));
+        CHECK(!connected.value().supports(
+            erui::Capability::submenu_updates));
+
+        erui::Submenu submenu{};
+        erui::ProviderOptions provider{};
+        provider.provider_id = "tests.submenu-updates-capability-absent";
+        provider.display_name = L"Submenu update capability absent";
+        provider.owner_module = GetModuleHandleW(nullptr);
+        const auto registered = connected.value().register_menu(
+            provider,
+            [&](erui::Menu& menu) noexcept {
+                submenu = menu.root().add_submenu(
+                    L"Submenu", L"Open submenu", L"Child page");
+                submenu.add_toggle(
+                    L"Child sentinel", L"Keeps the page non-empty", 1u);
+            });
+        CHECK(registered.success());
+        CHECK(submenu.valid());
+        CHECK(submenu.edit().label(L"Rejected").commit() ==
+            ERUI_NOT_SUPPORTED);
+    }
+
+    {
+        const auto config = configuration(0, ERUI_OK, ERUI_OK,
             ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT);
         CHECK(configure(&config) == ERUI_OK);
         auto connected = erui::connect(0ms);
@@ -227,6 +263,8 @@ int main(int argc, char** argv) {
         CHECK(connected.value().supports(erui::Capability::updates));
         CHECK(connected.value().supports(
             erui::Capability::row_availability));
+        CHECK(connected.value().supports(
+            erui::Capability::submenu_updates));
         CHECK(connected.value().supports(
             erui::Capability::row_visibility));
 

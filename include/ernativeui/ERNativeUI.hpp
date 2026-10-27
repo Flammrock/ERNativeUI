@@ -48,6 +48,7 @@
 namespace erui {
 
 using RowHandle = ERUI_RowHandle;
+using PageHandle = ERUI_PageHandle;
 using InputSectionHandle = ERUI_InputSectionHandle;
 using InputActionHandle = ERUI_InputActionHandle;
 using StorageHandle = ERUI_StorageHandle;
@@ -90,6 +91,7 @@ enum class Capability : ERUI_Capabilities {
     updates = ERUI_CAP_UPDATES,
     row_availability = ERUI_CAP_ROW_AVAILABILITY,
     row_visibility = ERUI_CAP_ROW_VISIBILITY,
+    submenu_updates = ERUI_CAP_SUBMENU_UPDATES,
 };
 
 enum class AvailabilityAppearance : ERUI_AvailabilityAppearance {
@@ -233,6 +235,9 @@ template <auto, typename> struct StatefulAssignmentsChangedState;
 template <auto, typename> struct OwnedAssignmentsChangedState;
 template <typename> class RowEditDraft;
 }
+
+class Submenu;
+class SubmenuEdit;
 
 class ActionInputs {
 public:
@@ -735,6 +740,7 @@ public:
 private:
     template <typename>
     friend class detail::RowEditDraft;
+    friend class SubmenuEdit;
 
     static bool same_style(
         const ERUI_TextStyleSpan& left,
@@ -1408,7 +1414,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_TITLE_SCREEN_TEXT |
                     ERUI_CAP_UPDATES |
                     ERUI_CAP_ROW_AVAILABILITY |
-                    ERUI_CAP_ROW_VISIBILITY)) == 0;
+                    ERUI_CAP_ROW_VISIBILITY |
+                    ERUI_CAP_SUBMENU_UPDATES)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -1434,7 +1441,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_TITLE_SCREEN_TEXT |
                     ERUI_CAP_UPDATES |
                     ERUI_CAP_ROW_AVAILABILITY |
-                    ERUI_CAP_ROW_VISIBILITY)) == 0;
+                    ERUI_CAP_ROW_VISIBILITY |
+                    ERUI_CAP_SUBMENU_UPDATES)) == 0;
     }
     if (version == ERUI_API_VERSION_1_2) {
         return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
@@ -1463,7 +1471,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_TITLE_SCREEN_TEXT) == 0 &&
             (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
-            (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0;
+            (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 &&
+            (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0;
     }
     if (version == ERUI_API_VERSION_1_3) {
         return api.size == ERUI_API_V1_3_SIZE && api.add_text_input &&
@@ -1491,7 +1500,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0 &&
             (api.capabilities & ERUI_CAP_UPDATES) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
-            (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0;
+            (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 &&
+            (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0;
     }
     if (version == ERUI_API_VERSION_1_4) {
         return api.size == ERUI_API_V1_4_SIZE && api.add_text_input &&
@@ -1520,7 +1530,10 @@ inline bool api_complete_for_version(
             ((api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 ||
              (api.capabilities & ERUI_CAP_UPDATES) != 0) &&
             ((api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 ||
-             (api.capabilities & ERUI_CAP_UPDATES) != 0);
+             (api.capabilities & ERUI_CAP_UPDATES) != 0) &&
+            ((api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0 ||
+             ((api.capabilities & ERUI_CAP_UPDATES) != 0 &&
+              (api.capabilities & ERUI_CAP_SUBMENU) != 0));
     }
     return false;
 }
@@ -2410,6 +2423,300 @@ private:
 
 } // namespace detail
 
+/*
+ * One atomic edit of a submenu opener and its child-page text. The draft owns
+ * every string and is inert until commit(), matching the ordinary row-edit
+ * lifecycle. Availability, visibility, removal, and tab mutation deliberately
+ * remain outside this API.
+ */
+class SubmenuEdit final {
+public:
+    SubmenuEdit(const SubmenuEdit&) = delete;
+    SubmenuEdit& operator=(const SubmenuEdit&) = delete;
+    SubmenuEdit(SubmenuEdit&&) noexcept = default;
+    SubmenuEdit& operator=(SubmenuEdit&&) noexcept = default;
+    ~SubmenuEdit() = default;
+
+    SubmenuEdit& label(std::wstring_view value) & noexcept {
+        set_text(value, label_, ERUI_SUBMENU_UPDATE_FIELD_LABEL);
+        return *this;
+    }
+    SubmenuEdit&& label(std::wstring_view value) && noexcept {
+        set_text(value, label_, ERUI_SUBMENU_UPDATE_FIELD_LABEL);
+        return std::move(*this);
+    }
+    SubmenuEdit& label(const StyledText& value) & noexcept {
+        set_styled_text(value, label_, ERUI_SUBMENU_UPDATE_FIELD_LABEL);
+        return *this;
+    }
+    SubmenuEdit&& label(const StyledText& value) && noexcept {
+        set_styled_text(value, label_, ERUI_SUBMENU_UPDATE_FIELD_LABEL);
+        return std::move(*this);
+    }
+    SubmenuEdit& label(StyledText&& value) & noexcept {
+        set_styled_text(
+            std::move(value), label_, ERUI_SUBMENU_UPDATE_FIELD_LABEL);
+        return *this;
+    }
+    SubmenuEdit&& label(StyledText&& value) && noexcept {
+        set_styled_text(
+            std::move(value), label_, ERUI_SUBMENU_UPDATE_FIELD_LABEL);
+        return std::move(*this);
+    }
+
+    SubmenuEdit& help(std::wstring_view value) & noexcept {
+        set_text(value, help_, ERUI_SUBMENU_UPDATE_FIELD_HELP);
+        return *this;
+    }
+    SubmenuEdit&& help(std::wstring_view value) && noexcept {
+        set_text(value, help_, ERUI_SUBMENU_UPDATE_FIELD_HELP);
+        return std::move(*this);
+    }
+    SubmenuEdit& help(const StyledText& value) & noexcept {
+        set_styled_text(value, help_, ERUI_SUBMENU_UPDATE_FIELD_HELP);
+        return *this;
+    }
+    SubmenuEdit&& help(const StyledText& value) && noexcept {
+        set_styled_text(value, help_, ERUI_SUBMENU_UPDATE_FIELD_HELP);
+        return std::move(*this);
+    }
+    SubmenuEdit& help(StyledText&& value) & noexcept {
+        set_styled_text(
+            std::move(value), help_, ERUI_SUBMENU_UPDATE_FIELD_HELP);
+        return *this;
+    }
+    SubmenuEdit&& help(StyledText&& value) && noexcept {
+        set_styled_text(
+            std::move(value), help_, ERUI_SUBMENU_UPDATE_FIELD_HELP);
+        return std::move(*this);
+    }
+
+    SubmenuEdit& caption(std::wstring_view value) & noexcept {
+        set_text(value, caption_, ERUI_SUBMENU_UPDATE_FIELD_CAPTION);
+        return *this;
+    }
+    SubmenuEdit&& caption(std::wstring_view value) && noexcept {
+        set_text(value, caption_, ERUI_SUBMENU_UPDATE_FIELD_CAPTION);
+        return std::move(*this);
+    }
+    SubmenuEdit& caption(const StyledText& value) & noexcept {
+        set_styled_text(value, caption_, ERUI_SUBMENU_UPDATE_FIELD_CAPTION);
+        return *this;
+    }
+    SubmenuEdit&& caption(const StyledText& value) && noexcept {
+        set_styled_text(value, caption_, ERUI_SUBMENU_UPDATE_FIELD_CAPTION);
+        return std::move(*this);
+    }
+    SubmenuEdit& caption(StyledText&& value) & noexcept {
+        set_styled_text(
+            std::move(value), caption_, ERUI_SUBMENU_UPDATE_FIELD_CAPTION);
+        return *this;
+    }
+    SubmenuEdit&& caption(StyledText&& value) && noexcept {
+        set_styled_text(
+            std::move(value), caption_, ERUI_SUBMENU_UPDATE_FIELD_CAPTION);
+        return std::move(*this);
+    }
+
+    SubmenuEdit& page_title(std::wstring_view value) & noexcept {
+        set_page_text(value, page_title_,
+            ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE, false);
+        return *this;
+    }
+    SubmenuEdit&& page_title(std::wstring_view value) && noexcept {
+        set_page_text(value, page_title_,
+            ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE, false);
+        return std::move(*this);
+    }
+
+    SubmenuEdit& page_help(std::wstring_view value) & noexcept {
+        set_page_text(value, page_help_,
+            ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP, true);
+        return *this;
+    }
+    SubmenuEdit&& page_help(std::wstring_view value) && noexcept {
+        set_page_text(value, page_help_,
+            ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP, true);
+        return std::move(*this);
+    }
+
+    [[nodiscard]] ERUI_Result commit() noexcept {
+        if (committed_) return ERUI_ALREADY_COMMITTED;
+        committed_ = true;
+        if (error_ != ERUI_OK) return error_;
+        if (fields_ == 0) return ERUI_INVALID_ARGUMENT;
+        if (row_ == ERUI_INVALID_ROW || page_ == ERUI_INVALID_PAGE ||
+            !context_ || !context_->committed() ||
+            context_->provider == ERUI_INVALID_PROVIDER) {
+            return ERUI_INVALID_HANDLE;
+        }
+        constexpr ERUI_Capabilities required =
+            ERUI_CAP_UPDATES | ERUI_CAP_SUBMENU_UPDATES;
+        if ((context_->api.capabilities & required) != required ||
+            !context_->api.commit_updates) {
+            return ERUI_NOT_SUPPORTED;
+        }
+
+        ERUI_SubmenuUpdateDesc submenu_update{};
+        submenu_update.size = sizeof(submenu_update);
+        submenu_update.row = row_;
+        submenu_update.page = page_;
+        submenu_update.fields = fields_;
+        if ((fields_ & ERUI_SUBMENU_UPDATE_FIELD_LABEL) != 0) {
+            submenu_update.label = styled_text_view(label_);
+        }
+        if ((fields_ & ERUI_SUBMENU_UPDATE_FIELD_HELP) != 0) {
+            submenu_update.help = styled_text_view(help_);
+        }
+        if ((fields_ & ERUI_SUBMENU_UPDATE_FIELD_CAPTION) != 0) {
+            submenu_update.caption = styled_text_view(caption_);
+        }
+        if ((fields_ & ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE) != 0) {
+            submenu_update.page_title = detail::utf16_view(page_title_);
+        }
+        if ((fields_ & ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP) != 0) {
+            submenu_update.page_help = detail::utf16_view(page_help_);
+        }
+
+        ERUI_UpdateDesc update{};
+        update.size = sizeof(update);
+        update.kind = ERUI_UPDATE_KIND_SUBMENU;
+        update.payload = &submenu_update;
+
+        ERUI_UpdateBatchDesc batch{};
+        batch.size = sizeof(batch);
+        batch.updates = &update;
+        batch.update_count = 1u;
+        batch.update_stride = sizeof(update);
+        return context_->api.commit_updates(context_->provider, &batch);
+    }
+
+private:
+    friend class Submenu;
+
+    SubmenuEdit(
+        std::shared_ptr<detail::RowContext> context,
+        RowHandle row,
+        PageHandle page) noexcept
+        : context_(std::move(context)), row_(row), page_(page) {}
+
+    void set_text(
+        std::wstring_view value,
+        StyledText& destination,
+        ERUI_SubmenuUpdateFields field) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        if (!detail::view_size_fits(value.size()) ||
+            ((field == ERUI_SUBMENU_UPDATE_FIELD_LABEL ||
+              field == ERUI_SUBMENU_UPDATE_FIELD_CAPTION) && value.empty())) {
+            error_ = ERUI_INVALID_ARGUMENT;
+            return;
+        }
+        StyledText replacement(value);
+        if (replacement.error_ != ERUI_OK) {
+            error_ = replacement.error_;
+            return;
+        }
+        try {
+            destination = std::move(replacement);
+            fields_ |= field;
+        } catch (...) {
+            error_ = ERUI_OUT_OF_MEMORY;
+        }
+    }
+
+    void set_styled_text(
+        const StyledText& value,
+        StyledText& destination,
+        ERUI_SubmenuUpdateFields field) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        if (value.error_ != ERUI_OK ||
+            ((field == ERUI_SUBMENU_UPDATE_FIELD_LABEL ||
+              field == ERUI_SUBMENU_UPDATE_FIELD_CAPTION) &&
+             value.text_.empty())) {
+            error_ = value.error_ != ERUI_OK
+                ? value.error_
+                : static_cast<ERUI_Result>(ERUI_INVALID_ARGUMENT);
+            return;
+        }
+        try {
+            destination = value;
+            fields_ |= field;
+        } catch (...) {
+            error_ = ERUI_OUT_OF_MEMORY;
+        }
+    }
+
+    void set_styled_text(
+        StyledText&& value,
+        StyledText& destination,
+        ERUI_SubmenuUpdateFields field) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        if (value.error_ != ERUI_OK ||
+            ((field == ERUI_SUBMENU_UPDATE_FIELD_LABEL ||
+              field == ERUI_SUBMENU_UPDATE_FIELD_CAPTION) &&
+             value.text_.empty())) {
+            error_ = value.error_ != ERUI_OK
+                ? value.error_
+                : static_cast<ERUI_Result>(ERUI_INVALID_ARGUMENT);
+            return;
+        }
+        try {
+            destination = std::move(value);
+            fields_ |= field;
+        } catch (...) {
+            error_ = ERUI_OUT_OF_MEMORY;
+        }
+    }
+
+    void set_page_text(
+        std::wstring_view value,
+        std::wstring& destination,
+        ERUI_SubmenuUpdateFields field,
+        bool empty_allowed) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        if (!detail::view_size_fits(value.size()) ||
+            (!empty_allowed && value.empty())) {
+            error_ = ERUI_INVALID_ARGUMENT;
+            return;
+        }
+        try {
+            if (value.empty()) destination.clear();
+            else destination.assign(value.data(), value.size());
+            fields_ |= field;
+        } catch (...) {
+            error_ = ERUI_OUT_OF_MEMORY;
+        }
+    }
+
+    static ERUI_StyledTextView styled_text_view(
+        const StyledText& value) noexcept {
+        static_assert(sizeof(wchar_t) == sizeof(std::uint16_t),
+            "ERNativeUI requires Windows UTF-16 wchar_t");
+        ERUI_StyledTextView result{};
+        result.size = sizeof(result);
+        result.text.data = value.text_.empty()
+            ? nullptr
+            : reinterpret_cast<const std::uint16_t*>(value.text_.data());
+        result.text.length = static_cast<std::uint32_t>(value.text_.size());
+        result.spans = value.spans_.empty() ? nullptr : value.spans_.data();
+        result.span_count = static_cast<std::uint32_t>(value.spans_.size());
+        result.span_stride = sizeof(ERUI_TextStyleSpan);
+        return result;
+    }
+
+    std::shared_ptr<detail::RowContext> context_{};
+    RowHandle row_{ERUI_INVALID_ROW};
+    PageHandle page_{ERUI_INVALID_PAGE};
+    ERUI_SubmenuUpdateFields fields_{};
+    ERUI_Result error_{ERUI_OK};
+    bool committed_{};
+    StyledText label_{};
+    StyledText help_{};
+    StyledText caption_{};
+    std::wstring page_title_{};
+    std::wstring page_help_{};
+};
+
 class ButtonRow;
 class ToggleRow;
 class SliderRow;
@@ -3273,33 +3580,12 @@ public:
             &state);
     }
 
-    Page add_submenu(
+    Submenu add_submenu(
         std::wstring_view label,
         std::wstring_view help,
         std::wstring_view page_title = {},
         std::wstring_view page_help = {},
-        bool enabled = true) noexcept {
-        if (!draft_ || !draft_->open() || draft_->failed_) return {};
-        if (!detail::view_size_fits(label.size()) ||
-            !detail::view_size_fits(help.size()) ||
-            !detail::view_size_fits(page_title.size()) ||
-            !detail::view_size_fits(page_help.size())) {
-            draft_->record(ERUI_INVALID_ARGUMENT, L"add_submenu text");
-            return {};
-        }
-        ERUI_SubmenuDesc desc{};
-        desc.size = sizeof(desc);
-        desc.label = detail::utf16_view(label);
-        desc.help = detail::utf16_view(help);
-        desc.page_title = detail::utf16_view(page_title);
-        desc.page_help = detail::utf16_view(page_help);
-        desc.enabled = enabled ? 1u : 0u;
-        ERUI_PageHandle child{};
-        ERUI_RowHandle row{};
-        draft_->record(draft_->api_.add_submenu(
-            draft_->provider_, page_, &desc, &child, &row), L"add_submenu");
-        return Page(draft_, child);
-    }
+        bool enabled = true) noexcept;
 
     Page& set_presentation(const PagePresentation& presentation) noexcept {
         if (!draft_ || !draft_->open() || draft_->failed_) return *this;
@@ -3348,6 +3634,7 @@ public:
 
 private:
     friend class Menu;
+    friend class Submenu;
     Page(std::shared_ptr<detail::Draft> draft,
         ERUI_PageHandle page,
         bool custom_tab = false) noexcept
@@ -3520,6 +3807,84 @@ private:
     ERUI_PageHandle page_{};
     bool custom_tab_{};
 };
+
+/*
+ * A submenu is both its child-page builder and a stable reference to the row
+ * that opens that page. Inheriting Page preserves every existing add_* call
+ * and permits an explicit conversion/slice to Page for older source code.
+ */
+class Submenu final : public Page {
+public:
+    Submenu() noexcept = default;
+
+    [[nodiscard]] bool valid() const noexcept {
+        return Page::valid() ||
+            (opener_ != ERUI_INVALID_ROW && child_ != ERUI_INVALID_PAGE &&
+             context_ && context_->committed() &&
+             context_->provider != ERUI_INVALID_PROVIDER);
+    }
+    explicit operator bool() const noexcept { return valid(); }
+
+    [[nodiscard]] SubmenuEdit edit() const noexcept {
+        return SubmenuEdit(context_, opener_, child_);
+    }
+
+    [[nodiscard]] RowHandle opener_handle() const noexcept {
+        return opener_;
+    }
+
+    [[nodiscard]] PageHandle page_handle() const noexcept {
+        return child_;
+    }
+
+private:
+    friend class Page;
+
+    Submenu(
+        std::shared_ptr<detail::Draft> draft,
+        PageHandle child,
+        RowHandle opener) noexcept
+        : Page(draft, child),
+          context_(draft ? draft->row_context_ : nullptr),
+          opener_(opener),
+          child_(child) {}
+
+    std::shared_ptr<detail::RowContext> context_{};
+    RowHandle opener_{ERUI_INVALID_ROW};
+    PageHandle child_{ERUI_INVALID_PAGE};
+};
+
+inline Submenu Page::add_submenu(
+    std::wstring_view label,
+    std::wstring_view help,
+    std::wstring_view page_title,
+    std::wstring_view page_help,
+    bool enabled) noexcept {
+    if (!draft_ || !draft_->open() || draft_->failed_) return {};
+    if (!detail::view_size_fits(label.size()) ||
+        !detail::view_size_fits(help.size()) ||
+        !detail::view_size_fits(page_title.size()) ||
+        !detail::view_size_fits(page_help.size())) {
+        draft_->record(ERUI_INVALID_ARGUMENT, L"add_submenu text");
+        return {};
+    }
+    ERUI_SubmenuDesc desc{};
+    desc.size = sizeof(desc);
+    desc.label = detail::utf16_view(label);
+    desc.help = detail::utf16_view(help);
+    desc.page_title = detail::utf16_view(page_title);
+    desc.page_help = detail::utf16_view(page_help);
+    desc.enabled = enabled ? 1u : 0u;
+    PageHandle child{};
+    RowHandle row{};
+    draft_->record(draft_->api_.add_submenu(
+        draft_->provider_, page_, &desc, &child, &row), L"add_submenu");
+    if (draft_->failed_ || child == ERUI_INVALID_PAGE ||
+        row == ERUI_INVALID_ROW) {
+        return {};
+    }
+    return Submenu(draft_, child, row);
+}
 
 class InputActionDevices;
 

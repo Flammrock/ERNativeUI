@@ -28,6 +28,9 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID) {
         if (!erui::host::registry().enable_row_visibility_backend()) {
             return FALSE;
         }
+        if (!erui::host::registry().enable_submenu_updates_backend()) {
+            return FALSE;
+        }
         erui::host::registry().open_registration();
         erui::host::set_api_state(erui::host::ApiState::runtime_ready);
     }

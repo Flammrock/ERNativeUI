@@ -484,6 +484,7 @@ if(_ernativeui_need_native_core)
         src/steam_dlc.cpp
         src/storage_document.cpp
         src/submenu_navigation.cpp
+        src/submenu_update_state.cpp
         src/tab_configuration.cpp
         src/tab_viewport.cpp
         src/text_input_state.cpp

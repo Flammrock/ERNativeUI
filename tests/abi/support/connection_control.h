@@ -21,6 +21,7 @@ extern "C" {
 #define ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT (1u << 0)
 #define ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY (1u << 1)
 #define ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY (1u << 2)
+#define ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES (1u << 3)
 
 /*
  * Keep the shared control protocol independent of symbols introduced by the

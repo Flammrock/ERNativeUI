@@ -20,6 +20,7 @@
 #include "root_button_text_override.hpp"
 #include "submenu_navigation.hpp"
 #include "submenu_runtime.hpp"
+#include "submenu_update_state.hpp"
 #include "color_picker.hpp"
 
 #include <Windows.h>
@@ -141,6 +142,32 @@ std::atomic<std::uint32_t> g_sub_injection_count{};
 std::atomic<std::uint32_t> g_title_fault_count{};
 erui::detail::SubmenuNavigation g_submenu_navigation{};
 TitleCaptureState g_title_capture{};
+
+// Only physically open submenu pages need a live title target. Keep this
+// fixed-capacity and UI-thread-owned so opening or updating a submenu never
+// allocates from a native callback.
+struct ActiveSubmenuTitleBinding {
+    void* page{};
+    CapturedTitleTarget target{};
+    erui::detail::PageRoute route{
+        .logical_page_index = erui::detail::invalid_route_index,
+    };
+    std::size_t slice_count{};
+    std::uint64_t applied_revision{};
+};
+constexpr std::size_t kActiveSubmenuTitleBindingCapacity = 64;
+std::array<ActiveSubmenuTitleBinding,
+    kActiveSubmenuTitleBindingCapacity> g_active_submenu_titles{};
+
+void retire_active_submenu_title(void* page) noexcept {
+    if (!page) return;
+    for (ActiveSubmenuTitleBinding& binding : g_active_submenu_titles) {
+        if (binding.page == page) {
+            binding = {};
+            return;
+        }
+    }
+}
 
 constexpr std::size_t kPanelVisualCapacityOffset = 0xB14;
 constexpr std::size_t kPanelNativeCountOffset = 0x1AF0;
@@ -535,6 +562,7 @@ bool cached_identity_is_globally_unique(
 
 void clear_retired_page_references(void* panel) noexcept {
     if (!panel) return;
+    retire_active_submenu_title(panel);
     retire_native_row_visibility_page(panel);
     retire_native_row_presentation_page(panel, g_addresses);
     void* expected = panel;
@@ -1544,6 +1572,113 @@ void apply_physical_page_titles(
     }
 }
 
+bool resolve_submenu_title_override(
+    const erui::detail::PageRoute& route,
+    std::size_t slice_count,
+    std::array<wchar_t, ERUI_PAGE_TITLE_BUFFER_CAPACITY>& buffer,
+    std::uint64_t& revision) noexcept {
+    revision = 0;
+    erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
+    if (route.kind != erui::detail::PageRouteKind::submenu ||
+        !runtime.menu || route.logical_page_index >= runtime.menu->pages.size()) {
+        return false;
+    }
+    const erui::detail::CompiledPage& page =
+        runtime.menu->pages[route.logical_page_index];
+    if (page.submenu_update_slot == erui::detail::invalid_compiled_index) {
+        return false;
+    }
+    return erui::detail::format_submenu_page_title(
+        page.submenu_update_slot,
+        route.slice_index,
+        slice_count,
+        buffer.data(),
+        buffer.size(),
+        revision);
+}
+
+ActiveSubmenuTitleBinding* active_submenu_title_binding(
+    void* page) noexcept {
+    if (!page) return nullptr;
+    for (ActiveSubmenuTitleBinding& binding : g_active_submenu_titles) {
+        if (binding.page == page) return &binding;
+    }
+    return nullptr;
+}
+
+void bind_active_submenu_title(
+    void* page,
+    const CapturedTitleTarget& target,
+    const erui::detail::PageRoute& route,
+    std::size_t slice_count,
+    std::uint64_t applied_revision) noexcept {
+    if (!page || route.kind != erui::detail::PageRouteKind::submenu ||
+        slice_count == 0) {
+        retire_active_submenu_title(page);
+        return;
+    }
+    if (!target.owned_by(page)) {
+        // A bound page may revisit subHandler without another construction-
+        // time path capture. Preserve the validated page-owned result from
+        // its first materialization and only refresh route topology.
+        if (ActiveSubmenuTitleBinding* existing =
+                active_submenu_title_binding(page)) {
+            existing->route = route;
+            existing->slice_count = slice_count;
+        }
+        return;
+    }
+    ActiveSubmenuTitleBinding* destination =
+        active_submenu_title_binding(page);
+    if (!destination) {
+        for (ActiveSubmenuTitleBinding& candidate : g_active_submenu_titles) {
+            if (!candidate.page) {
+                destination = &candidate;
+                break;
+            }
+        }
+    }
+    if (!destination) {
+        erui::detail::logf(
+            erui::LogLevel::warning,
+            "Live submenu-title binding capacity exhausted; current page keeps its construction title");
+        return;
+    }
+    *destination = {
+        .page = page,
+        .target = target,
+        .route = route,
+        .slice_count = slice_count,
+        .applied_revision = applied_revision,
+    };
+}
+
+void apply_active_submenu_title(void* page) noexcept {
+    ActiveSubmenuTitleBinding* const binding =
+        active_submenu_title_binding(page);
+    if (!binding || !binding->target.owned_by(page) ||
+        binding->slice_count == 0 || !g_addresses.scaleform_text_setter) {
+        return;
+    }
+    std::array<wchar_t, ERUI_PAGE_TITLE_BUFFER_CAPACITY> title{};
+    std::uint64_t revision{};
+    if (!resolve_submenu_title_override(
+            binding->route, binding->slice_count, title, revision) ||
+        revision == 0 || revision == binding->applied_revision) {
+        return;
+    }
+    unsigned long exception_code = 0;
+    if (!invoke_scaleform_text_setter(
+            g_addresses.scaleform_text_setter,
+            binding->target.text_value(),
+            title.data(),
+            exception_code)) {
+        log_title_fault("live submenu-title assignment", exception_code);
+        return;
+    }
+    binding->applied_revision = revision;
+}
+
 const char* minhook_status_name(MH_STATUS status) noexcept {
     const char* name = MH_StatusToString(status);
     return name ? name : "MH_UNKNOWN";
@@ -1765,6 +1900,7 @@ void __fastcall game_options_handler_detour(
     }
 
     if (previous_page && previous_page != page) {
+        retire_active_submenu_title(const_cast<void*>(previous_page));
         retire_native_row_visibility_page(
             const_cast<void*>(previous_page));
     }
@@ -1932,9 +2068,25 @@ void __fastcall sub_handler_detour(
         runtime.menu->resolve_presentation(route, outcome.slice_count);
     const wchar_t* const outer_title = runtime.menu->texts.lookup(
         static_cast<int>(presentation.outer_title_id));
-    const wchar_t* const page_title = runtime.menu->texts.lookup(
+    const wchar_t* page_title = runtime.menu->texts.lookup(
         static_cast<int>(presentation.page_title_id));
+    std::array<wchar_t, ERUI_PAGE_TITLE_BUFFER_CAPACITY>
+        updated_page_title{};
+    std::uint64_t submenu_title_revision{};
+    if (resolve_submenu_title_override(
+            route,
+            outcome.slice_count,
+            updated_page_title,
+            submenu_title_revision)) {
+        page_title = updated_page_title.data();
+    }
     apply_physical_page_titles(captured_title, outer_title, page_title);
+    bind_active_submenu_title(
+        page,
+        captured_title,
+        route,
+        outcome.slice_count,
+        submenu_title_revision);
     bind_native_row_visibility_title_target(page, captured_title);
     const std::uint32_t log_limit = runtime.options.enable_diagnostics ? 192u : 8u;
     if (injection <= log_limit || outcome.faulted != 0) {
@@ -1989,6 +2141,7 @@ void __fastcall page_frame_gate_detour(
         // The native page frame is intentionally paused while the dialog owns
         // input, so there is no native presentation pass to overwrite us.
         (void)apply_native_row_presentations(page, g_addresses);
+        apply_active_submenu_title(page);
         return;
     }
     original(page, frame_value, effective_input);
@@ -1999,6 +2152,7 @@ void __fastcall page_frame_gate_detour(
     // is identity-validated again inside the bridge before it is touched.
     const SelectedHelpRefreshTicket selected_help =
         apply_native_row_presentations(page, g_addresses);
+    apply_active_submenu_title(page);
     observe_native_row_visibility_page_frame(page, g_addresses);
     if (!visibility_rebuild_pending) {
         publish_native_selected_help(selected_help, g_addresses);
@@ -2056,6 +2210,7 @@ void __fastcall dialog_back_gate_detour(
         ? g_submenu_navigation.parent_page(page)
         : nullptr;
     if (restored_parent) {
+        retire_active_submenu_title(page);
         retire_native_row_visibility_page(page);
     }
     original(page, action);
@@ -2778,6 +2933,7 @@ void reset_hooks() noexcept {
     g_original_text_resolver.store(nullptr, std::memory_order_release);
     g_title_capture.reset();
     g_submenu_navigation.reset();
+    g_active_submenu_titles = {};
 }
 
 } // namespace
@@ -2891,8 +3047,18 @@ void reapply_native_row_visibility_page_title(
     }
     const erui::detail::ResolvedPagePresentation presentation =
         runtime.menu->resolve_presentation(route, slice_count);
-    const wchar_t* const page_title = runtime.menu->texts.lookup(
+    const wchar_t* page_title = runtime.menu->texts.lookup(
         static_cast<int>(presentation.page_title_id));
+    std::array<wchar_t, ERUI_PAGE_TITLE_BUFFER_CAPACITY>
+        updated_page_title{};
+    std::uint64_t submenu_title_revision{};
+    if (resolve_submenu_title_override(
+            route,
+            slice_count,
+            updated_page_title,
+            submenu_title_revision)) {
+        page_title = updated_page_title.data();
+    }
     if (!page_title || !*page_title) return;
 
     // The outer title is invariant across visible slice counts. Reusing only
@@ -2905,6 +3071,13 @@ void reapply_native_row_visibility_page_title(
             page_title,
             exception_code)) {
         log_title_fault("visibility page-title assignment", exception_code);
+        return;
+    }
+    if (ActiveSubmenuTitleBinding* binding =
+            active_submenu_title_binding(page)) {
+        binding->route = route;
+        binding->slice_count = slice_count;
+        binding->applied_revision = submenu_title_revision;
     }
 }
 

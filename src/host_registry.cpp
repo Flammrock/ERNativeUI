@@ -7,6 +7,7 @@
 #include "row_presentation_state.hpp"
 #include "row_update_state.hpp"
 #include "row_visibility_state.hpp"
+#include "submenu_update_state.hpp"
 #include "runtime_log.hpp"
 
 #include <algorithm>
@@ -622,6 +623,18 @@ bool Registry::enable_updates_backend() noexcept {
 bool Registry::updates_backend_available() const noexcept {
     std::lock_guard lock(mutex_);
     return updates_backend_available_;
+}
+
+bool Registry::enable_submenu_updates_backend() noexcept {
+    std::lock_guard lock(mutex_);
+    if (open_ || frozen_ || !updates_backend_available_) return false;
+    submenu_updates_backend_available_ = true;
+    return true;
+}
+
+bool Registry::submenu_updates_backend_available() const noexcept {
+    std::lock_guard lock(mutex_);
+    return submenu_updates_backend_available_;
 }
 
 bool Registry::enable_row_availability_backend() noexcept {
@@ -2321,6 +2334,7 @@ ERUI_Result Registry::add_submenu(
         row.enabled = description->enabled != 0;
         row.interactive = row.enabled;
         row.child_page = child.handle;
+        child.submenu_opener = row.handle;
         *out_child_page = child.handle;
         if (out_row) *out_row = row.handle;
         note_activity_locked();
@@ -2748,10 +2762,41 @@ ERUI_Result Registry::commit_updates(
         bool visibility_changed{};
         bool materialized{};
     };
+    struct ParsedSubmenuUpdate {
+        ERUI_RowHandle row{};
+        ERUI_PageHandle page{};
+        ERUI_SubmenuUpdateFields fields{};
+        erui::detail::ScaleformStyledText label{};
+        erui::detail::ScaleformStyledText help{};
+        erui::detail::ScaleformStyledText caption{};
+        std::wstring page_title{};
+        std::wstring page_help{};
+    };
+    struct PendingSubmenuMutation {
+        Row* row{};
+        Page* page{};
+        erui::detail::ScaleformStyledText label{};
+        erui::detail::ScaleformStyledText help{};
+        erui::detail::ScaleformStyledText caption{};
+        std::wstring label_html{};
+        std::wstring help_html{};
+        std::wstring caption_html{};
+        std::wstring page_title{};
+        std::wstring page_help{};
+        bool changes_label{};
+        bool changes_help{};
+        bool changes_caption{};
+        bool changes_page_title{};
+        bool changes_page_help{};
+        bool caption_overridden{};
+        bool materialized{};
+    };
 
     try {
-        std::vector<ParsedRowUpdate> parsed{};
-        parsed.reserve(description->update_count);
+        std::vector<ParsedRowUpdate> parsed_rows{};
+        parsed_rows.reserve(description->update_count);
+        std::vector<ParsedSubmenuUpdate> parsed_submenus{};
+        parsed_submenus.reserve(description->update_count);
         const auto* const update_bytes = reinterpret_cast<const std::byte*>(
             description->updates);
         constexpr ERUI_RowUpdateFields kKnownRowFields =
@@ -2760,6 +2805,25 @@ ERUI_Result Registry::commit_updates(
             ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
             ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE |
             ERUI_ROW_UPDATE_FIELD_VISIBLE;
+        constexpr ERUI_SubmenuUpdateFields kKnownSubmenuFields =
+            ERUI_SUBMENU_UPDATE_FIELD_LABEL |
+            ERUI_SUBMENU_UPDATE_FIELD_HELP |
+            ERUI_SUBMENU_UPDATE_FIELD_CAPTION |
+            ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE |
+            ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP;
+        const auto canonical_zero_styled_view =
+            [](const ERUI_StyledTextView& view) {
+                return view.size == 0 && view.flags == 0 &&
+                    view.text.data == nullptr && view.text.length == 0 &&
+                    view.text.reserved == 0 && view.spans == nullptr &&
+                    view.span_count == 0 && view.span_stride == 0 &&
+                    view.reserved[0] == 0 && view.reserved[1] == 0;
+            };
+        const auto canonical_zero_utf16_view =
+            [](const ERUI_Utf16View& view) {
+                return view.data == nullptr && view.length == 0 &&
+                    view.reserved == 0;
+            };
 
         for (std::uint32_t index = 0;
              index < description->update_count;
@@ -2771,97 +2835,190 @@ ERUI_Result Registry::commit_updates(
                     static_cast<std::size_t>(index) *
                         description->update_stride,
                 sizeof(update));
-            if (update.size != sizeof(update) ||
-                update.kind != ERUI_UPDATE_KIND_ROW || !update.payload ||
+            if (update.size != sizeof(update) || !update.payload ||
                 update.reserved[0] != 0 || update.reserved[1] != 0) {
                 return ERUI_INVALID_ARGUMENT;
             }
 
-            // Read the leading size before the complete descriptor. This
-            // rejects stale API 1.4 alpha payloads without reading past their
-            // former, shorter RowUpdateDesc allocation.
-            std::uint32_t row_update_size{};
-            std::memcpy(
-                &row_update_size, update.payload, sizeof(row_update_size));
-            if (row_update_size != sizeof(ERUI_RowUpdateDesc)) {
-                return ERUI_INVALID_ARGUMENT;
-            }
-            ERUI_RowUpdateDesc row_update{};
-            std::memcpy(&row_update, update.payload, sizeof(row_update));
-            if (row_update.flags != 0 ||
-                row_update.row == ERUI_INVALID_ROW ||
-                row_update.fields == 0 ||
-                (row_update.fields & ~kKnownRowFields) != 0) {
-                return ERUI_INVALID_ARGUMENT;
+            if (update.kind == ERUI_UPDATE_KIND_ROW) {
+                // Read the leading size before the complete descriptor. This
+                // rejects stale API 1.4 alpha payloads without reading past
+                // their former, shorter RowUpdateDesc allocation.
+                std::uint32_t row_update_size{};
+                std::memcpy(
+                    &row_update_size, update.payload,
+                    sizeof(row_update_size));
+                if (row_update_size != sizeof(ERUI_RowUpdateDesc)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                ERUI_RowUpdateDesc row_update{};
+                std::memcpy(&row_update, update.payload, sizeof(row_update));
+                if (row_update.flags != 0 ||
+                    row_update.row == ERUI_INVALID_ROW ||
+                    row_update.fields == 0 ||
+                    (row_update.fields & ~kKnownRowFields) != 0) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+
+                const bool changes_label =
+                    (row_update.fields & ERUI_ROW_UPDATE_FIELD_LABEL) != 0;
+                const bool changes_help =
+                    (row_update.fields & ERUI_ROW_UPDATE_FIELD_HELP) != 0;
+                const bool changes_caption =
+                    (row_update.fields & ERUI_ROW_UPDATE_FIELD_CAPTION) != 0;
+                const bool changes_interactive =
+                    (row_update.fields &
+                        ERUI_ROW_UPDATE_FIELD_INTERACTIVE) != 0;
+                const bool changes_appearance =
+                    (row_update.fields &
+                        ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
+                const bool changes_visible =
+                    (row_update.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
+                if ((!changes_label &&
+                        !canonical_zero_styled_view(row_update.label)) ||
+                    (!changes_help &&
+                        !canonical_zero_styled_view(row_update.help)) ||
+                    (!changes_caption &&
+                        !canonical_zero_styled_view(row_update.caption)) ||
+                    (!changes_interactive && row_update.interactive != 0) ||
+                    (changes_interactive && row_update.interactive > 1) ||
+                    (!changes_appearance &&
+                        row_update.availability_appearance !=
+                            ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY) ||
+                    (changes_appearance &&
+                        row_update.availability_appearance !=
+                            ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY &&
+                        row_update.availability_appearance !=
+                            ERUI_AVAILABILITY_APPEARANCE_NORMAL &&
+                        row_update.availability_appearance !=
+                            ERUI_AVAILABILITY_APPEARANCE_DISABLED) ||
+                    (!changes_visible && row_update.visible != 0) ||
+                    (changes_visible && row_update.visible > 1)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+
+                ParsedRowUpdate parsed_update{};
+                parsed_update.row = row_update.row;
+                parsed_update.fields = row_update.fields;
+                parsed_update.interactive = row_update.interactive != 0;
+                parsed_update.availability_appearance =
+                    row_update.availability_appearance;
+                parsed_update.visible = row_update.visible != 0;
+                if (changes_label) {
+                    const ERUI_Result parsed_label =
+                        erui::detail::parse_scaleform_styled_text(
+                            row_update.label, false,
+                            parsed_update.label);
+                    if (parsed_label != ERUI_OK) return parsed_label;
+                }
+                if (changes_help) {
+                    const ERUI_Result parsed_help =
+                        erui::detail::parse_scaleform_styled_text(
+                            row_update.help, true, parsed_update.help);
+                    if (parsed_help != ERUI_OK) return parsed_help;
+                }
+                if (changes_caption) {
+                    const ERUI_Result parsed_caption =
+                        erui::detail::parse_scaleform_styled_text(
+                            row_update.caption, false,
+                            parsed_update.caption);
+                    if (parsed_caption != ERUI_OK) return parsed_caption;
+                }
+                parsed_rows.push_back(std::move(parsed_update));
+                continue;
             }
 
-            const auto canonical_zero_view = [](const ERUI_StyledTextView& view) {
-                return view.size == 0 && view.flags == 0 &&
-                    view.text.data == nullptr && view.text.length == 0 &&
-                    view.text.reserved == 0 && view.spans == nullptr &&
-                    view.span_count == 0 && view.span_stride == 0 &&
-                    view.reserved[0] == 0 && view.reserved[1] == 0;
-            };
-            const bool changes_label =
-                (row_update.fields & ERUI_ROW_UPDATE_FIELD_LABEL) != 0;
-            const bool changes_help =
-                (row_update.fields & ERUI_ROW_UPDATE_FIELD_HELP) != 0;
-            const bool changes_caption =
-                (row_update.fields & ERUI_ROW_UPDATE_FIELD_CAPTION) != 0;
-            const bool changes_interactive =
-                (row_update.fields & ERUI_ROW_UPDATE_FIELD_INTERACTIVE) != 0;
-            const bool changes_appearance =
-                (row_update.fields &
-                    ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
-            const bool changes_visible =
-                (row_update.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
-            if ((!changes_label && !canonical_zero_view(row_update.label)) ||
-                (!changes_help && !canonical_zero_view(row_update.help)) ||
-                (!changes_caption &&
-                    !canonical_zero_view(row_update.caption)) ||
-                (!changes_interactive && row_update.interactive != 0) ||
-                (changes_interactive && row_update.interactive > 1) ||
-                (!changes_appearance &&
-                    row_update.availability_appearance !=
-                        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY) ||
-                (changes_appearance &&
-                    row_update.availability_appearance !=
-                        ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY &&
-                    row_update.availability_appearance !=
-                        ERUI_AVAILABILITY_APPEARANCE_NORMAL &&
-                    row_update.availability_appearance !=
-                        ERUI_AVAILABILITY_APPEARANCE_DISABLED) ||
-                (!changes_visible && row_update.visible != 0) ||
-                (changes_visible && row_update.visible > 1)) {
-                return ERUI_INVALID_ARGUMENT;
-            }
+            if (update.kind == ERUI_UPDATE_KIND_SUBMENU) {
+                std::uint32_t submenu_update_size{};
+                std::memcpy(
+                    &submenu_update_size, update.payload,
+                    sizeof(submenu_update_size));
+                if (submenu_update_size != sizeof(ERUI_SubmenuUpdateDesc)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                ERUI_SubmenuUpdateDesc submenu_update{};
+                std::memcpy(
+                    &submenu_update, update.payload,
+                    sizeof(submenu_update));
+                if (submenu_update.flags != 0 ||
+                    submenu_update.row == ERUI_INVALID_ROW ||
+                    submenu_update.page == ERUI_INVALID_PAGE ||
+                    submenu_update.fields == 0 ||
+                    (submenu_update.fields & ~kKnownSubmenuFields) != 0 ||
+                    submenu_update.reserved0 != 0 ||
+                    submenu_update.reserved[0] != 0 ||
+                    submenu_update.reserved[1] != 0) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                const bool changes_label =
+                    (submenu_update.fields &
+                        ERUI_SUBMENU_UPDATE_FIELD_LABEL) != 0;
+                const bool changes_help =
+                    (submenu_update.fields &
+                        ERUI_SUBMENU_UPDATE_FIELD_HELP) != 0;
+                const bool changes_caption =
+                    (submenu_update.fields &
+                        ERUI_SUBMENU_UPDATE_FIELD_CAPTION) != 0;
+                const bool changes_page_title =
+                    (submenu_update.fields &
+                        ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE) != 0;
+                const bool changes_page_help =
+                    (submenu_update.fields &
+                        ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP) != 0;
+                if ((!changes_label && !canonical_zero_styled_view(
+                        submenu_update.label)) ||
+                    (!changes_help && !canonical_zero_styled_view(
+                        submenu_update.help)) ||
+                    (!changes_caption && !canonical_zero_styled_view(
+                        submenu_update.caption)) ||
+                    (!changes_page_title && !canonical_zero_utf16_view(
+                        submenu_update.page_title)) ||
+                    (!changes_page_help && !canonical_zero_utf16_view(
+                        submenu_update.page_help)) ||
+                    (changes_page_title &&
+                        !valid_view(submenu_update.page_title)) ||
+                    (changes_page_help &&
+                        !valid_view(submenu_update.page_help))) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
 
-            ParsedRowUpdate parsed_update{};
-            parsed_update.row = row_update.row;
-            parsed_update.fields = row_update.fields;
-            parsed_update.interactive = row_update.interactive != 0;
-            parsed_update.availability_appearance =
-                row_update.availability_appearance;
-            parsed_update.visible = row_update.visible != 0;
-            if (changes_label) {
-                const ERUI_Result parsed_label =
-                    erui::detail::parse_scaleform_styled_text(
-                        row_update.label, false, parsed_update.label);
-                if (parsed_label != ERUI_OK) return parsed_label;
+                ParsedSubmenuUpdate parsed_update{};
+                parsed_update.row = submenu_update.row;
+                parsed_update.page = submenu_update.page;
+                parsed_update.fields = submenu_update.fields;
+                if (changes_label) {
+                    const ERUI_Result result =
+                        erui::detail::parse_scaleform_styled_text(
+                            submenu_update.label, false,
+                            parsed_update.label);
+                    if (result != ERUI_OK) return result;
+                }
+                if (changes_help) {
+                    const ERUI_Result result =
+                        erui::detail::parse_scaleform_styled_text(
+                            submenu_update.help, true,
+                            parsed_update.help);
+                    if (result != ERUI_OK) return result;
+                }
+                if (changes_caption) {
+                    const ERUI_Result result =
+                        erui::detail::parse_scaleform_styled_text(
+                            submenu_update.caption, false,
+                            parsed_update.caption);
+                    if (result != ERUI_OK) return result;
+                }
+                if (changes_page_title) {
+                    parsed_update.page_title = copy_utf16(
+                        submenu_update.page_title, false);
+                }
+                if (changes_page_help) {
+                    parsed_update.page_help = copy_utf16(
+                        submenu_update.page_help);
+                }
+                parsed_submenus.push_back(std::move(parsed_update));
+                continue;
             }
-            if (changes_help) {
-                const ERUI_Result parsed_help =
-                    erui::detail::parse_scaleform_styled_text(
-                        row_update.help, true, parsed_update.help);
-                if (parsed_help != ERUI_OK) return parsed_help;
-            }
-            if (changes_caption) {
-                const ERUI_Result parsed_caption =
-                    erui::detail::parse_scaleform_styled_text(
-                        row_update.caption, false, parsed_update.caption);
-                if (parsed_caption != ERUI_OK) return parsed_caption;
-            }
-            parsed.push_back(std::move(parsed_update));
+            return ERUI_INVALID_ARGUMENT;
         }
 
         std::lock_guard lock(mutex_);
@@ -2873,6 +3030,10 @@ ERUI_Result Registry::commit_updates(
             return ERUI_NOT_SUPPORTED;
         }
         if (!provider.committed) return ERUI_INVALID_HANDLE;
+        if (!parsed_submenus.empty() &&
+            !submenu_updates_backend_available_) {
+            return ERUI_NOT_SUPPORTED;
+        }
 
         const auto supports_runtime_availability = [](RowKind kind) noexcept {
             switch (kind) {
@@ -2928,14 +3089,16 @@ ERUI_Result Registry::commit_updates(
             };
 
         std::unordered_set<ERUI_RowHandle> unique_rows{};
-        unique_rows.reserve(parsed.size());
+        unique_rows.reserve(parsed_rows.size() + parsed_submenus.size());
+        std::unordered_set<ERUI_PageHandle> unique_submenu_pages{};
+        unique_submenu_pages.reserve(parsed_submenus.size());
         std::unordered_map<const Row*, bool> visibility_overrides{};
-        visibility_overrides.reserve(parsed.size());
+        visibility_overrides.reserve(parsed_rows.size());
         std::unordered_set<ERUI_PageHandle> visibility_pages{};
-        visibility_pages.reserve(parsed.size());
+        visibility_pages.reserve(parsed_rows.size());
         std::vector<PendingRowMutation> mutations{};
-        mutations.reserve(parsed.size());
-        for (ParsedRowUpdate& update : parsed) {
+        mutations.reserve(parsed_rows.size());
+        for (ParsedRowUpdate& update : parsed_rows) {
             if (!unique_rows.insert(update.row).second) {
                 return ERUI_INVALID_ARGUMENT;
             }
@@ -3040,6 +3203,106 @@ ERUI_Result Registry::commit_updates(
             mutations.push_back(std::move(mutation));
         }
 
+        std::vector<PendingSubmenuMutation> submenu_mutations{};
+        submenu_mutations.reserve(parsed_submenus.size());
+        std::vector<erui::detail::SubmenuTitleUpdate>
+            submenu_title_updates{};
+        submenu_title_updates.reserve(parsed_submenus.size());
+        for (ParsedSubmenuUpdate& update : parsed_submenus) {
+            if (!unique_rows.insert(update.row).second ||
+                !unique_submenu_pages.insert(update.page).second) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            const auto row_it = provider.row_lookup.find(update.row);
+            const auto page_it = provider.page_lookup.find(update.page);
+            if (row_it == provider.row_lookup.end() ||
+                page_it == provider.page_lookup.end()) {
+                return ERUI_INVALID_HANDLE;
+            }
+            Row& row = *row_it->second;
+            Page& page = *page_it->second;
+            if (row.kind != RowKind::submenu ||
+                row.child_page != page.handle ||
+                page.submenu_opener != row.handle) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+
+            PendingSubmenuMutation mutation{};
+            mutation.row = &row;
+            mutation.page = &page;
+            mutation.changes_label =
+                (update.fields & ERUI_SUBMENU_UPDATE_FIELD_LABEL) != 0;
+            mutation.changes_help =
+                (update.fields & ERUI_SUBMENU_UPDATE_FIELD_HELP) != 0;
+            mutation.changes_caption =
+                (update.fields & ERUI_SUBMENU_UPDATE_FIELD_CAPTION) != 0;
+            mutation.changes_page_title =
+                (update.fields & ERUI_SUBMENU_UPDATE_FIELD_PAGE_TITLE) != 0;
+            mutation.changes_page_help =
+                (update.fields & ERUI_SUBMENU_UPDATE_FIELD_PAGE_HELP) != 0;
+            if (mutation.changes_page_title && page.title_formatter) {
+                // A client formatter owns every physical title variant. Its
+                // callback cannot be safely re-entered after registration,
+                // so changing that formatter's base title is unsupported.
+                return ERUI_NOT_SUPPORTED;
+            }
+
+            mutation.label = mutation.changes_label
+                ? std::move(update.label)
+                : erui::detail::ScaleformStyledText{
+                    .text = row.label,
+                    .spans = row.label_styles,
+                };
+            mutation.help = mutation.changes_help
+                ? std::move(update.help)
+                : erui::detail::ScaleformStyledText{
+                    .text = row.help,
+                    .spans = row.help_styles,
+                };
+            mutation.caption_overridden =
+                mutation.changes_caption || row.caption_overridden;
+            if (mutation.changes_caption) {
+                mutation.caption = std::move(update.caption);
+            } else if (row.caption_overridden) {
+                mutation.caption = erui::detail::ScaleformStyledText{
+                    .text = row.caption,
+                    .spans = row.caption_styles,
+                };
+            }
+            if (mutation.changes_page_title) {
+                mutation.page_title = std::move(update.page_title);
+            }
+            if (mutation.changes_page_help) {
+                mutation.page_help = std::move(update.page_help);
+            }
+            mutation.materialized = row.enabled;
+
+            const ERUI_Result label_encoded =
+                erui::detail::encode_scaleform_html(
+                    mutation.label, mutation.label_html);
+            if (label_encoded != ERUI_OK) return label_encoded;
+            const ERUI_Result help_encoded =
+                erui::detail::encode_scaleform_html(
+                    mutation.help, mutation.help_html);
+            if (help_encoded != ERUI_OK) return help_encoded;
+            if (mutation.caption_overridden) {
+                const ERUI_Result caption_encoded =
+                    erui::detail::encode_scaleform_html(
+                        mutation.caption, mutation.caption_html);
+                if (caption_encoded != ERUI_OK) return caption_encoded;
+            }
+            if (mutation.changes_page_title) {
+                submenu_title_updates.push_back({
+                    .provider = provider_handle,
+                    .page = page.handle,
+                    .title = mutation.page_title,
+                    .maximum_slice_count = (std::max)(
+                        std::size_t{1}, page.rows.size()),
+                });
+            }
+            submenu_mutations.push_back(std::move(mutation));
+        }
+
         // The live rebuild matrix deliberately rejected a zero-row logical
         // projection for every page family. Preserve that proven boundary
         // until an explicit zero-row lifecycle probe establishes otherwise.
@@ -3098,7 +3361,7 @@ ERUI_Result Registry::commit_updates(
         }
 
         std::vector<erui::detail::RowPresentationUpdate> snapshots{};
-        snapshots.reserve(mutations.size());
+        snapshots.reserve(mutations.size() + submenu_mutations.size());
         std::vector<erui::detail::RowVisibilityUpdate> visibility_updates{};
         visibility_updates.reserve(visibility_overrides.size());
         for (const PendingRowMutation& mutation : mutations) {
@@ -3124,6 +3387,26 @@ ERUI_Result Registry::commit_updates(
                 });
             }
         }
+        for (const PendingSubmenuMutation& mutation : submenu_mutations) {
+            if (!mutation.materialized ||
+                (!mutation.changes_label && !mutation.changes_help &&
+                 !mutation.changes_caption)) {
+                continue;
+            }
+            erui::detail::RowPresentationUpdate snapshot{
+                .provider = provider_handle,
+                .row = mutation.row->handle,
+                .label = mutation.label_html,
+                .help = mutation.help_html,
+                .interactive = mutation.row->interactive,
+                .availability_appearance =
+                    mutation.row->availability_appearance,
+            };
+            if (mutation.caption_overridden) {
+                snapshot.caption = mutation.caption_html;
+            }
+            snapshots.push_back(std::move(snapshot));
+        }
 
         // Keep the layout projection and presentation snapshot in one
         // publication epoch. Visibility preparation owns every remaining
@@ -3132,10 +3415,18 @@ ERUI_Result Registry::commit_updates(
         const erui::detail::RowUpdatePublicationLock publication_lock =
             erui::detail::lock_row_update_publication();
         erui::detail::PreparedRowVisibilityUpdates prepared_visibility{};
+        erui::detail::PreparedSubmenuTitleUpdates prepared_submenu_titles{};
         if (!visibility_updates.empty()) {
             const ERUI_Result prepared =
                 erui::detail::prepare_row_visibility_updates(
                     std::move(visibility_updates), prepared_visibility);
+            if (prepared != ERUI_OK) return prepared;
+        }
+        if (!submenu_title_updates.empty()) {
+            const ERUI_Result prepared =
+                erui::detail::prepare_submenu_title_updates(
+                    std::move(submenu_title_updates),
+                    prepared_submenu_titles);
             if (prepared != ERUI_OK) return prepared;
         }
         if (!snapshots.empty()) {
@@ -3143,6 +3434,10 @@ ERUI_Result Registry::commit_updates(
                 erui::detail::submit_row_presentation_updates(
                     std::move(snapshots));
             if (published != ERUI_OK) return published;
+        }
+        if (prepared_submenu_titles) {
+            erui::detail::commit_prepared_submenu_title_updates(
+                std::move(prepared_submenu_titles));
         }
         if (prepared_visibility) {
             erui::detail::commit_prepared_row_visibility_updates(
@@ -3164,6 +3459,24 @@ ERUI_Result Registry::commit_updates(
             mutation.row->availability_appearance =
                 mutation.availability_appearance;
             mutation.row->visible = mutation.visible;
+        }
+        for (PendingSubmenuMutation& mutation : submenu_mutations) {
+            mutation.row->label = std::move(mutation.label.text);
+            mutation.row->label_styles = std::move(mutation.label.spans);
+            mutation.row->help = std::move(mutation.help.text);
+            mutation.row->help_styles = std::move(mutation.help.spans);
+            mutation.row->caption = std::move(mutation.caption.text);
+            mutation.row->caption_styles =
+                std::move(mutation.caption.spans);
+            mutation.row->caption_overridden =
+                mutation.caption_overridden;
+            if (mutation.changes_page_title) {
+                mutation.page->page_title =
+                    std::move(mutation.page_title);
+            }
+            if (mutation.changes_page_help) {
+                mutation.page->help = std::move(mutation.page_help);
+            }
         }
         ++generation_;
         if (open_) note_activity_locked();
@@ -3465,6 +3778,9 @@ void Registry::append_page_locked(
     const Page& source,
     erui::Page& destination) {
     if (!erui::detail::valid_builtin_page(source.builtin_page)) {
+        if (source.submenu_opener != ERUI_INVALID_ROW) {
+            destination.identify_page(provider.handle, source.handle);
+        }
         destination.set_presentation({
             .menu_title = source.menu_title.empty()
                 ? provider.display_name
