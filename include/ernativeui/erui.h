@@ -128,7 +128,8 @@ enum {
     ERUI_CAP_ROW_AVAILABILITY = UINT64_C(1) << 21,
     ERUI_CAP_ROW_VISIBILITY = UINT64_C(1) << 22,
     ERUI_CAP_SUBMENU_UPDATES = UINT64_C(1) << 23,
-    ERUI_CAP_TAB_UPDATES = UINT64_C(1) << 24
+    ERUI_CAP_TAB_UPDATES = UINT64_C(1) << 24,
+    ERUI_CAP_ROW_CONFIGURATION = UINT64_C(1) << 25
 };
 
 /*
@@ -818,7 +819,9 @@ enum {
     /* Selects the row's visual availability independently of interaction. */
     ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE = 1u << 4,
     /* Includes or excludes the row from layout and pagination. */
-    ERUI_ROW_UPDATE_FIELD_VISIBLE = 1u << 5
+    ERUI_ROW_UPDATE_FIELD_VISIBLE = 1u << 5,
+    /* Applies the type-specific control payload referenced by the descriptor. */
+    ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION = 1u << 6
 };
 
 /*
@@ -836,6 +839,62 @@ enum {
     ERUI_AVAILABILITY_APPEARANCE_DISABLED = 2u
 };
 
+/*
+ * Type-specific runtime control configuration. API 1.4 currently admits
+ * presentation-only, same-cardinality value-label replacement for Numeric
+ * Slider and Custom Slider rows. Each supplied label must contain
+ * 1..ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH UTF-16 code units. The host copies
+ * every nested view before commit_updates returns. Logical values, callbacks,
+ * ranges, and list cardinality remain unchanged by this first configuration
+ * slice.
+ */
+typedef uint32_t ERUI_RowControlUpdateKind;
+enum {
+    ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER = 1u,
+    ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER = 2u
+};
+
+typedef struct ERUI_RowControlUpdateDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_RowControlUpdateKind kind;
+    uint32_t reserved0;
+    const void* payload;
+    uint32_t reserved[2];
+} ERUI_RowControlUpdateDesc;
+
+typedef uint32_t ERUI_NumericSliderControlUpdateFields;
+enum {
+    ERUI_NUMERIC_SLIDER_CONTROL_UPDATE_FIELD_VALUE_LABELS = 1u << 0
+};
+
+typedef struct ERUI_NumericSliderControlUpdateDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_NumericSliderControlUpdateFields fields;
+    uint32_t reserved0;
+    const ERUI_Utf16View* value_labels;
+    uint32_t value_label_count;
+    uint32_t value_label_stride;
+    uint32_t reserved[2];
+} ERUI_NumericSliderControlUpdateDesc;
+
+typedef uint32_t ERUI_CustomSliderControlUpdateFields;
+enum {
+    ERUI_CUSTOM_SLIDER_CONTROL_UPDATE_FIELD_VALUES = 1u << 0
+};
+
+typedef struct ERUI_CustomSliderControlUpdateDesc {
+    uint32_t size;
+    uint32_t flags;
+    ERUI_CustomSliderControlUpdateFields fields;
+    uint32_t reserved0;
+    const ERUI_Utf16View* values;
+    uint32_t value_count;
+    uint32_t value_stride;
+    uint32_t reserved[2];
+} ERUI_CustomSliderControlUpdateDesc;
+
 typedef struct ERUI_RowUpdateDesc {
     uint32_t size;
     uint32_t flags;
@@ -847,6 +906,7 @@ typedef struct ERUI_RowUpdateDesc {
     ERUI_StyledTextView caption;
     ERUI_AvailabilityAppearance availability_appearance;
     uint32_t visible;
+    const ERUI_RowControlUpdateDesc* control_configuration;
 } ERUI_RowUpdateDesc;
 
 /*
@@ -939,7 +999,12 @@ typedef struct ERUI_TabUpdateDesc {
  * be exactly 0 or 1 and
  * availability_appearance must name a declared value, and visible must be
  * exactly 0 or 1. When the corresponding bit is absent, each scalar must be
- * zero. Availability fields additionally require ERUI_CAP_ROW_AVAILABILITY
+ * zero. control_configuration must be NULL unless
+ * ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION is present. That field requires
+ * ERUI_CAP_ROW_CONFIGURATION and one exact-sized payload whose kind matches
+ * the target Numeric Slider or Custom Slider. Its view array uses an exact
+ * sizeof(ERUI_Utf16View) stride and must preserve the registered value count.
+ * Availability fields additionally require ERUI_CAP_ROW_AVAILABILITY
  * and a materialized Button, Toggle,
  * Slider, NumericSlider, CustomSlider, InlineChoice, PopupChoice, TextInput,
  * or ColorPicker row. Submenu rows are unsupported; a construction-disabled

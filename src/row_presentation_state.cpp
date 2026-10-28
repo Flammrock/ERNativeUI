@@ -35,6 +35,7 @@ struct PendingSnapshot {
     ERUI_AvailabilityAppearance availability_appearance{
         ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
     std::uint64_t availability_revision{};
+    std::uint64_t slider_value_revision{};
 };
 
 struct Entry {
@@ -57,6 +58,8 @@ struct Entry {
         ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
     std::uint64_t desired_availability_revision{1};
     std::uint64_t applied_availability_revision{1};
+    std::uint64_t desired_slider_value_revision{};
+    std::uint64_t applied_slider_value_revision{};
     bool applied_caption_override{};
     bool dirty{};
 };
@@ -69,6 +72,7 @@ std::unordered_map<RowIdentity, PendingSnapshot, RowIdentityHash>
 std::uint64_t g_revision{};
 std::uint64_t g_help_revision{};
 std::uint64_t g_availability_revision{1};
+std::uint64_t g_slider_value_revision{};
 bool g_configured{};
 bool g_pending{};
 
@@ -131,6 +135,15 @@ ERUI_Result submit_row_presentation_updates(
         const std::uint64_t revision = next_revision(g_revision);
         const std::uint64_t availability_revision =
             next_revision(g_availability_revision);
+        const bool batch_refreshes_slider_value = std::any_of(
+            updates.begin(), updates.end(),
+            [](const RowPresentationUpdate& update) {
+                return update.refresh_slider_value;
+            });
+        const std::uint64_t slider_value_revision =
+            batch_refreshes_slider_value
+            ? next_revision(g_slider_value_revision)
+            : g_slider_value_revision;
 
         if (!g_configured) {
             // The registry has already validated duplicate targets. Reserve
@@ -160,6 +173,12 @@ ERUI_Result submit_row_presentation_updates(
                     : (existing != staged.end()
                         ? existing->second.help_revision
                         : std::uint64_t{0});
+                const std::uint64_t row_slider_value_revision =
+                    update.refresh_slider_value
+                    ? slider_value_revision
+                    : (existing != staged.end()
+                        ? existing->second.slider_value_revision
+                        : std::uint64_t{0});
                 staged[identity] = {
                     .label = std::move(update.label),
                     .help = std::move(update.help),
@@ -170,6 +189,8 @@ ERUI_Result submit_row_presentation_updates(
                     .availability_appearance =
                         update.availability_appearance,
                     .availability_revision = availability_revision,
+                    .slider_value_revision =
+                        row_slider_value_revision,
                 };
                 ++update_index;
             }
@@ -177,6 +198,9 @@ ERUI_Result submit_row_presentation_updates(
             g_revision = revision;
             if (batch_help_changed) g_help_revision = help_revision;
             g_availability_revision = availability_revision;
+            if (batch_refreshes_slider_value) {
+                g_slider_value_revision = slider_value_revision;
+            }
             g_pending = true;
             return ERUI_OK;
         }
@@ -253,11 +277,18 @@ ERUI_Result submit_row_presentation_updates(
             entry.desired_availability_appearance =
                 updates[index].availability_appearance;
             entry.desired_availability_revision = availability_revision;
+            if (updates[index].refresh_slider_value) {
+                entry.desired_slider_value_revision =
+                    slider_value_revision;
+            }
             entry.dirty = true;
         }
         g_revision = revision;
         if (batch_help_changed) g_help_revision = help_revision;
         g_availability_revision = availability_revision;
+        if (batch_refreshes_slider_value) {
+            g_slider_value_revision = slider_value_revision;
+        }
         g_pending = true;
         return ERUI_OK;
     } catch (const std::bad_alloc&) {
@@ -326,6 +357,8 @@ bool configure_row_presentation_state(CompiledMenu& menu) noexcept {
                         pending->second.availability_appearance;
                     entry->desired_availability_revision =
                         pending->second.availability_revision;
+                    entry->desired_slider_value_revision =
+                        pending->second.slider_value_revision;
                     entry->label_buffer = std::make_unique<wchar_t[]>(
                         row_presentation_max_text_units + 1u);
                     entry->help_buffer = std::make_unique<wchar_t[]>(
@@ -402,6 +435,8 @@ void synchronize_pending_row_presentations() noexcept {
             entry.desired_availability_appearance;
         entry.applied_availability_revision =
             entry.desired_availability_revision;
+        entry.applied_slider_value_revision =
+            entry.desired_slider_value_revision;
         entry.dirty = false;
     }
     g_pending = still_pending;
@@ -423,6 +458,8 @@ RowPresentationView row_presentation_view(std::size_t slot) noexcept {
             : nullptr,
         .revision = entry.applied_revision,
         .help_revision = entry.applied_help_revision,
+        .slider_value_revision =
+            entry.applied_slider_value_revision,
     };
 }
 
@@ -455,6 +492,7 @@ void reset_row_presentation_state() noexcept {
     g_revision = 0;
     g_help_revision = 0;
     g_availability_revision = 1;
+    g_slider_value_revision = 0;
     g_configured = false;
     g_pending = false;
 }

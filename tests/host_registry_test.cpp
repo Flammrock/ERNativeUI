@@ -4875,6 +4875,8 @@ int main() {
     ERUI_TEST_CHECK(negotiated.table.add_tab != nullptr);
     ERUI_TEST_CHECK((negotiated.table.capabilities &
         ERUI_CAP_TITLE_SCREEN_TEXT) == 0);
+    ERUI_TEST_CHECK((negotiated.table.capabilities &
+        ERUI_CAP_ROW_CONFIGURATION) == 0);
     ERUI_TEST_CHECK(negotiated.table.add_title_screen_text != nullptr);
     ERUI_PageHandle unavailable_tab{UINT64_C(0x5AA55AA55AA55AA5)};
     ERUI_TEST_CHECK(negotiated.table.add_tab(
@@ -4906,6 +4908,10 @@ int main() {
         erui::host::registry().enable_custom_tabs_backend());
     ERUI_TEST_CHECK(
         erui::host::registry().enable_title_screen_text_backend());
+    ERUI_TEST_CHECK(
+        erui::host::registry().enable_updates_backend());
+    ERUI_TEST_CHECK(
+        erui::host::registry().enable_row_configuration_backend());
     ERUI_Api tabs_enabled{};
     tabs_enabled.size = sizeof(tabs_enabled);
     ERUI_TEST_CHECK(ERUI_GetApi(
@@ -4916,11 +4922,21 @@ int main() {
     ERUI_TEST_CHECK((tabs_enabled.capabilities &
         ERUI_CAP_TITLE_SCREEN_TEXT) != 0);
     ERUI_TEST_CHECK(tabs_enabled.add_title_screen_text != nullptr);
+    ERUI_Api updates_enabled{};
+    updates_enabled.size = sizeof(updates_enabled);
+    ERUI_TEST_CHECK(ERUI_GetApi(
+        ERUI_API_VERSION_1_4, &updates_enabled) == ERUI_OK);
+    ERUI_TEST_CHECK((updates_enabled.capabilities &
+        ERUI_CAP_UPDATES) != 0);
+    ERUI_TEST_CHECK((updates_enabled.capabilities &
+        ERUI_CAP_ROW_CONFIGURATION) != 0);
     erui::host::registry().open_registration();
     ERUI_TEST_CHECK(
         !erui::host::registry().enable_custom_tabs_backend());
     ERUI_TEST_CHECK(
         !erui::host::registry().enable_title_screen_text_backend());
+    ERUI_TEST_CHECK(
+        !erui::host::registry().enable_row_configuration_backend());
     ERUI_ProviderDesc v1_provider{};
     v1_provider.size = sizeof(v1_provider);
     v1_provider.api_version = ERUI_API_VERSION_1_0;

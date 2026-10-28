@@ -84,6 +84,10 @@ int main() {
     static_assert(sizeof(ERUI_CustomSliderChangeContext) == 40);
     static_assert(sizeof(ERUI_NumericSliderDesc) == 136);
     static_assert(sizeof(ERUI_CustomSliderDesc) == 80);
+    static_assert(sizeof(ERUI_RowControlUpdateDesc) == 32);
+    static_assert(sizeof(ERUI_NumericSliderControlUpdateDesc) == 40);
+    static_assert(sizeof(ERUI_CustomSliderControlUpdateDesc) == 40);
+    static_assert(sizeof(ERUI_RowUpdateDesc) == 184);
     static_assert(sizeof(ERUI_ActionInputs) == 40);
     static_assert(sizeof(ERUI_InputActionActivatedContext) == 32);
     static_assert(sizeof(ERUI_InputSectionDesc) == 32);
@@ -122,6 +126,7 @@ int main() {
     static_assert(ERUI_CAP_UPDATES == (UINT64_C(1) << 20));
     static_assert(ERUI_CAP_ROW_AVAILABILITY == (UINT64_C(1) << 21));
     static_assert(ERUI_CAP_ROW_VISIBILITY == (UINT64_C(1) << 22));
+    static_assert(ERUI_CAP_ROW_CONFIGURATION == (UINT64_C(1) << 25));
     static_assert(ERUI_ROW_UPDATE_FIELD_INTERACTIVE == (1u << 3));
     static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4));
     static_assert(ERUI_ROW_UPDATE_FIELD_VISIBLE == (1u << 5));
@@ -192,6 +197,9 @@ int main() {
         erui::Capability::numeric_slider) == ERUI_CAP_NUMERIC_SLIDER);
     static_assert(static_cast<ERUI_Capabilities>(
         erui::Capability::custom_slider) == ERUI_CAP_CUSTOM_SLIDER);
+    static_assert(static_cast<ERUI_Capabilities>(
+        erui::Capability::row_configuration) ==
+        ERUI_CAP_ROW_CONFIGURATION);
     static_assert(static_cast<ERUI_ControllerButton>(
         erui::ControllerButton::right_trigger) ==
         ERUI_CONTROLLER_BUTTON_RIGHT_TRIGGER);

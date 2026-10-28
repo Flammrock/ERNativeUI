@@ -143,10 +143,14 @@ _Static_assert(ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE == (1u << 4),
     "ERUI row-appearance field bit drift");
 _Static_assert(ERUI_ROW_UPDATE_FIELD_VISIBLE == (1u << 5),
     "ERUI row-visible field bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION == (1u << 6),
+    "ERUI row-control-configuration field bit drift");
 _Static_assert(ERUI_CAP_SUBMENU_UPDATES == (UINT64_C(1) << 23),
     "ERUI submenu-updates capability drift");
 _Static_assert(ERUI_CAP_TAB_UPDATES == (UINT64_C(1) << 24),
     "ERUI tab-updates capability drift");
+_Static_assert(ERUI_CAP_ROW_CONFIGURATION == (UINT64_C(1) << 25),
+    "ERUI row-configuration capability drift");
 _Static_assert(ERUI_UPDATE_KIND_SUBMENU == 2u,
     "ERUI submenu-update kind drift");
 _Static_assert(ERUI_UPDATE_KIND_TAB == 3u,
@@ -161,7 +165,13 @@ _Static_assert(ERUI_AVAILABILITY_APPEARANCE_NORMAL == 1u,
     "ERUI normal appearance drift");
 _Static_assert(ERUI_AVAILABILITY_APPEARANCE_DISABLED == 2u,
     "ERUI disabled appearance drift");
-_Static_assert(sizeof(ERUI_RowUpdateDesc) == 176u,
+_Static_assert(sizeof(ERUI_RowControlUpdateDesc) == 32u,
+    "ERUI row-control update descriptor ABI drift");
+_Static_assert(sizeof(ERUI_NumericSliderControlUpdateDesc) == 40u,
+    "ERUI numeric-slider control update descriptor ABI drift");
+_Static_assert(sizeof(ERUI_CustomSliderControlUpdateDesc) == 40u,
+    "ERUI custom-slider control update descriptor ABI drift");
+_Static_assert(sizeof(ERUI_RowUpdateDesc) == 184u,
     "ERUI row-update descriptor ABI drift");
 _Static_assert(sizeof(ERUI_SubmenuUpdateDesc) == 216u,
     "ERUI submenu-update descriptor ABI drift");
@@ -183,6 +193,8 @@ _Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,
     "ERUI row-update appearance offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172u,
     "ERUI row-update visible offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, control_configuration) == 176u,
+    "ERUI row-update control-configuration offset drift");
 _Static_assert(sizeof(ERUI_UpdateDesc) == 24u,
     "ERUI update descriptor ABI drift");
 _Static_assert(sizeof(ERUI_UpdateBatchDesc) == 32u,
@@ -446,7 +458,8 @@ int main(void) {
         ERUI_CAP_BUILTIN_PAGES == 0u || ERUI_CAP_INPUT_BINDINGS == 0u ||
         ERUI_CAP_STORAGE == 0u || ERUI_CAP_NUMERIC_SLIDER == 0u ||
         ERUI_CAP_CUSTOM_SLIDER == 0u || ERUI_CAP_UPDATES == 0u ||
-        ERUI_CAP_ROW_VISIBILITY == 0u || row_update.visible != 1u ||
+        ERUI_CAP_ROW_VISIBILITY == 0u ||
+        ERUI_CAP_ROW_CONFIGURATION == 0u || row_update.visible != 1u ||
         update_batch.updates != &update ||
         update.payload != &row_update ||
         ERUI_PAGE_TITLE_BUFFER_CAPACITY < 1u;

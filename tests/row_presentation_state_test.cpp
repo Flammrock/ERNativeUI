@@ -602,6 +602,7 @@ int main() {
             .interactive = false,
             .availability_appearance =
                 ERUI_AVAILABILITY_APPEARANCE_DISABLED,
+            .refresh_slider_value = true,
         },
     }) == ERUI_OK);
     auto preconfigured_menu = make_menu();
@@ -614,6 +615,7 @@ int main() {
     assert(std::wstring(preconfigured.help) == L"Preconfigured help");
     assert(std::wstring(preconfigured.caption) == L"Preconfigured caption");
     assert(preconfigured.help_revision != 0);
+    assert(preconfigured.slider_value_revision != 0);
     const auto preconfigured_availability =
         erui::detail::row_availability_view(0);
     assert(preconfigured_availability);
@@ -711,6 +713,59 @@ int main() {
     assert(std::wstring(help_reverted.help) == L"Queued help B");
     assert(help_reverted.revision > help_coalesced.revision);
     assert(help_reverted.help_revision == coalesced_help_revision);
+    erui::detail::reset_row_presentation_state();
+
+    // Formatted-slider repaint requests have an independent generation. An
+    // ordinary text/availability edit must not schedule another SliderCtrl
+    // refresh, and the generation is never visible before the UI boundary.
+    auto slider_generation_menu = make_menu();
+    assert(erui::detail::configure_row_presentation_state(
+        *slider_generation_menu));
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Slider baseline",
+            .help = L"Slider baseline help",
+        },
+    }) == ERUI_OK);
+    erui::detail::synchronize_pending_row_presentations();
+    const auto slider_baseline =
+        erui::detail::row_presentation_view(0);
+    assert(slider_baseline);
+    assert(slider_baseline.slider_value_revision == 0);
+
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Slider table B",
+            .help = L"Slider table B help",
+            .refresh_slider_value = true,
+        },
+    }) == ERUI_OK);
+    const auto slider_before_sync =
+        erui::detail::row_presentation_view(0);
+    assert(slider_before_sync.slider_value_revision == 0);
+    erui::detail::synchronize_pending_row_presentations();
+    const auto slider_refreshed =
+        erui::detail::row_presentation_view(0);
+    assert(slider_refreshed.slider_value_revision != 0);
+
+    assert(erui::detail::submit_row_presentation_updates({
+        RowPresentationUpdate{
+            .provider = kProvider,
+            .row = kRow,
+            .label = L"Text-only after slider table",
+            .help = L"Text-only help",
+        },
+    }) == ERUI_OK);
+    erui::detail::synchronize_pending_row_presentations();
+    const auto slider_not_requeued =
+        erui::detail::row_presentation_view(0);
+    assert(slider_not_requeued.revision > slider_refreshed.revision);
+    assert(slider_not_requeued.slider_value_revision ==
+        slider_refreshed.slider_value_revision);
     erui::detail::reset_row_presentation_state();
     return 0;
 }

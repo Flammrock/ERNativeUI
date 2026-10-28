@@ -62,6 +62,7 @@ int check_v1_0_prefix(ERUI_GetApiFn get_api) {
     CHECK((api->capabilities & ERUI_CAP_ROW_VISIBILITY) == 0);
     CHECK((api->capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0);
     CHECK((api->capabilities & ERUI_CAP_TAB_UPDATES) == 0);
+    CHECK((api->capabilities & ERUI_CAP_ROW_CONFIGURATION) == 0);
 #endif
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_0_SIZE,
@@ -95,6 +96,7 @@ int check_v1_2_prefix(ERUI_GetApiFn get_api) {
     CHECK((api->capabilities & ERUI_CAP_ROW_VISIBILITY) == 0);
     CHECK((api->capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0);
     CHECK((api->capabilities & ERUI_CAP_TAB_UPDATES) == 0);
+    CHECK((api->capabilities & ERUI_CAP_ROW_CONFIGURATION) == 0);
 #endif
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_2_SIZE,
@@ -126,6 +128,7 @@ int check_v1_3_prefix(ERUI_GetApiFn get_api) {
     CHECK((api->capabilities & ERUI_CAP_ROW_VISIBILITY) == 0);
     CHECK((api->capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0);
     CHECK((api->capabilities & ERUI_CAP_TAB_UPDATES) == 0);
+    CHECK((api->capabilities & ERUI_CAP_ROW_CONFIGURATION) == 0);
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_3_SIZE,
         storage.bytes.size() - ERUI_API_V1_3_SIZE,
@@ -164,6 +167,7 @@ int check_v1_1_prefix(ERUI_GetApiFn get_api) {
     CHECK((api->capabilities & ERUI_CAP_ROW_VISIBILITY) == 0);
     CHECK((api->capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0);
     CHECK((api->capabilities & ERUI_CAP_TAB_UPDATES) == 0);
+    CHECK((api->capabilities & ERUI_CAP_ROW_CONFIGURATION) == 0);
 #endif
     CHECK(bytes_equal(
         storage.bytes.data() + ERUI_API_V1_1_SIZE,
@@ -249,6 +253,7 @@ int check_selected_current(ERUI_GetApiFn get_api) {
     CHECK((api.capabilities & ERUI_CAP_ROW_VISIBILITY) != 0);
     CHECK((api.capabilities & ERUI_CAP_SUBMENU_UPDATES) != 0);
     CHECK((api.capabilities & ERUI_CAP_TAB_UPDATES) != 0);
+    CHECK((api.capabilities & ERUI_CAP_ROW_CONFIGURATION) != 0);
     CHECK(api.commit_updates != nullptr);
 #endif
     return 0;

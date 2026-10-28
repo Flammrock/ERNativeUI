@@ -91,6 +91,24 @@ struct has_visible : std::false_type {};
 template <typename T>
 struct has_visible<T, std::void_t<decltype(
     std::declval<T&>().visible(true))>> : std::true_type {};
+
+template <typename T, typename = void>
+struct has_value_labels : std::false_type {};
+
+template <typename T>
+struct has_value_labels<T, std::void_t<decltype(
+    std::declval<T&>().value_labels(
+        std::declval<std::initializer_list<std::wstring_view>>()))>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_values_update : std::false_type {};
+
+template <typename T>
+struct has_values_update<T, std::void_t<decltype(
+    std::declval<T&>().values(
+        std::declval<std::initializer_list<std::wstring_view>>()))>>
+    : std::true_type {};
 #endif
 
 template <typename T, typename = void>
@@ -721,10 +739,14 @@ static_assert(!has_legacy_title_screen_text_overload<erui::Menu>::value);
 #if defined(ERUI_API_VERSION_1_4)
 static_assert(sizeof(ERUI_TextStyleSpan) == 32);
 static_assert(sizeof(ERUI_StyledTextView) == 48);
-static_assert(sizeof(ERUI_RowUpdateDesc) == 176);
+static_assert(sizeof(ERUI_RowControlUpdateDesc) == 32);
+static_assert(sizeof(ERUI_NumericSliderControlUpdateDesc) == 40);
+static_assert(sizeof(ERUI_CustomSliderControlUpdateDesc) == 40);
+static_assert(sizeof(ERUI_RowUpdateDesc) == 184);
 static_assert(sizeof(ERUI_SubmenuUpdateDesc) == 216);
 static_assert(sizeof(ERUI_TabUpdateDesc) == 64);
 static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172);
+static_assert(offsetof(ERUI_RowUpdateDesc, control_configuration) == 176);
 static_assert(offsetof(ERUI_SubmenuUpdateDesc, page_title) == 176);
 static_assert(offsetof(ERUI_SubmenuUpdateDesc, reserved) == 208);
 static_assert(offsetof(ERUI_TabUpdateDesc, title) == 24);
@@ -734,6 +756,11 @@ static_assert(sizeof(ERUI_UpdateDesc) == 24);
 static_assert(sizeof(ERUI_UpdateBatchDesc) == 32);
 static_assert(std::is_trivially_copyable_v<ERUI_TextStyleSpan>);
 static_assert(std::is_trivially_copyable_v<ERUI_StyledTextView>);
+static_assert(std::is_trivially_copyable_v<ERUI_RowControlUpdateDesc>);
+static_assert(std::is_trivially_copyable_v<
+    ERUI_NumericSliderControlUpdateDesc>);
+static_assert(std::is_trivially_copyable_v<
+    ERUI_CustomSliderControlUpdateDesc>);
 static_assert(std::is_trivially_copyable_v<ERUI_RowUpdateDesc>);
 static_assert(std::is_trivially_copyable_v<ERUI_SubmenuUpdateDesc>);
 static_assert(std::is_trivially_copyable_v<ERUI_TabUpdateDesc>);
@@ -749,6 +776,8 @@ static_assert(static_cast<ERUI_Capabilities>(
     erui::Capability::submenu_updates) == ERUI_CAP_SUBMENU_UPDATES);
 static_assert(static_cast<ERUI_Capabilities>(
     erui::Capability::tab_updates) == ERUI_CAP_TAB_UPDATES);
+static_assert(static_cast<ERUI_Capabilities>(
+    erui::Capability::row_configuration) == ERUI_CAP_ROW_CONFIGURATION);
 static_assert(std::is_base_of_v<erui::Page, erui::Tab>);
 static_assert(std::is_convertible_v<erui::Tab, erui::Page>);
 static_assert(std::is_assignable_v<erui::Page&, erui::Tab>);
@@ -870,6 +899,34 @@ static_assert(has_visible<erui::InlineChoiceRowEdit>::value);
 static_assert(has_visible<erui::PopupChoiceRowEdit>::value);
 static_assert(has_visible<erui::TextInputRowEdit>::value);
 static_assert(has_visible<erui::ColorPickerRowEdit>::value);
+static_assert(!has_value_labels<erui::ButtonRowEdit>::value);
+static_assert(!has_value_labels<erui::SliderRowEdit>::value);
+static_assert(has_value_labels<erui::NumericSliderRowEdit>::value);
+static_assert(!has_value_labels<erui::CustomSliderRowEdit>::value);
+static_assert(!has_values_update<erui::NumericSliderRowEdit>::value);
+static_assert(has_values_update<erui::CustomSliderRowEdit>::value);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::NumericSliderRowEdit&>().value_labels(
+        std::declval<std::initializer_list<std::wstring_view>>())),
+    erui::NumericSliderRowEdit&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::NumericSliderRowEdit&&>().value_labels(
+        std::declval<std::initializer_list<std::wstring_view>>())),
+    erui::NumericSliderRowEdit&&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::CustomSliderRowEdit&>().values(
+        std::declval<std::initializer_list<std::wstring_view>>())),
+    erui::CustomSliderRowEdit&>);
+static_assert(std::is_same_v<decltype(
+    std::declval<erui::CustomSliderRowEdit&&>().values(
+        std::declval<std::initializer_list<std::wstring_view>>())),
+    erui::CustomSliderRowEdit&&>);
+static_assert(noexcept(
+    std::declval<erui::NumericSliderRowEdit&>().value_labels(
+        std::declval<std::initializer_list<std::wstring_view>>())));
+static_assert(noexcept(
+    std::declval<erui::CustomSliderRowEdit&>().values(
+        std::declval<std::initializer_list<std::wstring_view>>())));
 static_assert(has_availability_appearance<erui::ButtonRowEdit>::value);
 static_assert(has_availability_appearance<erui::SliderRowEdit>::value);
 static_assert(has_availability_appearance<

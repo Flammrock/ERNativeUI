@@ -35,6 +35,9 @@ std::atomic<std::uint8_t> g_nested_rich_submenu_variant{0};
 erui::Tab g_rich_tab_alpha{};
 erui::Tab g_rich_tab_target{};
 erui::Tab g_rich_tab_omega{};
+erui::NumericSliderRow g_runtime_label_numeric{};
+erui::CustomSliderRow g_runtime_label_custom{};
+std::atomic<std::uint8_t> g_runtime_slider_label_variant{0};
 
 using TabIconPixels =
     std::array<std::uint8_t, ERUI_TAB_ICON_RGBA8_BYTE_COUNT>;
@@ -153,6 +156,14 @@ constexpr std::array<std::wstring_view, 3> kAvailabilityAppearanceValues{
     L"Follow", L"Normal", L"Disabled"};
 constexpr std::array<std::wstring_view, 2> kRichSubmenuVariantValues{
     L"Variant A", L"Variant B"};
+constexpr std::array<std::wstring_view, 3> kRuntimeNumericLabelsA{
+    L"ZERO", L"ONE", L"TWO"};
+constexpr std::array<std::wstring_view, 3> kRuntimeNumericLabelsB{
+    L"LOW", L"MEDIUM", L"HIGH"};
+constexpr std::array<std::wstring_view, 3> kRuntimeCustomLabelsA{
+    L"North", L"Center", L"South"};
+constexpr std::array<std::wstring_view, 3> kRuntimeCustomLabelsB{
+    L"Alpha", L"Beta", L"Gamma"};
 
 struct ShowcaseActionState {
     explicit ShowcaseActionState(const wchar_t* name) noexcept
@@ -780,6 +791,52 @@ void custom_slider_changed(
         static_cast<unsigned>(change.index),
         static_cast<unsigned>(change.value_count));
     debug(message);
+}
+
+void switch_runtime_slider_labels() noexcept {
+    if (!g_registration.supports(erui::Capability::updates) ||
+        !g_registration.supports(erui::Capability::row_configuration) ||
+        !g_registration.supports(erui::Capability::numeric_slider) ||
+        !g_registration.supports(erui::Capability::custom_slider)) {
+        debug(L"Runtime slider-label replacement is not available.");
+        return;
+    }
+
+    const std::uint8_t next = static_cast<std::uint8_t>(
+        g_runtime_slider_label_variant.load(std::memory_order_acquire) ^ 1u);
+    const auto& numeric_labels = next != 0u
+        ? kRuntimeNumericLabelsB
+        : kRuntimeNumericLabelsA;
+    const auto& custom_labels = next != 0u
+        ? kRuntimeCustomLabelsB
+        : kRuntimeCustomLabelsA;
+
+    // Each row is one atomic update: its focused help and complete
+    // same-cardinality display-label table publish together. These are two
+    // separate C++ commits; strict-C batching is required when several rows
+    // must publish as one all-or-nothing provider generation.
+    const ERUI_Result numeric_result = g_runtime_label_numeric.edit()
+        .help(next != 0u
+            ? L"Variant B: LOW / MEDIUM / HIGH; logical values remain 0 / 1 / 2."
+            : L"Variant A: ZERO / ONE / TWO; logical values remain 0 / 1 / 2.")
+        .value_labels(numeric_labels.data(), numeric_labels.size())
+        .commit();
+    const ERUI_Result custom_result = g_runtime_label_custom.edit()
+        .help(next != 0u
+            ? L"Variant B: Alpha / Beta / Gamma; the selected index is preserved."
+            : L"Variant A: North / Center / South; the selected index is preserved.")
+        .values(custom_labels.data(), custom_labels.size())
+        .commit();
+
+    if (numeric_result != ERUI_OK) {
+        debug(L"Could not replace the Numeric Slider display labels.");
+    }
+    if (custom_result != ERUI_OK) {
+        debug(L"Could not replace the Custom Slider display labels.");
+    }
+    if (numeric_result == ERUI_OK && custom_result == ERUI_OK) {
+        g_runtime_slider_label_variant.store(next, std::memory_order_release);
+    }
 }
 
 void text_input_changed(
@@ -1948,6 +2005,50 @@ DWORD WINAPI initialize(void*) noexcept {
                     g_slider_text->custom_mapping,
                     g_slider_text->custom_help,
                     impossible_values);
+            }
+
+            if (menu.supports(erui::Capability::button) &&
+                menu.supports(erui::Capability::numeric_slider) &&
+                menu.supports(erui::Capability::custom_slider) &&
+                menu.supports(erui::Capability::updates) &&
+                menu.supports(erui::Capability::row_configuration)) {
+                auto runtime_labels = advanced_sliders.add_submenu(
+                    L"Runtime Slider Labels",
+                    L"Replace two complete three-entry display tables without changing either selection.",
+                    L"Runtime Slider Labels",
+                    L"The Button callback commits one typed edit for each slider.");
+
+                erui::NumericSliderOptions runtime_numeric{};
+                runtime_numeric.minimum = 0.0;
+                runtime_numeric.maximum = 2.0;
+                runtime_numeric.step = 1.0;
+                runtime_numeric.initial_value = 1.0;
+                runtime_numeric.decimal_places = 0;
+                g_runtime_label_numeric =
+                    runtime_labels.add_slider<&numeric_slider_changed>(
+                        L"Numeric display labels",
+                        L"Initially 0 / 1 / 2; the Button replaces all three labels while preserving value 1.",
+                        runtime_numeric);
+
+                erui::CustomSliderOptions runtime_custom{};
+                runtime_custom.value_count = static_cast<std::uint32_t>(
+                    kRuntimeCustomLabelsA.size());
+                runtime_custom.initial_index = 1;
+                runtime_custom.format_value =
+                    [](std::uint32_t index, std::uint32_t) -> std::wstring {
+                        return index < kRuntimeCustomLabelsA.size()
+                            ? std::wstring(kRuntimeCustomLabelsA[index])
+                            : std::wstring{};
+                    };
+                g_runtime_label_custom =
+                    runtime_labels.add_custom_slider<&custom_slider_changed>(
+                        L"Custom display labels",
+                        L"Initially North / Center / South; the Button preserves selected index 1.",
+                        runtime_custom);
+
+                runtime_labels.add_button<&switch_runtime_slider_labels>(
+                    L"Switch both label sets",
+                    L"Each typed edit atomically changes one label table and that row's focused help.");
             }
         }
 

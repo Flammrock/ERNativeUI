@@ -12,8 +12,14 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <new>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace erui::native {
@@ -28,19 +34,46 @@ constexpr std::size_t kStepValueOffset = 0xD38;
 constexpr std::size_t kBoundValuePointerOffset = 0xD90;
 constexpr std::uint32_t kFaultLogLimit = 8;
 
+using ValueTexts = std::vector<std::wstring>;
+
 struct PresentationSlot {
     std::uintptr_t bound_value{};
-    std::vector<std::wstring> values{};
+    std::shared_ptr<const ValueTexts> values{};
 };
 
-std::vector<PresentationSlot> g_slots{};
+using PresentationBank = std::vector<PresentationSlot>;
+
+// One immutable bank is published for the complete API update generation.
+// A refresh retains the bank while it borrows a table, so old strings are
+// reclaimed only after every in-flight detour has released them.
+std::shared_ptr<const PresentationBank> g_desired_bank{};
+std::atomic<std::shared_ptr<const PresentationBank>> g_applied_bank{};
+std::unordered_map<std::uintptr_t, ValueTexts>
+    g_preconfiguration_updates{};
+std::mutex g_value_lock{};
+bool g_values_configured{};
+bool g_values_pending{};
 GameAddresses g_addresses{};
 SafetyHookInline g_slider_refresh_hook{};
 std::atomic<SliderRefreshFn> g_original_slider_refresh{};
 std::atomic<std::uint32_t> g_fault_logs{};
 std::atomic_bool g_presentation_active{};
-thread_local const PresentationSlot* g_constructing_slot{};
+thread_local std::uintptr_t g_constructing_bound_value{};
 thread_local std::int32_t g_constructing_value{};
+
+[[nodiscard]] bool valid_update(
+    const SliderPresentationUpdate& update) noexcept {
+    if (!update.bound_value ||
+        update.values.size() < ERUI_SLIDER_MIN_VALUE_COUNT ||
+        update.values.size() > ERUI_SLIDER_MAX_VALUE_COUNT) {
+        return false;
+    }
+    return std::all_of(
+        update.values.begin(), update.values.end(),
+        [](const std::wstring& value) {
+            return !value.empty();
+        });
+}
 
 void log_fault(const char* operation, unsigned long exception_code) noexcept {
     const std::uint32_t fault =
@@ -145,21 +178,22 @@ bool replace_value_text(
     return assigned;
 }
 
-const PresentationSlot* find_slot(std::uintptr_t bound_value) noexcept {
+template <class Bank>
+auto find_slot(Bank& bank, std::uintptr_t bound_value) noexcept {
     const auto found = std::lower_bound(
-        g_slots.begin(),
-        g_slots.end(),
+        bank.begin(),
+        bank.end(),
         bound_value,
         [](const PresentationSlot& slot, std::uintptr_t value) {
             return slot.bound_value < value;
         });
-    return found != g_slots.end() && found->bound_value == bound_value
-        ? &*found
-        : nullptr;
+    return found != bank.end() && found->bound_value == bound_value
+        ? &*found : nullptr;
 }
 
-void apply_presentation(void* slider) noexcept {
-    if (!slider) return;
+[[nodiscard]] bool apply_presentation_from_bank(
+    void* slider,
+    const PresentationBank& bank) noexcept {
 #if defined(_MSC_VER)
     unsigned long seh_code = 0;
     __try {
@@ -179,45 +213,56 @@ void apply_presentation(void* slider) noexcept {
             bytes + kStepValueOffset);
 
         const PresentationSlot* slot = nullptr;
-        if (const PresentationSlot* const constructing = g_constructing_slot;
-            constructing && minimum == 0 && step == 1 &&
-            maximum >= 1 &&
-            static_cast<std::size_t>(maximum) + 1 ==
-                constructing->values.size() &&
+        if (g_constructing_bound_value != 0) {
+            slot = find_slot(bank, g_constructing_bound_value);
+        }
+        const ValueTexts* values = slot && slot->values
+            ? slot->values.get() : nullptr;
+        if (slot && values &&
+            minimum == 0 && step == 1 && maximum >= 1 &&
+            static_cast<std::size_t>(maximum) + 1 == values->size() &&
             current == g_constructing_value && current >= minimum &&
             current <= maximum && baseline >= minimum && baseline <= maximum) {
             // The constructor's first structurally valid refresh consumes the
             // TLS marker. Later refreshes use SliderCtrl::bound_value.
-            slot = constructing;
-            g_constructing_slot = nullptr;
+            g_constructing_bound_value = 0;
             g_constructing_value = 0;
         } else {
-            slot = find_slot(bound_value);
+            slot = find_slot(bank, bound_value);
+            values = slot && slot->values ? slot->values.get() : nullptr;
         }
-        if (!slot) return;
+        if (!slot || !values) return false;
 
-        const std::vector<std::wstring>& values = slot->values;
         if (minimum != 0 || step != 1 || maximum < 1 ||
-            static_cast<std::size_t>(maximum) + 1 != values.size() ||
+            static_cast<std::size_t>(maximum) + 1 != values->size() ||
             current < minimum || current > maximum ||
             baseline < minimum || baseline > maximum) {
             log_fault("native range validation", 0);
-            return;
+            return false;
         }
 
-        (void)replace_value_text(
+        const bool current_assigned = replace_value_text(
             slider,
             "Text_0",
-            values[static_cast<std::size_t>(current)].c_str());
+            (*values)[static_cast<std::size_t>(current)].c_str());
         (void)replace_value_text(
             slider,
             "Text_1",
-            values[static_cast<std::size_t>(baseline)].c_str());
+            (*values)[static_cast<std::size_t>(baseline)].c_str());
+        return current_assigned;
 #if defined(_MSC_VER)
     } __except (seh_code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         log_fault("owned SliderCtrl inspection", seh_code);
+        return false;
     }
 #endif
+}
+
+void apply_presentation(void* slider) noexcept {
+    if (!slider) return;
+    const std::shared_ptr<const PresentationBank> bank =
+        g_applied_bank.load(std::memory_order_acquire);
+    if (bank) (void)apply_presentation_from_bank(slider, *bank);
 }
 
 void __fastcall slider_refresh_detour(void* slider) noexcept {
@@ -229,11 +274,58 @@ void __fastcall slider_refresh_detour(void* slider) noexcept {
     }
 }
 
+[[nodiscard]] bool refresh_presentation_from_bank(
+    void* slider,
+    const volatile std::uint8_t* expected_bound_value,
+    const PresentationBank& bank,
+    SliderRefreshFn original) noexcept {
+    unsigned long seh_code = 0;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        auto* const bytes = static_cast<std::byte*>(slider);
+        const std::uintptr_t bound_value =
+            reinterpret_cast<std::uintptr_t>(
+                *reinterpret_cast<void**>(
+                    bytes + kBoundValuePointerOffset));
+        const std::uintptr_t expected =
+            reinterpret_cast<std::uintptr_t>(
+                const_cast<std::uint8_t*>(expected_bound_value));
+        const PresentationSlot* const slot =
+            find_slot(bank, bound_value);
+        if (bound_value != expected || !slot || !slot->values) {
+            return false;
+        }
+
+        // Call the SafetyHook trampoline rather than the patched entry. This
+        // executes the complete previously approved native/third-party chain
+        // exactly once, then reapplies ERNativeUI's copied display table from
+        // the same immutable bank retained by the caller.
+        original(slider);
+        const std::uintptr_t rebound_value =
+            reinterpret_cast<std::uintptr_t>(
+                *reinterpret_cast<void**>(
+                    bytes + kBoundValuePointerOffset));
+        const PresentationSlot* const rebound_slot =
+            find_slot(bank, rebound_value);
+        if (rebound_value != expected || rebound_slot != slot ||
+            !rebound_slot || !rebound_slot->values) {
+            return false;
+        }
+        return apply_presentation_from_bank(slider, bank);
+#if defined(_MSC_VER)
+    } __except (seh_code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        log_fault("explicit UI-thread refresh", seh_code);
+        return false;
+    }
+#endif
+}
+
 std::size_t collect_slots() {
     erui::detail::RuntimeState& runtime = erui::detail::runtime_state();
     if (!runtime.menu) return 0;
 
-    std::vector<PresentationSlot> collected{};
+    std::vector<std::pair<std::uintptr_t, ValueTexts>> collected{};
     const std::size_t expected =
         runtime.menu->modeled_numeric_slider_count +
         runtime.menu->modeled_custom_slider_count;
@@ -249,21 +341,46 @@ std::size_t collect_slots() {
                     ERUI_SLIDER_MAX_VALUE_COUNT) {
                 continue;
             }
-            collected.push_back({
+            const std::uintptr_t bound_value =
                 reinterpret_cast<std::uintptr_t>(
-                    const_cast<std::uint8_t*>(row.byte_value)),
-                row.slider_value_texts,
-            });
+                    const_cast<std::uint8_t*>(row.byte_value));
+            collected.emplace_back(
+                bound_value, row.slider_value_texts);
         }
     }
     std::sort(
         collected.begin(),
         collected.end(),
-        [](const PresentationSlot& left, const PresentationSlot& right) {
-            return left.bound_value < right.bound_value;
+        [](const auto& left, const auto& right) {
+            return left.first < right.first;
         });
-    g_slots = std::move(collected);
-    return g_slots.size();
+    std::lock_guard lock(g_value_lock);
+    for (auto& [bound_value, values] : collected) {
+        if (const auto pending =
+                g_preconfiguration_updates.find(bound_value);
+            pending != g_preconfiguration_updates.end()) {
+            if (pending->second.size() != values.size()) {
+                throw std::invalid_argument(
+                    "formatted-slider preconfiguration cardinality");
+            }
+            values = pending->second;
+        }
+    }
+    auto bank = std::make_shared<PresentationBank>();
+    bank->reserve(collected.size());
+    for (auto& [bound_value, values] : collected) {
+        bank->push_back({
+            bound_value,
+            std::make_shared<const ValueTexts>(std::move(values)),
+        });
+    }
+    g_desired_bank = bank;
+    g_applied_bank.store(
+        std::shared_ptr<const PresentationBank>(std::move(bank)),
+        std::memory_order_release);
+    g_values_configured = true;
+    g_values_pending = false;
+    return collected.size();
 }
 
 } // namespace
@@ -373,7 +490,7 @@ void remove_native_slider_presentation() noexcept {
                 erui::LogLevel::trace,
                 "Formatted-slider hook disabled; process-lifetime presentation backing retained");
         }
-        g_constructing_slot = nullptr;
+        g_constructing_bound_value = 0;
         g_constructing_value = 0;
         return;
     }
@@ -381,25 +498,170 @@ void remove_native_slider_presentation() noexcept {
     // Before the first hook is created there cannot be an in-flight detour,
     // so failed preparation may release its temporary state normally.
     g_original_slider_refresh.store(nullptr, std::memory_order_release);
-    g_slots.clear();
+    {
+        std::lock_guard lock(g_value_lock);
+        g_desired_bank.reset();
+        g_applied_bank.store(
+            std::shared_ptr<const PresentationBank>{},
+            std::memory_order_release);
+        g_values_configured = false;
+        g_values_pending = false;
+        // Desired updates accepted after Registry freeze but before hook
+        // installation intentionally survive this initial cleanup and are
+        // reconciled by collect_slots().
+    }
     g_addresses = {};
     g_fault_logs.store(0, std::memory_order_release);
-    g_constructing_slot = nullptr;
+    g_constructing_bound_value = 0;
     g_constructing_value = 0;
 }
 
 void begin_native_slider_presentation_row(
     volatile std::uint8_t* bound_value) noexcept {
-    g_constructing_slot = find_slot(reinterpret_cast<std::uintptr_t>(
-        const_cast<std::uint8_t*>(bound_value)));
-    g_constructing_value = g_constructing_slot && bound_value
+    g_constructing_bound_value = reinterpret_cast<std::uintptr_t>(
+        const_cast<std::uint8_t*>(bound_value));
+    g_constructing_value = bound_value
         ? static_cast<std::int32_t>(*bound_value)
         : 0;
 }
 
 void end_native_slider_presentation_row() noexcept {
-    g_constructing_slot = nullptr;
+    g_constructing_bound_value = 0;
     g_constructing_value = 0;
+}
+
+struct PreparedSliderPresentationUpdates::Impl {
+    explicit Impl(std::unique_lock<std::mutex> acquired) noexcept
+        : lock(std::move(acquired)) {}
+
+    std::unique_lock<std::mutex> lock{};
+    bool configured{};
+    std::shared_ptr<const PresentationBank> staged_bank{};
+    std::unordered_map<std::uintptr_t, ValueTexts>
+        staged_preconfiguration{};
+};
+
+PreparedSliderPresentationUpdates::PreparedSliderPresentationUpdates()
+    noexcept = default;
+PreparedSliderPresentationUpdates::~PreparedSliderPresentationUpdates() =
+    default;
+PreparedSliderPresentationUpdates::PreparedSliderPresentationUpdates(
+    PreparedSliderPresentationUpdates&&) noexcept = default;
+PreparedSliderPresentationUpdates&
+PreparedSliderPresentationUpdates::operator=(
+    PreparedSliderPresentationUpdates&&) noexcept = default;
+
+PreparedSliderPresentationUpdates::operator bool() const noexcept {
+    return impl_ != nullptr;
+}
+
+ERUI_Result prepare_native_slider_presentation_updates(
+    std::vector<SliderPresentationUpdate> updates,
+    PreparedSliderPresentationUpdates& output) noexcept {
+    if (output || updates.empty()) return ERUI_INVALID_ARGUMENT;
+    for (const SliderPresentationUpdate& update : updates) {
+        if (!valid_update(update)) return ERUI_INVALID_ARGUMENT;
+    }
+
+    try {
+        std::unordered_set<std::uintptr_t> unique{};
+        unique.reserve(updates.size());
+        for (const SliderPresentationUpdate& update : updates) {
+            const std::uintptr_t key = reinterpret_cast<std::uintptr_t>(
+                const_cast<std::uint8_t*>(update.bound_value));
+            if (!unique.insert(key).second) return ERUI_INVALID_ARGUMENT;
+        }
+
+        auto prepared =
+            std::make_unique<PreparedSliderPresentationUpdates::Impl>(
+                std::unique_lock<std::mutex>(g_value_lock));
+        prepared->configured = g_values_configured;
+        prepared->staged_preconfiguration =
+            g_preconfiguration_updates;
+        if (!g_values_configured) {
+            for (SliderPresentationUpdate& update : updates) {
+                const std::uintptr_t key = reinterpret_cast<std::uintptr_t>(
+                    const_cast<std::uint8_t*>(update.bound_value));
+                prepared->staged_preconfiguration[key] =
+                    std::move(update.values);
+            }
+        } else {
+            if (!g_desired_bank) return ERUI_INTERNAL_ERROR;
+            auto staged_bank =
+                std::make_shared<PresentationBank>(*g_desired_bank);
+            for (SliderPresentationUpdate& update : updates) {
+                const std::uintptr_t key = reinterpret_cast<std::uintptr_t>(
+                    const_cast<std::uint8_t*>(update.bound_value));
+                PresentationSlot* const slot = find_slot(*staged_bank, key);
+                if (!slot || !slot->values) {
+                    return ERUI_INVALID_HANDLE;
+                }
+                if (slot->values->size() != update.values.size()) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                prepared->staged_preconfiguration[key] = update.values;
+                slot->values = std::make_shared<const ValueTexts>(
+                    std::move(update.values));
+            }
+            prepared->staged_bank = std::move(staged_bank);
+        }
+        output.impl_ = std::move(prepared);
+        return ERUI_OK;
+    } catch (const std::bad_alloc&) {
+        return ERUI_OUT_OF_MEMORY;
+    } catch (...) {
+        return ERUI_INTERNAL_ERROR;
+    }
+}
+
+void commit_prepared_native_slider_presentation_updates(
+    PreparedSliderPresentationUpdates&& prepared) noexcept {
+    if (!prepared.impl_) return;
+    PreparedSliderPresentationUpdates::Impl& state = *prepared.impl_;
+    if (!state.configured) {
+        g_preconfiguration_updates.swap(
+            state.staged_preconfiguration);
+        prepared.impl_.reset();
+        return;
+    }
+    if (!state.staged_bank) {
+        prepared.impl_.reset();
+        return;
+    }
+    g_preconfiguration_updates.swap(
+        state.staged_preconfiguration);
+    g_desired_bank = std::move(state.staged_bank);
+    g_values_pending = true;
+    prepared.impl_.reset();
+}
+
+void synchronize_pending_native_slider_presentations() noexcept {
+    std::lock_guard lock(g_value_lock);
+    if (!g_values_configured || !g_values_pending) return;
+    g_applied_bank.store(g_desired_bank, std::memory_order_release);
+    g_values_pending = false;
+}
+
+bool native_slider_presentation_updates_pending() noexcept {
+    std::lock_guard lock(g_value_lock);
+    return g_values_pending;
+}
+
+bool refresh_native_slider_presentation(
+    void* slider,
+    const volatile std::uint8_t* expected_bound_value) noexcept {
+    if (!slider || !expected_bound_value ||
+        !g_presentation_active.load(std::memory_order_acquire)) {
+        return false;
+    }
+
+    const std::shared_ptr<const PresentationBank> bank =
+        g_applied_bank.load(std::memory_order_acquire);
+    const SliderRefreshFn original =
+        g_original_slider_refresh.load(std::memory_order_acquire);
+    if (!bank || !original) return false;
+    return refresh_presentation_from_bank(
+        slider, expected_bound_value, *bank, original);
 }
 
 } // namespace erui::native

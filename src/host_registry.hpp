@@ -62,6 +62,10 @@ public:
     // label/help or availability presentation.
     [[nodiscard]] bool enable_row_visibility_backend() noexcept;
     [[nodiscard]] bool row_visibility_backend_available() const noexcept;
+    // Same-cardinality formatted-slider label replacement is advertised
+    // independently so clients never infer it merely from generic updates.
+    [[nodiscard]] bool enable_row_configuration_backend() noexcept;
+    [[nodiscard]] bool row_configuration_backend_available() const noexcept;
     void open_registration() noexcept;
     void set_host_locale(erui::MenuLocalization pagination);
     void set_tab_configuration(erui::detail::TabConfiguration configuration);
@@ -467,6 +471,7 @@ private:
     bool tab_updates_backend_available_{};
     bool row_availability_backend_available_{};
     bool row_visibility_backend_available_{};
+    bool row_configuration_backend_available_{};
     bool open_{};
     bool frozen_{};
     std::uint64_t generation_{};

@@ -494,7 +494,44 @@ _Static_assert(offsetof(ERUI_StyledTextView, span_stride) == 36u,
     "styled-text span-stride offset drift");
 _Static_assert(offsetof(ERUI_StyledTextView, reserved) == 40u,
     "styled-text reserved offset drift");
-_Static_assert(sizeof(ERUI_RowUpdateDesc) == 176u,
+_Static_assert(ERUI_CAP_ROW_CONFIGURATION == (UINT64_C(1) << 25),
+    "row-configuration capability bit drift");
+_Static_assert(ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION == (1u << 6),
+    "row control-configuration field bit drift");
+_Static_assert(ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER == 1u,
+    "numeric-slider control-update kind drift");
+_Static_assert(ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER == 2u,
+    "custom-slider control-update kind drift");
+_Static_assert(sizeof(ERUI_RowControlUpdateDesc) == 32u,
+    "row-control update descriptor size drift");
+_Static_assert(offsetof(ERUI_RowControlUpdateDesc, kind) == 8u,
+    "row-control update kind offset drift");
+_Static_assert(offsetof(ERUI_RowControlUpdateDesc, payload) == 16u,
+    "row-control update payload offset drift");
+_Static_assert(offsetof(ERUI_RowControlUpdateDesc, reserved) == 24u,
+    "row-control update reserved offset drift");
+_Static_assert(sizeof(ERUI_NumericSliderControlUpdateDesc) == 40u,
+    "numeric-slider control-update descriptor size drift");
+_Static_assert(offsetof(ERUI_NumericSliderControlUpdateDesc,
+        value_labels) == 16u,
+    "numeric-slider value-label pointer offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderControlUpdateDesc,
+        value_label_count) == 24u,
+    "numeric-slider value-label count offset drift");
+_Static_assert(offsetof(ERUI_NumericSliderControlUpdateDesc,
+        value_label_stride) == 28u,
+    "numeric-slider value-label stride offset drift");
+_Static_assert(sizeof(ERUI_CustomSliderControlUpdateDesc) == 40u,
+    "custom-slider control-update descriptor size drift");
+_Static_assert(offsetof(ERUI_CustomSliderControlUpdateDesc, values) == 16u,
+    "custom-slider value pointer offset drift");
+_Static_assert(offsetof(ERUI_CustomSliderControlUpdateDesc,
+        value_count) == 24u,
+    "custom-slider value count offset drift");
+_Static_assert(offsetof(ERUI_CustomSliderControlUpdateDesc,
+        value_stride) == 28u,
+    "custom-slider value stride offset drift");
+_Static_assert(sizeof(ERUI_RowUpdateDesc) == 184u,
     "row-update descriptor size drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, row) == 8u,
     "row-update handle offset drift");
@@ -512,6 +549,8 @@ _Static_assert(offsetof(ERUI_RowUpdateDesc, availability_appearance) == 168u,
     "row-update availability-appearance offset drift");
 _Static_assert(offsetof(ERUI_RowUpdateDesc, visible) == 172u,
     "row-update visible offset drift");
+_Static_assert(offsetof(ERUI_RowUpdateDesc, control_configuration) == 176u,
+    "row-update control-configuration offset drift");
 _Static_assert(ERUI_SUBMENU_UPDATE_FIELD_LABEL == (1u << 0),
     "submenu-label field bit drift");
 _Static_assert(ERUI_SUBMENU_UPDATE_FIELD_HELP == (1u << 1),

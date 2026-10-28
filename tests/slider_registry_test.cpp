@@ -73,6 +73,8 @@ void ERUI_CALL custom_changed(
 
 int main() {
     erui::host::Registry registry{};
+    ERUI_TEST_CHECK(registry.enable_updates_backend());
+    ERUI_TEST_CHECK(registry.enable_row_configuration_backend());
     registry.open_registration();
 
     ERUI_ProviderDesc legacy_provider{};
@@ -104,14 +106,14 @@ int main() {
 
     ERUI_ProviderDesc provider{};
     provider.size = sizeof(provider);
-    provider.api_version = ERUI_API_VERSION_1_2;
+    provider.api_version = ERUI_API_VERSION_1_4;
     provider.owner_module = GetModuleHandleW(nullptr);
     provider.provider_id = ascii("slider-registry-current");
     provider.display_name = utf16(L"Slider registry current");
     ERUI_ProviderHandle provider_handle{};
     ERUI_PageHandle root{};
     ERUI_TEST_CHECK(registry.register_provider(
-        ERUI_API_VERSION_1_2,
+        ERUI_API_VERSION_1_4,
         &provider,
         &provider_handle,
         &root) == ERUI_OK);
@@ -204,6 +206,166 @@ int main() {
 
     ERUI_TEST_CHECK(registry.commit_provider(provider_handle) == ERUI_OK);
 
+    // API 1.4 copies complete same-cardinality label tables and publishes
+    // both slider families through the ordinary atomic row-update envelope.
+    std::array<std::wstring, 11> numeric_replacements{};
+    std::array<ERUI_Utf16View, numeric_replacements.size()>
+        numeric_replacement_views{};
+    for (std::size_t index = 0;
+         index < numeric_replacements.size();
+         ++index) {
+        numeric_replacements[index] =
+            L"numeric-" + std::to_wstring(index);
+        numeric_replacement_views[index] = utf16(
+            numeric_replacements[index]);
+    }
+    std::array<std::wstring, 7> custom_replacements{};
+    std::array<ERUI_Utf16View, custom_replacements.size()>
+        custom_replacement_views{};
+    for (std::size_t index = 0;
+         index < custom_replacements.size();
+         ++index) {
+        custom_replacements[index] =
+            L"custom-" + std::to_wstring(index);
+        custom_replacement_views[index] = utf16(
+            custom_replacements[index]);
+    }
+
+    ERUI_NumericSliderControlUpdateDesc numeric_control_payload{};
+    numeric_control_payload.size = sizeof(numeric_control_payload);
+    numeric_control_payload.fields =
+        ERUI_NUMERIC_SLIDER_CONTROL_UPDATE_FIELD_VALUE_LABELS;
+    numeric_control_payload.value_labels =
+        numeric_replacement_views.data();
+    numeric_control_payload.value_label_count =
+        static_cast<std::uint32_t>(numeric_replacement_views.size());
+    numeric_control_payload.value_label_stride = sizeof(ERUI_Utf16View);
+    ERUI_RowControlUpdateDesc numeric_control{};
+    numeric_control.size = sizeof(numeric_control);
+    numeric_control.kind =
+        ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER;
+    numeric_control.payload = &numeric_control_payload;
+    ERUI_RowUpdateDesc numeric_update{};
+    numeric_update.size = sizeof(numeric_update);
+    numeric_update.row = numeric_row;
+    numeric_update.fields =
+        ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION;
+    numeric_update.control_configuration = &numeric_control;
+
+    ERUI_CustomSliderControlUpdateDesc custom_control_payload{};
+    custom_control_payload.size = sizeof(custom_control_payload);
+    custom_control_payload.fields =
+        ERUI_CUSTOM_SLIDER_CONTROL_UPDATE_FIELD_VALUES;
+    custom_control_payload.values = custom_replacement_views.data();
+    custom_control_payload.value_count =
+        static_cast<std::uint32_t>(custom_replacement_views.size());
+    custom_control_payload.value_stride = sizeof(ERUI_Utf16View);
+    ERUI_RowControlUpdateDesc custom_control{};
+    custom_control.size = sizeof(custom_control);
+    custom_control.kind = ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER;
+    custom_control.payload = &custom_control_payload;
+    ERUI_RowUpdateDesc custom_update{};
+    custom_update.size = sizeof(custom_update);
+    custom_update.row = custom_row;
+    custom_update.fields =
+        ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION;
+    custom_update.control_configuration = &custom_control;
+
+    std::array<ERUI_UpdateDesc, 2> control_updates{};
+    control_updates[0].size = sizeof(ERUI_UpdateDesc);
+    control_updates[0].kind = ERUI_UPDATE_KIND_ROW;
+    control_updates[0].payload = &numeric_update;
+    control_updates[1].size = sizeof(ERUI_UpdateDesc);
+    control_updates[1].kind = ERUI_UPDATE_KIND_ROW;
+    control_updates[1].payload = &custom_update;
+    ERUI_UpdateBatchDesc control_batch{};
+    control_batch.size = sizeof(control_batch);
+    control_batch.updates = control_updates.data();
+    control_batch.update_count =
+        static_cast<std::uint32_t>(control_updates.size());
+    control_batch.update_stride = sizeof(ERUI_UpdateDesc);
+
+    const auto expect_invalid_control_batch = [&] {
+        ERUI_TEST_CHECK(registry.commit_updates(
+            provider_handle, &control_batch) == ERUI_INVALID_ARGUMENT);
+    };
+
+    // Establish the tables whose survival is checked after every malformed
+    // nested descriptor and the later two-row transaction failure.
+    ERUI_TEST_CHECK(registry.commit_updates(
+        provider_handle, &control_batch) == ERUI_OK);
+
+    numeric_control.kind = ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER;
+    expect_invalid_control_batch();
+    numeric_control.kind = ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER;
+
+    --numeric_control_payload.size;
+    expect_invalid_control_batch();
+    numeric_control_payload.size = sizeof(numeric_control_payload);
+
+    numeric_control_payload.flags = 1;
+    expect_invalid_control_batch();
+    numeric_control_payload.flags = 0;
+
+    numeric_control_payload.reserved[0] = 1;
+    expect_invalid_control_batch();
+    numeric_control_payload.reserved[0] = 0;
+
+    numeric_control_payload.fields = 0;
+    expect_invalid_control_batch();
+    numeric_control_payload.fields =
+        ERUI_NUMERIC_SLIDER_CONTROL_UPDATE_FIELD_VALUE_LABELS;
+
+    numeric_control_payload.value_label_stride = 1;
+    expect_invalid_control_batch();
+    numeric_control_payload.value_label_stride = sizeof(ERUI_Utf16View);
+
+    const ERUI_Utf16View first_numeric_view =
+        numeric_replacement_views.front();
+    numeric_replacement_views.front() = utf16(L"");
+    expect_invalid_control_batch();
+    const std::wstring oversized_label(
+        ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH + 1u, L'x');
+    numeric_replacement_views.front() = utf16(oversized_label);
+    expect_invalid_control_batch();
+    numeric_replacement_views.front() = first_numeric_view;
+
+    numeric_update.fields = ERUI_ROW_UPDATE_FIELD_INTERACTIVE;
+    numeric_update.interactive = 1;
+    expect_invalid_control_batch();
+    numeric_update.interactive = 0;
+    numeric_update.fields = ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION;
+
+    std::array<std::wstring, 11> later_numeric_replacements{};
+    std::array<ERUI_Utf16View, later_numeric_replacements.size()>
+        later_numeric_views{};
+    for (std::size_t index = 0;
+         index < later_numeric_replacements.size();
+         ++index) {
+        later_numeric_replacements[index] =
+            L"later-numeric-" + std::to_wstring(index);
+        later_numeric_views[index] = utf16(later_numeric_replacements[index]);
+    }
+    std::array<std::wstring, 7> later_custom_replacements{};
+    std::array<ERUI_Utf16View, later_custom_replacements.size()>
+        later_custom_views{};
+    for (std::size_t index = 0;
+         index < later_custom_replacements.size();
+         ++index) {
+        later_custom_replacements[index] =
+            L"later-custom-" + std::to_wstring(index);
+        later_custom_views[index] = utf16(later_custom_replacements[index]);
+    }
+    numeric_control_payload.value_labels = later_numeric_views.data();
+    custom_control_payload.values = later_custom_views.data();
+
+    // The first row is valid and different, but the second row's wrong
+    // cardinality rejects the complete batch atomically.
+    const std::uint32_t valid_custom_count =
+        custom_control_payload.value_count;
+    custom_control_payload.value_count = valid_custom_count - 1u;
+    expect_invalid_control_batch();
+
     ERUI_DecimalValue numeric_value{};
     ERUI_TEST_CHECK(registry.get_numeric_slider_value(
         provider_handle, numeric_row, &numeric_value) == ERUI_OK);
@@ -220,8 +382,22 @@ int main() {
     ERUI_TEST_CHECK(registry.get_row_value(
         provider_handle, custom_row, &generic_value) == ERUI_INVALID_ARGUMENT);
 
+    // Freeze the post-failure model before accepting the later valid runtime
+    // update. The compiled snapshot below must still contain the first tables.
     std::unique_ptr<erui::Menu> menu = registry.freeze_and_build();
     ERUI_TEST_CHECK(menu != nullptr);
+    custom_control_payload.value_count = valid_custom_count;
+    ERUI_TEST_CHECK(registry.commit_updates(
+        provider_handle, &control_batch) == ERUI_OK);
+
+    // Every nested client buffer is borrowed only for commit_updates.
+    for (std::wstring& text : later_numeric_replacements) {
+        text.assign(L"overwritten");
+    }
+    for (std::wstring& text : later_custom_replacements) {
+        text.assign(L"overwritten");
+    }
+
     std::unique_ptr<erui::detail::CompiledMenu> compiled =
         erui::detail::MenuCompiler::compile(*menu);
     ERUI_TEST_CHECK(compiled != nullptr);
@@ -247,16 +423,16 @@ int main() {
     ERUI_TEST_CHECK(numeric_it->slider.maximum == 10);
     ERUI_TEST_CHECK(numeric_it->slider.step == 1);
     ERUI_TEST_CHECK(numeric_it->slider_value_texts.size() == 11);
-    ERUI_TEST_CHECK(numeric_it->slider_value_texts.front() == L"x-1.0s");
-    ERUI_TEST_CHECK(numeric_it->slider_value_texts[5] == L"x0.0s");
-    ERUI_TEST_CHECK(numeric_it->slider_value_texts.back() == L"x1.0s");
+    ERUI_TEST_CHECK(numeric_it->slider_value_texts.front() == L"numeric-0");
+    ERUI_TEST_CHECK(numeric_it->slider_value_texts[5] == L"numeric-5");
+    ERUI_TEST_CHECK(numeric_it->slider_value_texts.back() == L"numeric-10");
     ERUI_TEST_CHECK(*numeric_it->byte_value == 2);
     ERUI_TEST_CHECK(custom_it->slider.minimum == 0);
     ERUI_TEST_CHECK(custom_it->slider.maximum == 6);
     ERUI_TEST_CHECK(custom_it->slider_value_texts.size() == 7);
-    ERUI_TEST_CHECK(custom_it->slider_value_texts[0] == L"-7");
-    ERUI_TEST_CHECK(custom_it->slider_value_texts[4] == L"hello");
-    ERUI_TEST_CHECK(custom_it->slider_value_texts[6] == L"x1.3");
+    ERUI_TEST_CHECK(custom_it->slider_value_texts[0] == L"custom-0");
+    ERUI_TEST_CHECK(custom_it->slider_value_texts[4] == L"custom-4");
+    ERUI_TEST_CHECK(custom_it->slider_value_texts[6] == L"custom-6");
     ERUI_TEST_CHECK(*custom_it->byte_value == 4);
 
     const auto full_range_it = std::find_if(

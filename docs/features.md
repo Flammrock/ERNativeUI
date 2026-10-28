@@ -93,14 +93,15 @@ does not remove custom tabs.
 | [Runtime row visibility and repagination](guides/row-updates/visibility.md) | Rows appear or disappear in place; page slices, navigation rows, titles, focus, and subpage scrollbars are rebuilt without closing the page. | 1.4; `ERUI_CAP_UPDATES` and `ERUI_CAP_ROW_VISIBILITY` | No. | Supported on built-in pages, custom-tab content, and subpages for the nine ordinary materialized row families. A committed projection cannot leave a logical page empty. This does not hide or show the custom tab itself. |
 | [Runtime Submenu text](guides/controls/submenu.md) | A retained opener and its child-page title/help can change together without replacing either page. | 1.4; `ERUI_CAP_UPDATES`, `ERUI_CAP_SUBMENU`, and `ERUI_CAP_SUBMENU_UPDATES` | No. | `SubmenuEdit` atomically supports opener label/help/caption plus child-page title/help. Runtime Submenu availability and visibility remain excluded. |
 | [Runtime custom-tab presentation](guides/custom-tabs.md#edit-a-committed-tab) | A retained top-level tab can change title, icon, visibility, and preferred order—normally live—while preserving its page and rows. | 1.4; `ERUI_CAP_UPDATES`, `ERUI_CAP_CUSTOM_TABS`, and `ERUI_CAP_TAB_UPDATES` | No. | `TabEdit` publishes complete generations atomically, repairs active selection when hidden, respects player order overrides, and carries an interrupted icon handoff into the first reopened System movie. Geometry-incompatible strip changes defer safely; icons are low-frequency changes, not animation frames. |
+| [Runtime slider display labels](guides/row-updates/slider-labels.md) | Numeric and Custom Sliders can replace every displayed position label while retaining the same current value/index and logical domain. | 1.4; `ERUI_CAP_UPDATES`, `ERUI_CAP_ROW_CONFIGURATION`, `ERUI_CAP_NUMERIC_SLIDER`, and `ERUI_CAP_CUSTOM_SLIDER` | No. | The replacement must preserve the registered 2–256 entry count; each non-empty label is limited to 64 UTF-16 code units. `NumericSliderRowEdit::value_labels(...)` and `CustomSliderRowEdit::values(...)` may be combined atomically with that row's ordinary text edit. Broader runtime control configuration remains staged. |
 
 The API 1.4 C table appends one provider-scoped `commit_updates` operation.
 Its array batch is validated, copied, and published atomically; a failed item
 leaves the previous logical generation intact. The C++ wrapper exposes
 one-target `row.edit()...commit()`, `submenu.edit()...commit()`, and
 `tab.edit()...commit()` drafts. A C++ multi-target collector, recursive
-Collapse controls, and runtime Submenu availability/visibility are not part
-of API 1.4.
+Collapse controls, runtime Submenu availability/visibility, changed-cardinality
+control lists, and runtime range/constraint editing are not part of API 1.4.
 
 ## Runtime GFX completion
 

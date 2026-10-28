@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 
 namespace {
 
@@ -64,6 +65,19 @@ void stateful_binding_activated(
 
 unsigned g_binding_calls{};
 
+bool control_value_equals(
+    const ERUI_TestRowControlValueObservation& observation,
+    std::wstring_view expected) noexcept {
+    if (observation.length != expected.size()) return false;
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        if (observation.text[index] !=
+            static_cast<std::uint16_t>(expected[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -78,9 +92,13 @@ int main(int argc, char** argv) {
         host.module, "ERUI_TestGetConnectionSnapshot");
     const auto get_row_update = resolve<ERUI_TestGetRowUpdateObservationFn>(
         host.module, "ERUI_TestGetRowUpdateObservation");
+    const auto get_row_control_value =
+        resolve<ERUI_TestGetRowControlValueObservationFn>(
+            host.module, "ERUI_TestGetRowControlValueObservation");
     CHECK(configure != nullptr);
     CHECK(get_snapshot != nullptr);
     CHECK(get_row_update != nullptr);
+    CHECK(get_row_control_value != nullptr);
 
     {
         ERUI_Api capability_gated{};
@@ -102,7 +120,7 @@ int main(int argc, char** argv) {
         capability_gated.capabilities &=
             ~(ERUI_CAP_UPDATES | ERUI_CAP_ROW_AVAILABILITY |
                 ERUI_CAP_ROW_VISIBILITY | ERUI_CAP_SUBMENU_UPDATES |
-                ERUI_CAP_TAB_UPDATES);
+                ERUI_CAP_TAB_UPDATES | ERUI_CAP_ROW_CONFIGURATION);
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities |= ERUI_CAP_ROW_AVAILABILITY;
@@ -144,6 +162,23 @@ int main(int argc, char** argv) {
         CHECK(!erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
         capability_gated.capabilities |= ERUI_CAP_SUBMENU;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities &= ~ERUI_CAP_UPDATES;
+        capability_gated.capabilities |= ERUI_CAP_ROW_CONFIGURATION;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_UPDATES;
+        CHECK(erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities &= ~ERUI_CAP_NUMERIC_SLIDER;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_NUMERIC_SLIDER;
+        capability_gated.capabilities &= ~ERUI_CAP_CUSTOM_SLIDER;
+        CHECK(!erui::detail::api_complete_for_version(
+            capability_gated, ERUI_API_VERSION_1_4));
+        capability_gated.capabilities |= ERUI_CAP_CUSTOM_SLIDER;
         CHECK(erui::detail::api_complete_for_version(
             capability_gated, ERUI_API_VERSION_1_4));
     }
@@ -205,6 +240,57 @@ int main(int argc, char** argv) {
             .commit() == ERUI_NOT_SUPPORTED);
         CHECK(toggle.edit().help(L"Text updates remain available").commit() ==
             ERUI_OK);
+    }
+
+    {
+        const auto config = configuration(0, ERUI_OK, ERUI_OK,
+            ERUI_TEST_CONNECTION_DISABLE_ROW_CONFIGURATION);
+        CHECK(configure(&config) == ERUI_OK);
+        auto connected = erui::connect(0ms);
+        CHECK(connected.success());
+        CHECK(connected.value().supports(erui::Capability::updates));
+        CHECK(!connected.value().supports(
+            erui::Capability::row_configuration));
+
+        erui::NumericSliderRow numeric{};
+        erui::CustomSliderRow custom{};
+        erui::ProviderOptions provider{};
+        provider.provider_id = "tests.row-configuration-capability-absent";
+        provider.display_name = L"Row configuration capability absent";
+        provider.owner_module = GetModuleHandleW(nullptr);
+        const auto registered = connected.value().register_menu(
+            provider,
+            [&](erui::Menu& menu) noexcept {
+                erui::NumericSliderOptions numeric_options{};
+                numeric_options.minimum = 0.0;
+                numeric_options.maximum = 2.0;
+                numeric_options.step = 1.0;
+                numeric = menu.root().add_slider(
+                    L"Numeric", L"Configuration must be capability gated",
+                    numeric_options);
+
+                erui::CustomSliderOptions custom_options{};
+                custom_options.value_count = 3;
+                custom_options.format_value = [](
+                    std::uint32_t index, std::uint32_t) {
+                    return std::to_wstring(index);
+                };
+                custom = menu.root().add_custom_slider(
+                    L"Custom", L"Configuration must be capability gated",
+                    custom_options);
+            });
+        CHECK(registered.success());
+        CHECK(numeric.valid());
+        CHECK(custom.valid());
+        CHECK(numeric.edit().value_labels(
+            {L"Low", L"Default", L"High"}).commit() ==
+            ERUI_NOT_SUPPORTED);
+        CHECK(custom.edit().values(
+            {L"One", L"Two", L"Three"}).commit() ==
+            ERUI_NOT_SUPPORTED);
+        ERUI_TestRowUpdateObservation absent{};
+        absent.size = sizeof(absent);
+        CHECK(get_row_update(0u, &absent) == ERUI_NOT_FOUND);
     }
 
     {
@@ -288,6 +374,8 @@ int main(int argc, char** argv) {
             erui::Capability::submenu_updates));
         CHECK(connected.value().supports(
             erui::Capability::row_visibility));
+        CHECK(connected.value().supports(
+            erui::Capability::row_configuration));
 
         auto observed = snapshot(get_snapshot);
         CHECK(observed.get_api_calls == 3);
@@ -327,6 +415,8 @@ int main(int argc, char** argv) {
         ERUI_InputActionHandle static_binding = ERUI_INVALID_INPUT_ACTION;
         ERUI_InputActionHandle stateful_binding = ERUI_INVALID_INPUT_ACTION;
         erui::ToggleRow mutable_row{};
+        erui::NumericSliderRow numeric_row{};
+        erui::CustomSliderRow custom_row{};
         erui::ProviderOptions provider{};
         provider.provider_id = "tests.explicit-connection";
         provider.display_name = L"Explicit Connection";
@@ -337,6 +427,22 @@ int main(int argc, char** argv) {
                 builder_called = true;
                 mutable_row = menu.root().add_toggle(
                     L"Mutable row", L"Before update", 1u);
+                erui::NumericSliderOptions numeric_options{};
+                numeric_options.minimum = 0.0;
+                numeric_options.maximum = 2.0;
+                numeric_options.step = 1.0;
+                numeric_options.initial_value = 1.0;
+                numeric_row = menu.root().add_slider(
+                    L"Numeric row", L"Runtime labels", numeric_options);
+                erui::CustomSliderOptions custom_options{};
+                custom_options.value_count = 3;
+                custom_options.initial_index = 1;
+                custom_options.format_value = [](
+                    std::uint32_t index, std::uint32_t) {
+                    return std::to_wstring(index);
+                };
+                custom_row = menu.root().add_custom_slider(
+                    L"Custom row", L"Runtime values", custom_options);
                 builtin_page_valid = menu.page(erui::BuiltinPage::sound).valid();
                 auto section = menu.input_bindings().add_section(
                     L"ERNativeUI tests");
@@ -366,12 +472,18 @@ int main(int argc, char** argv) {
         CHECK(raw_binding != static_binding);
         CHECK(raw_binding != stateful_binding);
         CHECK(static_binding != stateful_binding);
+        CHECK(numeric_row.valid());
+        CHECK(custom_row.valid());
         CHECK(mutable_row.edit()
             .label(L"Updated row")
             .help(L"Updated help")
             .visible(false)
             .commit() == ERUI_OK);
         CHECK(mutable_row.edit().visible(true).commit() == ERUI_OK);
+        CHECK(numeric_row.edit().value_labels(
+            {L"Low", L"Default", L"High"}).commit() == ERUI_OK);
+        CHECK(custom_row.edit().values(
+            {L"One", L"Two", L"Three"}).commit() == ERUI_OK);
 
         ERUI_TestRowUpdateObservation visibility_only{};
         visibility_only.size = sizeof(visibility_only);
@@ -382,6 +494,74 @@ int main(int argc, char** argv) {
         CHECK(visibility_only.visible == 1u);
         CHECK(visibility_only.reserved[0] == 0u);
         CHECK(visibility_only.reserved[1] == 0u);
+
+        ERUI_TestRowUpdateObservation numeric_configuration{};
+        numeric_configuration.size = sizeof(numeric_configuration);
+        CHECK(get_row_update(2u, &numeric_configuration) == ERUI_OK);
+        CHECK(numeric_configuration.descriptor_size ==
+            sizeof(ERUI_RowUpdateDesc));
+        CHECK(numeric_configuration.row == numeric_row.handle());
+        CHECK(numeric_configuration.fields ==
+            ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION);
+        CHECK(numeric_configuration.control_descriptor_size ==
+            sizeof(ERUI_RowControlUpdateDesc));
+        CHECK(numeric_configuration.control_kind ==
+            ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER);
+        CHECK(numeric_configuration.control_payload_size ==
+            sizeof(ERUI_NumericSliderControlUpdateDesc));
+        CHECK(numeric_configuration.control_fields ==
+            ERUI_NUMERIC_SLIDER_CONTROL_UPDATE_FIELD_VALUE_LABELS);
+        CHECK(numeric_configuration.control_value_count == 3u);
+        CHECK(numeric_configuration.control_value_stride ==
+            sizeof(ERUI_Utf16View));
+        CHECK(numeric_configuration.reserved[0] == 0u);
+        CHECK(numeric_configuration.reserved[1] == 0u);
+
+        ERUI_TestRowControlValueObservation control_value{};
+        control_value.size = sizeof(control_value);
+        CHECK(get_row_control_value(2u, 0u, &control_value) == ERUI_OK);
+        CHECK(control_value_equals(control_value, L"Low"));
+        control_value.size = sizeof(control_value);
+        CHECK(get_row_control_value(2u, 1u, &control_value) == ERUI_OK);
+        CHECK(control_value_equals(control_value, L"Default"));
+        control_value.size = sizeof(control_value);
+        CHECK(get_row_control_value(2u, 2u, &control_value) == ERUI_OK);
+        CHECK(control_value_equals(control_value, L"High"));
+        control_value.size = sizeof(control_value);
+        CHECK(get_row_control_value(2u, 3u, &control_value) ==
+            ERUI_NOT_FOUND);
+
+        ERUI_TestRowUpdateObservation custom_configuration{};
+        custom_configuration.size = sizeof(custom_configuration);
+        CHECK(get_row_update(3u, &custom_configuration) == ERUI_OK);
+        CHECK(custom_configuration.descriptor_size ==
+            sizeof(ERUI_RowUpdateDesc));
+        CHECK(custom_configuration.row == custom_row.handle());
+        CHECK(custom_configuration.fields ==
+            ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION);
+        CHECK(custom_configuration.control_descriptor_size ==
+            sizeof(ERUI_RowControlUpdateDesc));
+        CHECK(custom_configuration.control_kind ==
+            ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER);
+        CHECK(custom_configuration.control_payload_size ==
+            sizeof(ERUI_CustomSliderControlUpdateDesc));
+        CHECK(custom_configuration.control_fields ==
+            ERUI_CUSTOM_SLIDER_CONTROL_UPDATE_FIELD_VALUES);
+        CHECK(custom_configuration.control_value_count == 3u);
+        CHECK(custom_configuration.control_value_stride ==
+            sizeof(ERUI_Utf16View));
+        CHECK(custom_configuration.reserved[0] == 0u);
+        CHECK(custom_configuration.reserved[1] == 0u);
+
+        control_value.size = sizeof(control_value);
+        CHECK(get_row_control_value(3u, 0u, &control_value) == ERUI_OK);
+        CHECK(control_value_equals(control_value, L"One"));
+        control_value.size = sizeof(control_value);
+        CHECK(get_row_control_value(3u, 1u, &control_value) == ERUI_OK);
+        CHECK(control_value_equals(control_value, L"Two"));
+        control_value.size = sizeof(control_value);
+        CHECK(get_row_control_value(3u, 2u, &control_value) == ERUI_OK);
+        CHECK(control_value_equals(control_value, L"Three"));
 
         observed = snapshot(get_snapshot);
         CHECK(observed.get_api_calls == 3);

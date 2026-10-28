@@ -412,7 +412,10 @@ the separate in-game runtime qualification recorded in `VALIDATION.md`.
 | `ERUI_TitleScreenTextDesc` | 40 |
 | `ERUI_TextStyleSpan` | 24 |
 | `ERUI_StyledTextView` | 48 |
-| `ERUI_RowUpdateDesc` | 176 |
+| `ERUI_RowControlUpdateDesc` | 32 |
+| `ERUI_NumericSliderControlUpdateDesc` | 40 |
+| `ERUI_CustomSliderControlUpdateDesc` | 40 |
+| `ERUI_RowUpdateDesc` | 184 |
 | `ERUI_UpdateDesc` | 24 |
 | `ERUI_UpdateBatchDesc` | 32 |
 | API 1.0 function-table prefix | 128 |

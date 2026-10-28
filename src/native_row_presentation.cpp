@@ -4,6 +4,7 @@
 #include "game_build.hpp"
 #include "game_build_profiles.hpp"
 #include "module.hpp"
+#include "native_slider_presentation.hpp"
 #include "native_title_bridge.hpp"
 #include "row_presentation_state.hpp"
 #include "runtime_log.hpp"
@@ -252,6 +253,19 @@ struct SliderValueBinding {
     bool disabled{};
 };
 
+// The live formatted-value repaint path deliberately does not share the
+// availability color-transform lifecycle above. Row configuration remains a
+// separately negotiated capability, so a missing or locally incompatible
+// disabled-appearance backend must not make a label-table commit wait for
+// player movement before its visible value changes.
+struct FormattedSliderRefreshBinding {
+    void* slider{};
+    std::uint8_t refresh_failures{};
+    std::uint64_t presentation_revision{};
+    std::uint64_t failed_presentation_revision{};
+    bool candidate{};
+};
+
 struct SliderTransformRegistryEntry {
     void* owner{};
     void* payload{};
@@ -302,6 +316,7 @@ struct PhysicalBinding {
     std::uint8_t applied_value{0xFF};
     AvailabilityColorTransformState label_color_transform{};
     SliderValueBinding slider_value{};
+    FormattedSliderRefreshBinding slider_refresh{};
     bool help_conflict{};
     bool interaction_conflict{};
     bool availability_supported{};
@@ -712,6 +727,11 @@ constexpr bool is_slider_row(RowKind kind) noexcept {
         kind == RowKind::custom_slider;
 }
 
+constexpr bool is_formatted_slider_row(RowKind kind) noexcept {
+    return kind == RowKind::numeric_slider ||
+        kind == RowKind::custom_slider;
+}
+
 constexpr bool uses_authored_availability_twins(RowKind kind) noexcept {
     return kind == RowKind::toggle || kind == RowKind::inline_choice;
 }
@@ -779,6 +799,9 @@ static_assert(is_slider_row(RowKind::slider));
 static_assert(is_slider_row(RowKind::numeric_slider));
 static_assert(is_slider_row(RowKind::custom_slider));
 static_assert(!is_slider_row(RowKind::inline_choice));
+static_assert(is_formatted_slider_row(RowKind::numeric_slider));
+static_assert(is_formatted_slider_row(RowKind::custom_slider));
+static_assert(!is_formatted_slider_row(RowKind::slider));
 static_assert(uses_authored_availability_twins(RowKind::toggle));
 static_assert(uses_authored_availability_twins(RowKind::inline_choice));
 
@@ -2128,6 +2151,123 @@ bool read_slider_binding_snapshot(
         out.current_value == static_cast<std::int32_t>(out.backing_value);
 }
 
+bool slider_runtime_identities_equal(
+    const SliderRuntimeIdentity& left,
+    const SliderRuntimeIdentity& right) noexcept {
+    return left.slider_vtable == right.slider_vtable &&
+        left.movie_proxy_vtable == right.movie_proxy_vtable &&
+        left.movie_owner == right.movie_owner;
+}
+
+bool read_formatted_slider_refresh_snapshot(
+    const PhysicalBinding& binding,
+    SliderBindingSnapshot& out,
+    unsigned long& out_seh) noexcept {
+    out = {};
+    out_seh = 0;
+    const FormattedSliderRefreshBinding& refresh =
+        binding.slider_refresh;
+    if (!refresh.slider || !binding.byte_value) return false;
+#if defined(_MSC_VER)
+    __try {
+#endif
+        const auto* const bytes = static_cast<const std::byte*>(
+            refresh.slider);
+        std::memcpy(&out.bound_value,
+            bytes + kSliderBoundValueOffset,
+            sizeof(out.bound_value));
+        std::memcpy(&out.current_value,
+            bytes + kSliderCurrentValueOffset,
+            sizeof(out.current_value));
+        out.backing_value = *binding.byte_value;
+#if defined(_MSC_VER)
+    } __except (out_seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+#endif
+    return out.bound_value == reinterpret_cast<std::uintptr_t>(
+               const_cast<std::uint8_t*>(binding.byte_value)) &&
+        out.current_value == static_cast<std::int32_t>(out.backing_value);
+}
+
+bool formatted_slider_row_identity_matches(
+    const PhysicalBinding& binding,
+    unsigned long& out_seh) noexcept {
+    out_seh = 0;
+    if (!binding.native_row || !binding.row_vtable ||
+        !binding.controller || !binding.controller_vtable) {
+        return false;
+    }
+
+    void* live_row_vtable{};
+    void* live_controller{};
+    void* live_controller_vtable{};
+#if defined(_MSC_VER)
+    __try {
+#endif
+        const auto* const row = static_cast<const std::byte*>(
+            binding.native_row);
+        std::memcpy(&live_row_vtable, row,
+            sizeof(live_row_vtable));
+        std::memcpy(&live_controller,
+            row + kPropertyControllerOffset,
+            sizeof(live_controller));
+        if (live_controller) {
+            std::memcpy(&live_controller_vtable, live_controller,
+                sizeof(live_controller_vtable));
+        }
+#if defined(_MSC_VER)
+    } __except (out_seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+#endif
+    return live_row_vtable == binding.row_vtable &&
+        live_controller == binding.controller &&
+        live_controller_vtable == binding.controller_vtable;
+}
+
+bool validate_formatted_slider_refresh_binding(
+    const GameAddresses& addresses,
+    const PhysicalBinding& binding,
+    unsigned long& out_seh) noexcept {
+    out_seh = 0;
+    const FormattedSliderRefreshBinding& refresh =
+        binding.slider_refresh;
+    if (!refresh.candidate || !refresh.slider || !binding.controller ||
+        !binding.byte_value || !is_formatted_slider_row(binding.row_kind) ||
+        refresh.slider != static_cast<const std::byte*>(
+                binding.controller) + kEmbeddedSliderOffset) {
+        return false;
+    }
+
+    // Sample both the native runtime identity and its bound value on either
+    // side of the validation window. The actual refresh bridge performs its
+    // own pointer/bank checks again immediately before and after the native
+    // trampoline; this first pass proves that the materializer-owned embedded
+    // SliderCtrl is stable enough to enter that bridge.
+    SliderRuntimeIdentity identity_before{};
+    SliderRuntimeIdentity identity_after{};
+    SliderBindingSnapshot value_before{};
+    SliderBindingSnapshot value_after{};
+    if (!formatted_slider_row_identity_matches(binding, out_seh) ||
+        !capture_slider_runtime_identity(
+            refresh.slider, addresses, identity_before, out_seh) ||
+        !read_formatted_slider_refresh_snapshot(
+            binding, value_before, out_seh) ||
+        !capture_slider_runtime_identity(
+            refresh.slider, addresses, identity_after, out_seh) ||
+        !read_formatted_slider_refresh_snapshot(
+            binding, value_after, out_seh) ||
+        !formatted_slider_row_identity_matches(binding, out_seh)) {
+        return false;
+    }
+    return slider_runtime_identities_equal(
+            identity_before, identity_after) &&
+        value_before.bound_value == value_after.bound_value &&
+        value_before.current_value == value_after.current_value &&
+        value_before.backing_value == value_after.backing_value;
+}
+
 bool read_availability_path_payload(
     const AvailabilityPathResult& result,
     void*& out_owner,
@@ -3257,6 +3397,42 @@ bool apply_binding(
         }
     }
 
+    // Typed slider-table edits publish a dedicated per-row generation.
+    // Revalidate the exact materializer-owned embedded SliderCtrl and backing
+    // byte, then consume the generation after the first successful UI-thread
+    // repaint. Failed assignments receive only the bounded retries below.
+    // Authorization is independent of the optional disabled-appearance
+    // transform backend.
+    FormattedSliderRefreshBinding& slider = binding.slider_refresh;
+    if (view && view.slider_value_revision != 0 &&
+        slider.presentation_revision != view.slider_value_revision &&
+        slider.candidate &&
+        !(slider.failed_presentation_revision ==
+                view.slider_value_revision &&
+            slider.refresh_failures >= 4u)) {
+        if (slider.failed_presentation_revision !=
+                view.slider_value_revision) {
+            slider.failed_presentation_revision =
+                view.slider_value_revision;
+            slider.refresh_failures = 0;
+        }
+        unsigned long seh{};
+        const bool validated = validate_formatted_slider_refresh_binding(
+            addresses, binding, seh);
+        if (validated && refresh_native_slider_presentation(
+                slider.slider, binding.byte_value)) {
+            slider.presentation_revision =
+                view.slider_value_revision;
+            slider.refresh_failures = 0;
+        } else {
+            ++slider.refresh_failures;
+            log_fault(validated
+                    ? "formatted-slider immediate refresh"
+                    : "formatted-slider refresh validation",
+                page, binding.physical_index, seh);
+        }
+    }
+
     const detail::RowAvailabilityView availability =
         detail::row_availability_view(binding.presentation_slot);
     apply_binding_appearance(
@@ -3274,6 +3450,19 @@ bool apply_binding(
         binding,
         availability);
     return help_changed;
+}
+
+void initialize_formatted_slider_refresh_candidate(
+    PhysicalBinding& binding) noexcept {
+    if (!is_formatted_slider_row(binding.row_kind) ||
+        !binding.controller || !binding.byte_value) {
+        return;
+    }
+    FormattedSliderRefreshBinding& refresh =
+        binding.slider_refresh;
+    refresh.slider = static_cast<std::byte*>(binding.controller) +
+        kEmbeddedSliderOffset;
+    refresh.candidate = true;
 }
 
 void initialize_slider_value_candidate(
@@ -3465,6 +3654,7 @@ bool capture_physical_binding(
                     : 0xFF;
             }
         }
+        initialize_formatted_slider_refresh_candidate(captured);
         initialize_slider_value_candidate(addresses, captured);
         return true;
 #if defined(_MSC_VER)

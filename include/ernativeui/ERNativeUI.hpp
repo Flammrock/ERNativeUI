@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -93,6 +94,7 @@ enum class Capability : ERUI_Capabilities {
     row_visibility = ERUI_CAP_ROW_VISIBILITY,
     submenu_updates = ERUI_CAP_SUBMENU_UPDATES,
     tab_updates = ERUI_CAP_TAB_UPDATES,
+    row_configuration = ERUI_CAP_ROW_CONFIGURATION,
 };
 
 enum class AvailabilityAppearance : ERUI_AvailabilityAppearance {
@@ -1419,7 +1421,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_ROW_AVAILABILITY |
                     ERUI_CAP_ROW_VISIBILITY |
                     ERUI_CAP_SUBMENU_UPDATES |
-                    ERUI_CAP_TAB_UPDATES)) == 0;
+                    ERUI_CAP_TAB_UPDATES |
+                    ERUI_CAP_ROW_CONFIGURATION)) == 0;
     }
     if (version == ERUI_API_VERSION_1_1) {
         return api.size == ERUI_API_V1_1_SIZE && api.add_text_input &&
@@ -1447,7 +1450,8 @@ inline bool api_complete_for_version(
                     ERUI_CAP_ROW_AVAILABILITY |
                     ERUI_CAP_ROW_VISIBILITY |
                     ERUI_CAP_SUBMENU_UPDATES |
-                    ERUI_CAP_TAB_UPDATES)) == 0;
+                    ERUI_CAP_TAB_UPDATES |
+                    ERUI_CAP_ROW_CONFIGURATION)) == 0;
     }
     if (version == ERUI_API_VERSION_1_2) {
         return api.size == ERUI_API_V1_2_SIZE && api.add_text_input &&
@@ -1478,7 +1482,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 &&
             (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0 &&
-            (api.capabilities & ERUI_CAP_TAB_UPDATES) == 0;
+            (api.capabilities & ERUI_CAP_TAB_UPDATES) == 0 &&
+            (api.capabilities & ERUI_CAP_ROW_CONFIGURATION) == 0;
     }
     if (version == ERUI_API_VERSION_1_3) {
         return api.size == ERUI_API_V1_3_SIZE && api.add_text_input &&
@@ -1508,7 +1513,8 @@ inline bool api_complete_for_version(
             (api.capabilities & ERUI_CAP_ROW_AVAILABILITY) == 0 &&
             (api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0 &&
             (api.capabilities & ERUI_CAP_SUBMENU_UPDATES) == 0 &&
-            (api.capabilities & ERUI_CAP_TAB_UPDATES) == 0;
+            (api.capabilities & ERUI_CAP_TAB_UPDATES) == 0 &&
+            (api.capabilities & ERUI_CAP_ROW_CONFIGURATION) == 0;
     }
     if (version == ERUI_API_VERSION_1_4) {
         return api.size == ERUI_API_V1_4_SIZE && api.add_text_input &&
@@ -1543,7 +1549,11 @@ inline bool api_complete_for_version(
               (api.capabilities & ERUI_CAP_SUBMENU) != 0)) &&
             ((api.capabilities & ERUI_CAP_TAB_UPDATES) == 0 ||
              ((api.capabilities & ERUI_CAP_UPDATES) != 0 &&
-              (api.capabilities & ERUI_CAP_CUSTOM_TABS) != 0));
+              (api.capabilities & ERUI_CAP_CUSTOM_TABS) != 0)) &&
+            ((api.capabilities & ERUI_CAP_ROW_CONFIGURATION) == 0 ||
+             ((api.capabilities & ERUI_CAP_UPDATES) != 0 &&
+              (api.capabilities & ERUI_CAP_NUMERIC_SLIDER) != 0 &&
+              (api.capabilities & ERUI_CAP_CUSTOM_SLIDER) != 0));
     }
     return false;
 }
@@ -2238,6 +2248,47 @@ public:
             (context_->api.capabilities & ERUI_CAP_ROW_VISIBILITY) == 0) {
             return ERUI_NOT_SUPPORTED;
         }
+        if ((fields_ &
+                ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION) != 0 &&
+            (context_->api.capabilities &
+                ERUI_CAP_ROW_CONFIGURATION) == 0) {
+            return ERUI_NOT_SUPPORTED;
+        }
+
+        ERUI_NumericSliderControlUpdateDesc numeric_control{};
+        ERUI_CustomSliderControlUpdateDesc custom_control{};
+        ERUI_RowControlUpdateDesc control{};
+        if ((fields_ &
+                ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION) != 0) {
+            control.size = sizeof(control);
+            control.kind = control_kind_;
+            switch (control_kind_) {
+            case ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER:
+                numeric_control.size = sizeof(numeric_control);
+                numeric_control.fields =
+                    ERUI_NUMERIC_SLIDER_CONTROL_UPDATE_FIELD_VALUE_LABELS;
+                numeric_control.value_labels =
+                    control_value_views_.data();
+                numeric_control.value_label_count =
+                    static_cast<std::uint32_t>(control_values_.size());
+                numeric_control.value_label_stride =
+                    sizeof(ERUI_Utf16View);
+                control.payload = &numeric_control;
+                break;
+            case ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER:
+                custom_control.size = sizeof(custom_control);
+                custom_control.fields =
+                    ERUI_CUSTOM_SLIDER_CONTROL_UPDATE_FIELD_VALUES;
+                custom_control.values = control_value_views_.data();
+                custom_control.value_count =
+                    static_cast<std::uint32_t>(control_values_.size());
+                custom_control.value_stride = sizeof(ERUI_Utf16View);
+                control.payload = &custom_control;
+                break;
+            default:
+                return ERUI_INVALID_ARGUMENT;
+            }
+        }
 
         ERUI_RowUpdateDesc row_update{};
         row_update.size = sizeof(row_update);
@@ -2262,6 +2313,10 @@ public:
         }
         if ((fields_ & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0) {
             row_update.visible = visible_ ? 1u : 0u;
+        }
+        if ((fields_ &
+                ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION) != 0) {
+            row_update.control_configuration = &control;
         }
 
         ERUI_UpdateDesc update{};
@@ -2323,6 +2378,51 @@ protected:
         if (committed_ || error_ != ERUI_OK) return;
         visible_ = value;
         fields_ |= ERUI_ROW_UPDATE_FIELD_VISIBLE;
+    }
+
+    void set_control_values(
+        const std::wstring_view* values,
+        std::size_t count,
+        ERUI_RowControlUpdateKind kind) noexcept {
+        if (committed_ || error_ != ERUI_OK) return;
+        if (!values || count < ERUI_SLIDER_MIN_VALUE_COUNT ||
+            count > ERUI_SLIDER_MAX_VALUE_COUNT ||
+            (kind != ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER &&
+             kind != ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER)) {
+            error_ = ERUI_INVALID_ARGUMENT;
+            return;
+        }
+        try {
+            std::vector<std::wstring> replacement{};
+            replacement.reserve(count);
+            for (std::size_t index = 0; index < count; ++index) {
+                if (values[index].empty() ||
+                    values[index].size() >
+                        ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH ||
+                    !view_size_fits(values[index].size())) {
+                    error_ = ERUI_INVALID_ARGUMENT;
+                    return;
+                }
+                replacement.emplace_back(values[index]);
+            }
+            control_values_ = std::move(replacement);
+            std::vector<ERUI_Utf16View> replacement_views{};
+            replacement_views.reserve(control_values_.size());
+            for (const std::wstring& value : control_values_) {
+                replacement_views.push_back({
+                    reinterpret_cast<const std::uint16_t*>(value.data()),
+                    static_cast<std::uint32_t>(value.size()),
+                    0,
+                });
+            }
+            control_value_views_ = std::move(replacement_views);
+            control_kind_ = kind;
+            fields_ |= ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION;
+        } catch (const std::bad_alloc&) {
+            error_ = ERUI_OUT_OF_MEMORY;
+        } catch (...) {
+            error_ = ERUI_INVALID_ARGUMENT;
+        }
     }
 
 private:
@@ -2429,6 +2529,9 @@ private:
     StyledText label_{};
     StyledText help_{};
     StyledText caption_{};
+    std::vector<std::wstring> control_values_{};
+    std::vector<ERUI_Utf16View> control_value_views_{};
+    ERUI_RowControlUpdateKind control_kind_{};
 };
 
 } // namespace detail
@@ -3001,6 +3104,35 @@ public:
     NumericSliderRowEdit(NumericSliderRowEdit&&) noexcept = default;
     NumericSliderRowEdit& operator=(NumericSliderRowEdit&&) noexcept = default;
     ~NumericSliderRowEdit() = default;
+
+    NumericSliderRowEdit& value_labels(
+        const std::wstring_view* values,
+        std::size_t count) & noexcept {
+        set_control_values(
+            values, count,
+            ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER);
+        return *this;
+    }
+
+    NumericSliderRowEdit&& value_labels(
+        const std::wstring_view* values,
+        std::size_t count) && noexcept {
+        set_control_values(
+            values, count,
+            ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER);
+        return std::move(*this);
+    }
+
+    NumericSliderRowEdit& value_labels(
+        std::initializer_list<std::wstring_view> values) & noexcept {
+        return value_labels(values.begin(), values.size());
+    }
+
+    NumericSliderRowEdit&& value_labels(
+        std::initializer_list<std::wstring_view> values) && noexcept {
+        value_labels(values.begin(), values.size());
+        return std::move(*this);
+    }
 private:
     friend class NumericSliderRow;
     NumericSliderRowEdit(
@@ -3018,6 +3150,35 @@ public:
     CustomSliderRowEdit(CustomSliderRowEdit&&) noexcept = default;
     CustomSliderRowEdit& operator=(CustomSliderRowEdit&&) noexcept = default;
     ~CustomSliderRowEdit() = default;
+
+    CustomSliderRowEdit& values(
+        const std::wstring_view* values,
+        std::size_t count) & noexcept {
+        set_control_values(
+            values, count,
+            ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER);
+        return *this;
+    }
+
+    CustomSliderRowEdit&& values(
+        const std::wstring_view* values,
+        std::size_t count) && noexcept {
+        set_control_values(
+            values, count,
+            ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER);
+        return std::move(*this);
+    }
+
+    CustomSliderRowEdit& values(
+        std::initializer_list<std::wstring_view> values) & noexcept {
+        return this->values(values.begin(), values.size());
+    }
+
+    CustomSliderRowEdit&& values(
+        std::initializer_list<std::wstring_view> values) && noexcept {
+        this->values(values.begin(), values.size());
+        return std::move(*this);
+    }
 private:
     friend class CustomSliderRow;
     CustomSliderRowEdit(

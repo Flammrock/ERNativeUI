@@ -1157,6 +1157,15 @@ DWORD run_host() noexcept {
             }
             log::write(
                 "Runtime row-presentation backend preflight passed; API 1.4 label/help updates are available");
+            if (!registry().enable_row_configuration_backend()) {
+                log::write(
+                    erui::LogLevel::fatal,
+                    "Runtime formatted-slider backend passed preflight but typed row configuration could not be published before registration opened");
+                set_api_state(ApiState::failed);
+                return 1;
+            }
+            log::write(
+                "Runtime formatted-slider preflight passed; API 1.4 same-cardinality slider label updates are available");
             if (!registry().enable_submenu_updates_backend()) {
                 log::write(
                     erui::LogLevel::fatal,

@@ -25,6 +25,9 @@ struct RowPresentationUpdate {
     bool interactive{true};
     ERUI_AvailabilityAppearance availability_appearance{
         ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
+    // Requests one UI-thread SliderCtrl repaint after the matching immutable
+    // formatted-value table is promoted at the shared row-update boundary.
+    bool refresh_slider_value{};
 };
 
 struct RowPresentationView {
@@ -37,6 +40,9 @@ struct RowPresentationView {
     // presentation uses this generation to avoid republishing focused help
     // for label-, caption-, or availability-only edits.
     std::uint64_t help_revision{};
+    // Advances only for a typed formatted-slider table replacement. Native
+    // row presentation consumes it once per materialized SliderCtrl.
+    std::uint64_t slider_value_revision{};
 
     [[nodiscard]] explicit operator bool() const noexcept {
         return revision != 0 && label && help;

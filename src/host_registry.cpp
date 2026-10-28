@@ -4,6 +4,7 @@
 #include "native_input_bindings.hpp"
 #include "native_dialog.hpp"
 #include "native_dialog_presentation.hpp"
+#include "native_slider_presentation.hpp"
 #include "row_presentation_state.hpp"
 #include "row_update_state.hpp"
 #include "row_visibility_state.hpp"
@@ -675,6 +676,18 @@ bool Registry::enable_row_visibility_backend() noexcept {
 bool Registry::row_visibility_backend_available() const noexcept {
     std::lock_guard lock(mutex_);
     return row_visibility_backend_available_;
+}
+
+bool Registry::enable_row_configuration_backend() noexcept {
+    std::lock_guard lock(mutex_);
+    if (open_ || frozen_ || !updates_backend_available_) return false;
+    row_configuration_backend_available_ = true;
+    return true;
+}
+
+bool Registry::row_configuration_backend_available() const noexcept {
+    std::lock_guard lock(mutex_);
+    return row_configuration_backend_available_;
 }
 
 void Registry::open_registration() noexcept {
@@ -2754,6 +2767,7 @@ ERUI_Result Registry::commit_updates(
     struct ParsedRowUpdate {
         ERUI_RowHandle row{};
         ERUI_RowUpdateFields fields{};
+        ERUI_RowControlUpdateKind control_kind{};
         bool interactive{};
         ERUI_AvailabilityAppearance availability_appearance{
             ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
@@ -2761,6 +2775,7 @@ ERUI_Result Registry::commit_updates(
         erui::detail::ScaleformStyledText label{};
         erui::detail::ScaleformStyledText help{};
         erui::detail::ScaleformStyledText caption{};
+        std::vector<std::wstring> slider_value_texts{};
     };
     struct PendingRowMutation {
         Row* row{};
@@ -2776,7 +2791,9 @@ ERUI_Result Registry::commit_updates(
             ERUI_AVAILABILITY_APPEARANCE_FOLLOW_INTERACTIVITY};
         bool visible{true};
         bool visibility_changed{};
+        bool changes_slider_value_texts{};
         bool materialized{};
+        std::vector<std::wstring> slider_value_texts{};
     };
     struct ParsedSubmenuUpdate {
         ERUI_RowHandle row{};
@@ -2839,7 +2856,8 @@ ERUI_Result Registry::commit_updates(
             ERUI_ROW_UPDATE_FIELD_CAPTION |
             ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
             ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE |
-            ERUI_ROW_UPDATE_FIELD_VISIBLE;
+            ERUI_ROW_UPDATE_FIELD_VISIBLE |
+            ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION;
         constexpr ERUI_SubmenuUpdateFields kKnownSubmenuFields =
             ERUI_SUBMENU_UPDATE_FIELD_LABEL |
             ERUI_SUBMENU_UPDATE_FIELD_HELP |
@@ -2863,6 +2881,38 @@ ERUI_Result Registry::commit_updates(
             [](const ERUI_Utf16View& view) {
                 return view.data == nullptr && view.length == 0 &&
                     view.reserved == 0;
+            };
+        const auto copy_slider_value_texts = [](
+            const ERUI_Utf16View* values,
+            std::uint32_t count,
+            std::uint32_t stride,
+            std::vector<std::wstring>& output) -> ERUI_Result {
+                if (!values ||
+                    count < ERUI_SLIDER_MIN_VALUE_COUNT ||
+                    count > ERUI_SLIDER_MAX_VALUE_COUNT ||
+                    stride != sizeof(ERUI_Utf16View)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                output.clear();
+                output.reserve(count);
+                const auto* const bytes =
+                    reinterpret_cast<const std::byte*>(values);
+                for (std::uint32_t value_index = 0;
+                     value_index < count;
+                     ++value_index) {
+                    ERUI_Utf16View view{};
+                    std::memcpy(
+                        &view,
+                        bytes + static_cast<std::size_t>(value_index) *
+                            stride,
+                        sizeof(view));
+                    if (!valid_view(view) || view.length == 0 ||
+                        view.length > ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH) {
+                        return ERUI_INVALID_ARGUMENT;
+                    }
+                    output.push_back(copy_utf16(view, false));
+                }
+                return ERUI_OK;
             };
 
         for (std::uint32_t index = 0;
@@ -2914,6 +2964,9 @@ ERUI_Result Registry::commit_updates(
                         ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
                 const bool changes_visible =
                     (row_update.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
+                const bool changes_control_configuration =
+                    (row_update.fields &
+                        ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION) != 0;
                 if ((!changes_label &&
                         !canonical_zero_styled_view(row_update.label)) ||
                     (!changes_help &&
@@ -2933,7 +2986,11 @@ ERUI_Result Registry::commit_updates(
                         row_update.availability_appearance !=
                             ERUI_AVAILABILITY_APPEARANCE_DISABLED) ||
                     (!changes_visible && row_update.visible != 0) ||
-                    (changes_visible && row_update.visible > 1)) {
+                    (changes_visible && row_update.visible > 1) ||
+                    (!changes_control_configuration &&
+                        row_update.control_configuration != nullptr) ||
+                    (changes_control_configuration &&
+                        row_update.control_configuration == nullptr)) {
                     return ERUI_INVALID_ARGUMENT;
                 }
 
@@ -2963,6 +3020,86 @@ ERUI_Result Registry::commit_updates(
                             row_update.caption, false,
                             parsed_update.caption);
                     if (parsed_caption != ERUI_OK) return parsed_caption;
+                }
+                if (changes_control_configuration) {
+                    std::uint32_t control_size{};
+                    std::memcpy(
+                        &control_size,
+                        row_update.control_configuration,
+                        sizeof(control_size));
+                    if (control_size != sizeof(ERUI_RowControlUpdateDesc)) {
+                        return ERUI_INVALID_ARGUMENT;
+                    }
+                    ERUI_RowControlUpdateDesc control{};
+                    std::memcpy(
+                        &control,
+                        row_update.control_configuration,
+                        sizeof(control));
+                    if (control.flags != 0 || control.reserved0 != 0 ||
+                        !control.payload || control.reserved[0] != 0 ||
+                        control.reserved[1] != 0) {
+                        return ERUI_INVALID_ARGUMENT;
+                    }
+                    parsed_update.control_kind = control.kind;
+                    if (control.kind ==
+                            ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER) {
+                        std::uint32_t payload_size{};
+                        std::memcpy(
+                            &payload_size,
+                            control.payload,
+                            sizeof(payload_size));
+                        if (payload_size != sizeof(
+                                ERUI_NumericSliderControlUpdateDesc)) {
+                            return ERUI_INVALID_ARGUMENT;
+                        }
+                        ERUI_NumericSliderControlUpdateDesc payload{};
+                        std::memcpy(
+                            &payload, control.payload, sizeof(payload));
+                        if (payload.flags != 0 ||
+                            payload.fields !=
+                                ERUI_NUMERIC_SLIDER_CONTROL_UPDATE_FIELD_VALUE_LABELS ||
+                            payload.reserved0 != 0 ||
+                            payload.reserved[0] != 0 ||
+                            payload.reserved[1] != 0) {
+                            return ERUI_INVALID_ARGUMENT;
+                        }
+                        const ERUI_Result copied = copy_slider_value_texts(
+                            payload.value_labels,
+                            payload.value_label_count,
+                            payload.value_label_stride,
+                            parsed_update.slider_value_texts);
+                        if (copied != ERUI_OK) return copied;
+                    } else if (control.kind ==
+                            ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER) {
+                        std::uint32_t payload_size{};
+                        std::memcpy(
+                            &payload_size,
+                            control.payload,
+                            sizeof(payload_size));
+                        if (payload_size != sizeof(
+                                ERUI_CustomSliderControlUpdateDesc)) {
+                            return ERUI_INVALID_ARGUMENT;
+                        }
+                        ERUI_CustomSliderControlUpdateDesc payload{};
+                        std::memcpy(
+                            &payload, control.payload, sizeof(payload));
+                        if (payload.flags != 0 ||
+                            payload.fields !=
+                                ERUI_CUSTOM_SLIDER_CONTROL_UPDATE_FIELD_VALUES ||
+                            payload.reserved0 != 0 ||
+                            payload.reserved[0] != 0 ||
+                            payload.reserved[1] != 0) {
+                            return ERUI_INVALID_ARGUMENT;
+                        }
+                        const ERUI_Result copied = copy_slider_value_texts(
+                            payload.values,
+                            payload.value_count,
+                            payload.value_stride,
+                            parsed_update.slider_value_texts);
+                        if (copied != ERUI_OK) return copied;
+                    } else {
+                        return ERUI_INVALID_ARGUMENT;
+                    }
                 }
                 parsed_rows.push_back(std::move(parsed_update));
                 continue;
@@ -3162,6 +3299,16 @@ ERUI_Result Registry::commit_updates(
         if (!parsed_tabs.empty() && !tab_updates_backend_available_) {
             return ERUI_NOT_SUPPORTED;
         }
+        const bool has_control_configuration = std::any_of(
+            parsed_rows.begin(), parsed_rows.end(),
+            [](const ParsedRowUpdate& update) {
+                return (update.fields &
+                    ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION) != 0;
+            });
+        if (has_control_configuration &&
+            !row_configuration_backend_available_) {
+            return ERUI_NOT_SUPPORTED;
+        }
 
         const auto supports_runtime_availability = [](RowKind kind) noexcept {
             switch (kind) {
@@ -3243,6 +3390,9 @@ ERUI_Result Registry::commit_updates(
                      ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE)) != 0;
             const bool changes_visibility =
                 (update.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
+            const bool changes_control_configuration =
+                (update.fields &
+                    ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION) != 0;
             if (changes_availability &&
                 !row_availability_backend_available_) {
                 return ERUI_NOT_SUPPORTED;
@@ -3269,6 +3419,20 @@ ERUI_Result Registry::commit_updates(
                 row.kind == RowKind::submenu;
             if (changes_caption && !caption_supported) {
                 return ERUI_INVALID_ARGUMENT;
+            }
+            if (changes_control_configuration) {
+                const bool kind_matches =
+                    (update.control_kind ==
+                            ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER &&
+                        row.kind == RowKind::numeric_slider) ||
+                    (update.control_kind ==
+                            ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER &&
+                        row.kind == RowKind::custom_slider);
+                if (!kind_matches ||
+                    update.slider_value_texts.size() !=
+                        row.slider_value_texts.size()) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
             }
             PendingRowMutation mutation{};
             mutation.row = &row;
@@ -3301,6 +3465,12 @@ ERUI_Result Registry::commit_updates(
                 ? update.visible
                 : row.visible;
             mutation.visibility_changed = changes_visibility;
+            mutation.changes_slider_value_texts =
+                changes_control_configuration;
+            if (changes_control_configuration) {
+                mutation.slider_value_texts =
+                    std::move(update.slider_value_texts);
+            }
             if (changes_caption) {
                 mutation.caption = std::move(update.caption);
             } else if (row.caption_overridden) {
@@ -3552,6 +3722,11 @@ ERUI_Result Registry::commit_updates(
         snapshots.reserve(mutations.size() + submenu_mutations.size());
         std::vector<erui::detail::RowVisibilityUpdate> visibility_updates{};
         visibility_updates.reserve(visibility_overrides.size());
+        std::vector<erui::native::SliderPresentationUpdate>
+            slider_presentation_updates{};
+        if (frozen_) {
+            slider_presentation_updates.reserve(mutations.size());
+        }
         for (const PendingRowMutation& mutation : mutations) {
             if (!mutation.materialized) continue;
             erui::detail::RowPresentationUpdate snapshot{
@@ -3562,6 +3737,8 @@ ERUI_Result Registry::commit_updates(
                 .interactive = mutation.interactive,
                 .availability_appearance =
                     mutation.availability_appearance,
+                .refresh_slider_value =
+                    mutation.changes_slider_value_texts,
             };
             if (mutation.caption_overridden) {
                 snapshot.caption = mutation.caption_html;
@@ -3572,6 +3749,12 @@ ERUI_Result Registry::commit_updates(
                     .provider = provider_handle,
                     .row = mutation.row->handle,
                     .visible = mutation.visible,
+                });
+            }
+            if (frozen_ && mutation.changes_slider_value_texts) {
+                slider_presentation_updates.push_back({
+                    .bound_value = &mutation.row->native_value,
+                    .values = mutation.slider_value_texts,
                 });
             }
         }
@@ -3605,6 +3788,8 @@ ERUI_Result Registry::commit_updates(
         erui::detail::PreparedRowVisibilityUpdates prepared_visibility{};
         erui::detail::PreparedSubmenuTitleUpdates prepared_submenu_titles{};
         erui::detail::PreparedTabRuntimeUpdates prepared_tabs{};
+        erui::native::PreparedSliderPresentationUpdates
+            prepared_slider_presentations{};
         if (!visibility_updates.empty()) {
             const ERUI_Result prepared =
                 erui::detail::prepare_row_visibility_updates(
@@ -3622,6 +3807,13 @@ ERUI_Result Registry::commit_updates(
             const ERUI_Result prepared =
                 erui::detail::prepare_tab_runtime_updates(
                     std::move(tab_runtime_updates), prepared_tabs);
+            if (prepared != ERUI_OK) return prepared;
+        }
+        if (!slider_presentation_updates.empty()) {
+            const ERUI_Result prepared =
+                erui::native::prepare_native_slider_presentation_updates(
+                    std::move(slider_presentation_updates),
+                    prepared_slider_presentations);
             if (prepared != ERUI_OK) return prepared;
         }
         if (!snapshots.empty()) {
@@ -3642,6 +3834,10 @@ ERUI_Result Registry::commit_updates(
             erui::detail::commit_prepared_tab_runtime_updates(
                 std::move(prepared_tabs));
         }
+        if (prepared_slider_presentations) {
+            erui::native::commit_prepared_native_slider_presentation_updates(
+                std::move(prepared_slider_presentations));
+        }
 
         // Publication above is all-or-nothing. The remaining moves are
         // noexcept, so the registry model and the native desired generation
@@ -3658,6 +3854,10 @@ ERUI_Result Registry::commit_updates(
             mutation.row->availability_appearance =
                 mutation.availability_appearance;
             mutation.row->visible = mutation.visible;
+            if (mutation.changes_slider_value_texts) {
+                mutation.row->slider_value_texts =
+                    std::move(mutation.slider_value_texts);
+            }
         }
         for (PendingSubmenuMutation& mutation : submenu_mutations) {
             mutation.row->label = std::move(mutation.label.text);

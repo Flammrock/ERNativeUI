@@ -15,6 +15,7 @@ reference.
 |---|---|
 | Add rows, submenus, built-in destinations, or paginated pages | [Menus, pages, and pagination](menus-and-pages.md) |
 | Change a row's text, value, availability, or visibility at runtime | [Row updates](row-updates/README.md) |
+| Replace every Numeric or Custom Slider display label without changing its value/index | [Runtime slider display labels](row-updates/slider-labels.md) |
 | Give my mod a top-level Configuration tab and custom icon | [Custom Configuration tabs](custom-tabs.md) |
 | Add version or status text to a title-screen corner | [Title-screen text](title-screen-text.md) |
 | Choose and configure a settings control | [Settings controls](controls/README.md) |

@@ -149,6 +149,48 @@ matches ERNativeUI's pinned-host and no-hot-unload lifetime contract.
 The 2-through-256 position limit follows from the proven native backing. It is
 not an arbitrary wrapper limit.
 
+## API 1.4 live table replacement
+
+API 1.4 reuses the same owned-row identity to replace a Numeric Slider's or
+Custom Slider's complete display table after registration. The host first
+validates and copies a same-cardinality table, stages a new immutable bank,
+and publishes that bank with a dedicated per-row repaint generation at the
+shared UI update boundary. Logical numeric values and custom indices do not
+change.
+
+A currently materialized row does not wait for player movement. On the next
+safe UI frame, row presentation revalidates the materializer-owned embedded
+`SliderCtrl`, its vtable/movie identity, and its exact backing-byte pointer.
+It then calls the retained original refresh trampoline once and reapplies
+`Text_0` and `Text_1` from the same retained immutable bank. The bridge checks
+the backing pointer again after the original returns. A row binding consumes
+each repaint generation once; bounded retries cover a controller that is not
+yet safe to address.
+
+This does not introduce a second long-lived native pointer cache. The only
+controller identity comes from the existing physical-row binding and is
+validated for the call. Repaint authorization is also independent of the
+optional availability color-transform attachment, so the separately
+negotiated row-configuration capability does not depend on disabled styling.
+
+### API 1.4 live validation
+
+On 2026-10-28, the focused Tarnished UI Showcase scene was confirmed working
+on executable 2.7.2.0 after the explicit refresh was deployed. Both sliders'
+selected-value labels now change without moving their values. The Release
+build passed all 99 tests, and the deployed host matched the tested artifact's
+SHA-256.
+
+The final runtime session logged one `Formatted-slider native range
+validation failed` warning (`fault=1`, `seh=0x00000000`). This existing guard
+returns before assigning either text when the native range/current/default
+fields do not match the owned label table. No explicit UI-thread repaint
+failure or exception was logged. The warning does not include the sampled
+range or construction context, so its exact trigger cannot be established
+from that log. Retain the guard and investigate this observation during the
+final diagnostic review before stable publication; the visual confirmation
+alone does not prove the warning harmless.
+
 ## Reproduction procedure
 
 To revalidate this boundary after a game update:

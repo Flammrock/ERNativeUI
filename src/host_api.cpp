@@ -708,6 +708,9 @@ extern "C" ERUI_EXPORT ERUI_Result ERUI_CALL ERUI_GetApi(
         if (erui::host::registry().row_visibility_backend_available()) {
             table.capabilities |= ERUI_CAP_ROW_VISIBILITY;
         }
+        if (erui::host::registry().row_configuration_backend_available()) {
+            table.capabilities |= ERUI_CAP_ROW_CONFIGURATION;
+        }
     }
 
     std::memcpy(out_api, &table, selected_size);

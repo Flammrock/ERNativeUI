@@ -37,7 +37,8 @@ constexpr ERUI_Capabilities kCapabilities =
     ERUI_CAP_NUMERIC_SLIDER | ERUI_CAP_CUSTOM_SLIDER |
     ERUI_CAP_CUSTOM_TABS | ERUI_CAP_TITLE_SCREEN_TEXT | ERUI_CAP_UPDATES |
     ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY |
-    ERUI_CAP_SUBMENU_UPDATES | ERUI_CAP_TAB_UPDATES;
+    ERUI_CAP_SUBMENU_UPDATES | ERUI_CAP_TAB_UPDATES |
+    ERUI_CAP_ROW_CONFIGURATION;
 
 struct ActionState {
     ERUI_ProviderHandle provider{};
@@ -52,6 +53,11 @@ struct TitleScreenTextState {
     ERUI_TitleScreenTextFlags flags{};
     ERUI_Color color{};
     ERUI_TitleScreenCorner corner{};
+};
+
+struct RowUpdateState {
+    ERUI_TestRowUpdateObservation observation{};
+    std::vector<std::wstring> control_values{};
 };
 
 struct ProviderState {
@@ -75,7 +81,7 @@ std::unordered_map<ERUI_InputActionHandle, ActionState> g_actions{};
 std::uint32_t g_custom_tab_count{};
 std::uint32_t g_title_screen_text_count{};
 std::vector<TitleScreenTextState> g_title_screen_text_observations{};
-std::vector<ERUI_TestRowUpdateObservation> g_row_update_observations{};
+std::vector<RowUpdateState> g_row_update_observations{};
 std::vector<ERUI_TestTabUpdateObservation> g_tab_update_observations{};
 
 bool valid_slot(std::uint32_t state, std::uint32_t input,
@@ -985,7 +991,8 @@ ERUI_Result ERUI_CALL commit_updates(
         ERUI_ROW_UPDATE_FIELD_CAPTION |
         ERUI_ROW_UPDATE_FIELD_INTERACTIVE |
         ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE |
-        ERUI_ROW_UPDATE_FIELD_VISIBLE;
+        ERUI_ROW_UPDATE_FIELD_VISIBLE |
+        ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION;
     constexpr ERUI_SubmenuUpdateFields kKnownSubmenuFields =
         ERUI_SUBMENU_UPDATE_FIELD_LABEL |
         ERUI_SUBMENU_UPDATE_FIELD_HELP |
@@ -1000,7 +1007,7 @@ ERUI_Result ERUI_CALL commit_updates(
     std::unordered_set<ERUI_RowHandle> rows{};
     std::unordered_set<ERUI_PageHandle> submenu_pages{};
     std::unordered_set<ERUI_PageHandle> tab_pages{};
-    std::vector<ERUI_TestRowUpdateObservation> observations{};
+    std::vector<RowUpdateState> observations{};
     std::vector<ERUI_TestTabUpdateObservation> tab_observations{};
     try {
         rows.reserve(description->update_count);
@@ -1205,6 +1212,9 @@ ERUI_Result ERUI_CALL commit_updates(
                 ERUI_ROW_UPDATE_FIELD_AVAILABILITY_APPEARANCE) != 0;
         const bool visible =
             (row.fields & ERUI_ROW_UPDATE_FIELD_VISIBLE) != 0;
+        const bool control_configuration =
+            (row.fields &
+                ERUI_ROW_UPDATE_FIELD_CONTROL_CONFIGURATION) != 0;
         if ((!label && !canonical_zero_view(row.label)) ||
             (!help && !canonical_zero_view(row.help)) ||
             (!caption && !canonical_zero_view(row.caption)) ||
@@ -1222,16 +1232,131 @@ ERUI_Result ERUI_CALL commit_updates(
                 row.availability_appearance !=
                     ERUI_AVAILABILITY_APPEARANCE_DISABLED) ||
             (!visible && row.visible != 0) ||
-            (visible && row.visible > 1u)) {
+            (visible && row.visible > 1u) ||
+            (!control_configuration &&
+                row.control_configuration != nullptr) ||
+            (control_configuration &&
+                row.control_configuration == nullptr)) {
             return ERUI_INVALID_ARGUMENT;
         }
-        ERUI_TestRowUpdateObservation observation{};
+        RowUpdateState state{};
+        ERUI_TestRowUpdateObservation& observation = state.observation;
         observation.size = sizeof(observation);
         observation.descriptor_size = row.size;
         observation.row = row.row;
         observation.fields = row.fields;
         observation.visible = row.visible;
-        observations.push_back(observation);
+        if (control_configuration) {
+            std::uint32_t control_size{};
+            std::memcpy(
+                &control_size,
+                row.control_configuration,
+                sizeof(control_size));
+            if (control_size != sizeof(ERUI_RowControlUpdateDesc)) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            ERUI_RowControlUpdateDesc control{};
+            std::memcpy(
+                &control, row.control_configuration, sizeof(control));
+            if (control.flags != 0 || control.reserved0 != 0 ||
+                !control.payload || control.reserved[0] != 0 ||
+                control.reserved[1] != 0) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            observation.control_descriptor_size = control.size;
+            observation.control_kind = control.kind;
+
+            const ERUI_Utf16View* values{};
+            std::uint32_t value_count{};
+            std::uint32_t value_stride{};
+            if (control.kind ==
+                    ERUI_ROW_CONTROL_UPDATE_KIND_NUMERIC_SLIDER) {
+                std::uint32_t payload_size{};
+                std::memcpy(
+                    &payload_size, control.payload, sizeof(payload_size));
+                if (payload_size !=
+                    sizeof(ERUI_NumericSliderControlUpdateDesc)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                ERUI_NumericSliderControlUpdateDesc payload{};
+                std::memcpy(&payload, control.payload, sizeof(payload));
+                if (payload.flags != 0 ||
+                    payload.fields !=
+                        ERUI_NUMERIC_SLIDER_CONTROL_UPDATE_FIELD_VALUE_LABELS ||
+                    payload.reserved0 != 0 ||
+                    payload.reserved[0] != 0 ||
+                    payload.reserved[1] != 0) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                observation.control_payload_size = payload.size;
+                observation.control_fields = payload.fields;
+                values = payload.value_labels;
+                value_count = payload.value_label_count;
+                value_stride = payload.value_label_stride;
+            } else if (control.kind ==
+                    ERUI_ROW_CONTROL_UPDATE_KIND_CUSTOM_SLIDER) {
+                std::uint32_t payload_size{};
+                std::memcpy(
+                    &payload_size, control.payload, sizeof(payload_size));
+                if (payload_size !=
+                    sizeof(ERUI_CustomSliderControlUpdateDesc)) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                ERUI_CustomSliderControlUpdateDesc payload{};
+                std::memcpy(&payload, control.payload, sizeof(payload));
+                if (payload.flags != 0 ||
+                    payload.fields !=
+                        ERUI_CUSTOM_SLIDER_CONTROL_UPDATE_FIELD_VALUES ||
+                    payload.reserved0 != 0 ||
+                    payload.reserved[0] != 0 ||
+                    payload.reserved[1] != 0) {
+                    return ERUI_INVALID_ARGUMENT;
+                }
+                observation.control_payload_size = payload.size;
+                observation.control_fields = payload.fields;
+                values = payload.values;
+                value_count = payload.value_count;
+                value_stride = payload.value_stride;
+            } else {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            if (!values || value_count < ERUI_SLIDER_MIN_VALUE_COUNT ||
+                value_count > ERUI_SLIDER_MAX_VALUE_COUNT ||
+                value_stride != sizeof(ERUI_Utf16View)) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+            observation.control_value_count = value_count;
+            observation.control_value_stride = value_stride;
+            try {
+                state.control_values.reserve(value_count);
+                const auto* const value_bytes =
+                    reinterpret_cast<const std::byte*>(values);
+                for (std::uint32_t value_index = 0;
+                     value_index < value_count;
+                     ++value_index) {
+                    ERUI_Utf16View value{};
+                    std::memcpy(
+                        &value,
+                        value_bytes +
+                            static_cast<std::size_t>(value_index) *
+                                value_stride,
+                        sizeof(value));
+                    if (!valid_utf16(value, false) ||
+                        value.length >
+                            ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH) {
+                        return ERUI_INVALID_ARGUMENT;
+                    }
+                    state.control_values.emplace_back(
+                        reinterpret_cast<const wchar_t*>(value.data),
+                        value.length);
+                }
+            } catch (const std::bad_alloc&) {
+                return ERUI_OUT_OF_MEMORY;
+            } catch (...) {
+                return ERUI_INVALID_ARGUMENT;
+            }
+        }
+        observations.push_back(std::move(state));
     }
     try {
         std::lock_guard lock(g_state_mutex);
@@ -1310,7 +1435,8 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
     } else {
         api.capabilities &= ~(ERUI_CAP_UPDATES |
             ERUI_CAP_ROW_AVAILABILITY | ERUI_CAP_ROW_VISIBILITY |
-            ERUI_CAP_SUBMENU_UPDATES | ERUI_CAP_TAB_UPDATES);
+            ERUI_CAP_SUBMENU_UPDATES | ERUI_CAP_TAB_UPDATES |
+            ERUI_CAP_ROW_CONFIGURATION);
     }
     if ((g_disabled_features.load(std::memory_order_relaxed) &
             ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT) != 0) {
@@ -1328,6 +1454,10 @@ ERUI_Api make_api(std::uint32_t version) noexcept {
             ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES) != 0) {
         api.capabilities &= ~ERUI_CAP_SUBMENU_UPDATES;
     }
+    if ((g_disabled_features.load(std::memory_order_relaxed) &
+            ERUI_TEST_CONNECTION_DISABLE_ROW_CONFIGURATION) != 0) {
+        api.capabilities &= ~ERUI_CAP_ROW_CONFIGURATION;
+    }
     return api;
 }
 
@@ -1342,7 +1472,8 @@ ERUI_TestConfigureConnection(
             ~(ERUI_TEST_CONNECTION_DISABLE_TITLE_SCREEN_TEXT |
                 ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY |
                 ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY |
-                ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES)) != 0 ||
+                ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES |
+                ERUI_TEST_CONNECTION_DISABLE_ROW_CONFIGURATION)) != 0 ||
         configuration->reserved[1] != 0 ||
         configuration->reserved[2] != 0) {
         return ERUI_INVALID_ARGUMENT;
@@ -1413,7 +1544,38 @@ ERUI_TestGetRowUpdateObservation(
     if (index >= g_row_update_observations.size()) {
         return ERUI_NOT_FOUND;
     }
-    *out_observation = g_row_update_observations[index];
+    *out_observation = g_row_update_observations[index].observation;
+    return ERUI_OK;
+}
+
+extern "C" __declspec(dllexport) ERUI_Result ERUI_CALL
+ERUI_TestGetRowControlValueObservation(
+    std::uint32_t update_index,
+    std::uint32_t value_index,
+    ERUI_TestRowControlValueObservation* out_observation) {
+    if (!out_observation || out_observation->size < sizeof(*out_observation)) {
+        return ERUI_INVALID_ARGUMENT;
+    }
+
+    std::lock_guard lock(g_state_mutex);
+    if (update_index >= g_row_update_observations.size()) {
+        return ERUI_NOT_FOUND;
+    }
+    const RowUpdateState& update = g_row_update_observations[update_index];
+    if (value_index >= update.control_values.size()) {
+        return ERUI_NOT_FOUND;
+    }
+    const std::wstring& source = update.control_values[value_index];
+    if (source.size() > ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH) {
+        return ERUI_INTERNAL_ERROR;
+    }
+    ERUI_TestRowControlValueObservation observation{};
+    observation.size = sizeof(observation);
+    observation.length = static_cast<std::uint32_t>(source.size());
+    for (std::size_t unit = 0; unit < source.size(); ++unit) {
+        observation.text[unit] = static_cast<std::uint16_t>(source[unit]);
+    }
+    *out_observation = observation;
     return ERUI_OK;
 }
 

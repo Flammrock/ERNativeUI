@@ -202,6 +202,11 @@ A programmatic write normalizes the requested value onto the declared step
 sequence, updates the native row asynchronously, and does not invoke the
 player-change callback.
 
+API 1.4 can also replace the complete display-label table without changing
+that numeric value, range, step, or callback. Retain the typed row and use
+`slider.edit().value_labels(...).commit()` with exactly one label per existing
+position. See [Replace slider display labels at runtime](../row-updates/slider-labels.md).
+
 `NumericSliderRow` exposes `handle()` and converts implicitly to
 `erui::RowHandle`. Existing API 1.3 code may therefore continue retaining a
 raw handle and calling `Registration::get_numeric_slider_value` or

@@ -8,15 +8,16 @@
     <td valign="middle">
       <a href="../capabilities.md#updates"><code>updates</code></a> ·
       <a href="../capabilities.md#row-availability"><code>row_availability</code></a> ·
-      <a href="../capabilities.md#row-visibility"><code>row_visibility</code></a>
+      <a href="../capabilities.md#row-visibility"><code>row_visibility</code></a> ·
+      <a href="../capabilities.md#row-configuration"><code>row_configuration</code></a>
     </td>
   </tr>
 </table>
 
 API 1.4 lets a mod retain the typed object returned when it creates a row and
 later update that logical row safely. This page explains the shared
-`row.edit()...commit()` model used by text, availability, and visibility
-updates.
+`row.edit()...commit()` model used by text, availability, visibility, and the
+focused same-cardinality slider-label configuration slice.
 
 If you have not registered an ERNativeUI menu before, first read
 [Build your first client mod](../../getting-started/first-mod.md). The examples
@@ -153,6 +154,7 @@ of that commit:
 | `.interactive(bool)` | Focus and activation eligibility | The row's registration-time `enabled` state |
 | `.availability_appearance(...)` | Normal/disabled visual policy, independently of input | `follow_interactivity` |
 | `.visible(bool)` | Participation in layout and pagination | `true` for a materialized row |
+| Numeric `.value_labels(...)` / Custom `.values(...)` | Complete display-label table without changing the logical value or index | Numeric formatting / Custom labels supplied during registration |
 
 Inline Choice, Popup Choice, and TextInput do not expose a registration-time
 `enabled` option and initially start interactive. Other supported controls use
@@ -199,7 +201,18 @@ const bool can_change_availability =
 const bool can_change_visibility =
     can_edit_text &&
     connection.supports(erui::Capability::row_visibility);
+
+const bool can_replace_slider_labels =
+    can_edit_text &&
+    connection.supports(erui::Capability::row_configuration) &&
+    connection.supports(erui::Capability::numeric_slider) &&
+    connection.supports(erui::Capability::custom_slider);
 ```
+
+The single `row_configuration` capability covers both admitted slider
+families, so its negotiated dependency includes both slider-registration
+capabilities. The focused
+[slider-label guide](slider-labels.md) shows the complete checks.
 
 The same `supports(...)` query is available on `erui::Menu` during
 registration and on `erui::Registration` afterward. Prefer capability checks
@@ -216,6 +229,7 @@ presence separate:
 | Remove or restore a row and recompute pagination | [Visibility](visibility.md) | The row stops or starts consuming layout space. |
 | Keep a row visible but disable or enable player interaction | [Runtime row availability](availability.md) | The row remains in layout while input and appearance can change independently. |
 | Read or change the control's canonical value | [Values](values.md) | The host-owned value changes without pretending it was player input. |
+| Replace every existing Numeric or Custom Slider display label without changing its value/index | [Slider display labels](slider-labels.md) | The same-cardinality label table changes while the logical domain remains fixed. |
 | Publish changes to several rows as one all-or-nothing generation | [Atomic batching](batching.md) | A strict-C client submits several updates in one commit. |
 
 The presentation guide includes the complete

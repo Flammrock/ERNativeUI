@@ -22,6 +22,9 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID) {
         if (!erui::host::registry().enable_updates_backend()) {
             return FALSE;
         }
+        if (!erui::host::registry().enable_row_configuration_backend()) {
+            return FALSE;
+        }
         if (!erui::host::registry().enable_row_availability_backend()) {
             return FALSE;
         }

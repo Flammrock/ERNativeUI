@@ -69,6 +69,11 @@ erui::CustomSliderRow add_impossible_values(erui::Page page) noexcept
 `add_custom_slider` runs. ERNativeUI copies every returned string. The
 formatter is then discarded and is never called from Elden Ring's UI thread.
 
+That formatter defines the registration-time table. API 1.4 can later replace
+the complete same-cardinality table through
+`slider.edit().values(...).commit()` while preserving the selected index. See
+[Replace slider display labels at runtime](../row-updates/slider-labels.md).
+
 ![The complete Custom Slider showcase page displaying hello](../../assets/images/controls/custom-slider/custom-slider_fullscreen_before_click.png)
 
 *The screenshot helper uses index `4`, whose unrelated display label is

@@ -60,6 +60,7 @@ this page.
 | [`erui::Capability::row_visibility`](#row-visibility) | `ERUI_CAP_ROW_VISIBILITY` | 1.4 | Show or hide rows and rebuild pagination |
 | [`erui::Capability::submenu_updates`](#submenu-updates) | `ERUI_CAP_SUBMENU_UPDATES` | 1.4 | Edit a retained Submenu's opener and child-page text |
 | [`erui::Capability::tab_updates`](#tab-updates) | `ERUI_CAP_TAB_UPDATES` | 1.4 | Edit a retained custom tab's title, icon, visibility, or order |
+| [`erui::Capability::row_configuration`](#row-configuration) | `ERUI_CAP_ROW_CONFIGURATION` | 1.4 | Replace same-cardinality Numeric/Custom Slider display labels |
 
 ## Reading capability requirements
 
@@ -145,6 +146,7 @@ are intentional:
 | Change runtime row text or style | `updates` |
 | Change runtime row interaction or disabled appearance | `updates` and `row_availability` |
 | Show or hide rows and repaginate | `updates` and `row_visibility` |
+| Replace a Numeric Slider's or Custom Slider's complete display-label table | `updates`, `row_configuration`, `numeric_slider`, and `custom_slider` |
 | Change a Submenu opener or child-page text | `updates`, `submenu`, and `submenu_updates` |
 | Change a custom tab title, icon, visibility, or preferred order | `updates`, `custom_tabs`, and `tab_updates` |
 
@@ -382,8 +384,10 @@ See [Title-screen text](title-screen-text.md).
 
 Enables the provider-scoped atomic update boundary, C++ `row.edit().commit()`
 drafts, and runtime label, help, supported caption, and structured-text
-changes. It does not replace the type-specific value getters and setters. When
-absent, keep registration-time text and presentation. See
+changes. Type-specific control configuration additionally requires
+[`row_configuration`](#row-configuration). It does not replace the
+type-specific value getters and setters. When absent, keep registration-time
+text and presentation. See
 [Row updates](row-updates/README.md).
 
 <a id="row-availability"></a>
@@ -432,6 +436,28 @@ a retained `Tab` to atomically edit its title, 32x32 RGBA8 icon, visibility,
 and preferred order. Supported edits publish live in the active System menu;
 an interrupted icon handoff remains queued for the first reopened movie. See
 [Custom Configuration tabs](custom-tabs.md#edit-a-committed-tab).
+
+<a id="row-configuration"></a>
+### `row_configuration`
+
+**C++:** `erui::Capability::row_configuration`<br>
+**C:** `ERUI_CAP_ROW_CONFIGURATION`
+
+Together with [`updates`](#updates), [`numeric_slider`](#numeric-slider), and
+[`custom_slider`](#custom-slider), enables the first typed runtime
+control-configuration slice:
+
+- `NumericSliderRowEdit::value_labels(...)` replaces every existing numeric
+  position's display text; and
+- `CustomSliderRowEdit::values(...)` replaces every existing custom index's
+  display text.
+
+Both operations are presentation-only and require exactly the row's existing
+number of entries. They preserve the current value or index, logical domain,
+callbacks, and row identity. This capability does not currently grant runtime
+range, step, precision, prefix/suffix, list-cardinality, choice-option, or
+TextInput-constraint changes. See
+[Replace slider display labels at runtime](row-updates/slider-labels.md).
 
 ## What a capability does not guarantee
 

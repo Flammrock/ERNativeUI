@@ -10,6 +10,11 @@
 - a dedicated advanced-slider submenu containing `x0.6`, signed `-0.5`, and
   `3.0s` Numeric Sliders plus a deliberately absurd Custom Slider that moves
   through `-7`, `3`, `7.8`, `1s`, `hello`, `18`, and `x1.3`;
+- a capability-gated **Runtime Slider Labels** subpage where one Button
+  callback uses `NumericSliderRowEdit::value_labels(...)` and
+  `CustomSliderRowEdit::values(...)` to replace two three-entry display tables
+  while preserving both current selections; each typed edit also changes that
+  row's focused help in the same atomic row commit;
 - value and button callbacks;
 - a dedicated choice submenu comparing one inline row with independent native
   popup lists containing two, four, and eight options;
@@ -81,6 +86,27 @@ System tab and back, and close/reopen System. Open and close the Popup Choice,
 select each of its three values, and open the TextInput and ColorPicker editors
 as well. Labels, captions, and focused help must keep the active A/B variant
 throughout those frame updates and reconstructions.
+
+The **Runtime Slider Labels** regression is nested under **Advanced Slider
+Showcase**. Both sliders have exactly three positions and initially select the
+middle one. Press **Switch both label sets** repeatedly:
+
+- Numeric Slider changes between `ZERO / ONE / TWO` and
+  `LOW / MEDIUM / HIGH`, but its logical numeric value remains `1`;
+- Custom Slider changes between `North / Center / South` and
+  `Alpha / Beta / Gamma`, but its selected index remains `1`; and
+- focusing each row shows help from the same variant as its current labels,
+  proving that the ordinary help field and typed label table were one atomic
+  row commit.
+
+After pressing the Button, both visible selected-value labels must repaint
+without moving either slider. Then switch pages and close/reopen System; the
+latest label table and the preserved middle selection must remain in effect.
+
+The Button callback makes two independent C++ commits, one per retained row.
+There must be no mixed help/label generation within either row. A mod that
+needs both rows to publish as one cross-row all-or-nothing generation must use
+the strict-C update batch described in the row-update documentation.
 
 The **Rich Submenu** row is the focused runtime Submenu test. Open it and
 change **Main presentation variant** between A and B. The currently open page

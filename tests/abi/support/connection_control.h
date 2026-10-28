@@ -22,6 +22,7 @@ extern "C" {
 #define ERUI_TEST_CONNECTION_DISABLE_ROW_AVAILABILITY (1u << 1)
 #define ERUI_TEST_CONNECTION_DISABLE_ROW_VISIBILITY (1u << 2)
 #define ERUI_TEST_CONNECTION_DISABLE_SUBMENU_UPDATES (1u << 3)
+#define ERUI_TEST_CONNECTION_DISABLE_ROW_CONFIGURATION (1u << 4)
 
 /*
  * Keep the shared control protocol independent of symbols introduced by the
@@ -81,12 +82,30 @@ typedef struct ERUI_TestRowUpdateObservation {
     ERUI_RowHandle row;
     ERUI_RowUpdateFields fields;
     uint32_t visible;
+    uint32_t control_descriptor_size;
+    ERUI_RowControlUpdateKind control_kind;
+    uint32_t control_payload_size;
+    uint32_t control_fields;
+    uint32_t control_value_count;
+    uint32_t control_value_stride;
     uint32_t reserved[2];
 } ERUI_TestRowUpdateObservation;
 
 typedef ERUI_Result (ERUI_CALL* ERUI_TestGetRowUpdateObservationFn)(
     uint32_t index,
     ERUI_TestRowUpdateObservation* out_observation);
+
+typedef struct ERUI_TestRowControlValueObservation {
+    uint32_t size;
+    uint32_t length;
+    uint16_t text[ERUI_CUSTOM_SLIDER_MAX_TEXT_LENGTH];
+    uint32_t reserved[2];
+} ERUI_TestRowControlValueObservation;
+
+typedef ERUI_Result (ERUI_CALL* ERUI_TestGetRowControlValueObservationFn)(
+    uint32_t update_index,
+    uint32_t value_index,
+    ERUI_TestRowControlValueObservation* out_observation);
 
 /* Exact tab-update snapshot used only by the current C++ wrapper test. */
 typedef struct ERUI_TestTabUpdateObservation {
